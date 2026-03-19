@@ -1,0 +1,3 @@
+# Ignore Helm templates so they don't get mangled by invalid YAML syntax parsing
+helm/**/templates/*.yaml
+helm/**/templates/*.tpl

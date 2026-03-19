@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Platform core metrics
+  - job_name: "platform-core"
+    static_configs:
+      - targets: ["platform-core:8080"]
+    metrics_path: "/actuator/prometheus"
+
+  # Target services — add your service's actuator/prometheus URL here
+  # Example for a Spring Boot service in the same Docker network:
+  - job_name: "target-service"
+    static_configs:
+      - targets: ["your-service:8080"]
+    metrics_path: "/actuator/prometheus"

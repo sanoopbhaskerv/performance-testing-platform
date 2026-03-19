@@ -1,0 +1,92 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "performance-platform.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "performance-platform.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "performance-platform.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Trigger rolling update when team configs or secrets change
+        checksum/config: {{ toJson .Values.teamConfigs | sha256sum }}
+        checksum/secret: {{ toJson .Values.database | sha256sum }}
+        # Prometheus scrape annotations — platform-core exposes /actuator/prometheus
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: {{ include "performance-platform.serviceAccountName" . }}
+      containers:
+        - name: platform-core
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: {{ include "performance-platform.databaseUrl" . | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  key: password
+            - name: JMETER_HOME
+              value: {{ .Values.jmeter.home | quote }}
+            - name: MAT_HOME
+              value: {{ .Values.mat.home | quote }}
+            # Tell platform-core where to find team configs (mounted ConfigMap)
+            - name: TEAM_CONFIG_DIR
+              value: "/config/teams"
+            # Pass Karpenter node pool name so the orchestrator can set nodeSelector on spawned Jobs
+            - name: KARPENTER_NODE_POOL
+              value: {{ .Values.karpenter.nodePool | quote }}
+            # Kubernetes namespace — used when spawning JMeter Jobs via K8s API
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: team-configs
+              mountPath: /config/teams
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.resources.platformCore.requests.cpu }}
+              memory: {{ .Values.resources.platformCore.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.platformCore.limits.cpu }}
+              memory: {{ .Values.resources.platformCore.limits.memory }}
+      volumes:
+        - name: team-configs
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-team-configs

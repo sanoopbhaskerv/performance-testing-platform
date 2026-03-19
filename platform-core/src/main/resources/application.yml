@@ -1,0 +1,81 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: performance-testing-platform
+
+  # Database — H2 for local dev, override with PostgreSQL env vars in prod
+  datasource:
+    url: ${DB_URL:jdbc:h2:mem:perfplatform;DB_CLOSE_DELAY=-1}
+    username: ${DB_USER:sa}
+    password: ${DB_PASS:}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: ${DB_DIALECT:org.hibernate.dialect.H2Dialect}
+
+  # Mail (email notifications)
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USER:}
+    password: ${SMTP_PASS:}
+
+  # Freemarker (JMX template engine)
+  freemarker:
+    template-loader-path: classpath:/templates/
+    suffix: .ftl
+    cache: false
+
+# Platform configuration
+platform:
+  # Where team config YAML files live (can be a mounted ConfigMap in K8s)
+  config-dir: ${TEAM_CONFIG_DIR:config/teams}
+
+  # Where to store JMeter JMX files, results, and dump files
+  work-dir: ${WORK_DIR:/tmp/perf-platform}
+
+  # JMeter binary path (inside the JMeter Docker image or local install)
+  jmeter-home: ${JMETER_HOME:/opt/jmeter}
+
+  # Eclipse MAT binary path (for heap dump analysis)
+  mat-home: ${MAT_HOME:/opt/mat}
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui
+    operations-sorter: method
+
+# Logging
+logging:
+  level:
+    com.perfplatform: INFO
+    org.springframework.web: WARN

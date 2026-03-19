@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────
+#  Performance Testing Platform — Helm values
+#  Customize for your EKS cluster.
+# ─────────────────────────────────────────────────────────
+
+image:
+  repository: perfplatform/platform-core
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "perf-platform.internal.your-company.com"
+  tls: []
+
+# Team config files — each key becomes a *.yml file in /config/teams/
+# Teams add their config here via a PR, and the platform auto-loads it.
+teamConfigs:
+  example-team: |
+    team: example-team
+    apiKey: "change-me"
+    targets:
+      - name: example-service
+        baseUrl: "http://example-service:8080"
+        jvmEnabled: false
+
+database:
+  username: "perf"
+  password: "perf" # Use a K8s Secret in production
+
+jmeter:
+  home: /opt/jmeter
+
+mat:
+  home: /opt/mat
+
+# Karpenter node selector for JMeter job pods (CPU-heavy, spot-safe)
+karpenter:
+  nodePool: perf-testing
+  instanceCategory: c # Compute optimised (c5, c6i etc.)
+  capacityType: spot # Use spot instances to save cost
+
+resources:
+  platformCore:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  jmeterJob: # Resource request for each JMeter test run pod
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+prometheus:
+  enabled: true
+
+grafana:
+  enabled: true
+  adminPassword: "admin" # Change in production
+
+postgres:
+  enabled: true # Set false to use an external RDS instance
+  externalUrl: "" # Set this if postgres.enabled=false

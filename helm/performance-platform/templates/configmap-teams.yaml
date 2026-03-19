@@ -1,0 +1,20 @@
+---
+# Team configuration ConfigMap.
+# Each key under values.teamConfigs becomes a *.yml file mounted at
+# /config/teams/ inside the platform-core pod. Teams onboard by adding
+# a new key here (or via a PR to values.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-team-configs
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "performance-platform.labels" . | indent 4 }}
+  annotations:
+    # Force pod rollout when team configs change (checksum-based)
+    checksum/config: {{ toJson .Values.teamConfigs | sha256sum }}
+data:
+{{- range $teamName, $teamConfig := .Values.teamConfigs }}
+  {{ $teamName }}.yml: |
+{{ $teamConfig | indent 4 }}
+{{- end }}

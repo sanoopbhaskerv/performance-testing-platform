@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────
+#  Performance Testing Platform — .gitignore
+# ─────────────────────────────────────────────────────────
+
+# IDE & Editor Config
+.vscode/
+.idea/
+*.iml
+*.iws
+
+# OS Metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Java & Maven Outputs
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+
+# Node & JS Tooling
+**/node_modules/
+**/dist/
+.npm
+.next/
+
+# Logs & Temporary Files
+*.log
+**/jmeter.log
+**/perf-platform/
+demo-service.zip
+perf-report.html
+
+# Local Environment / Secrets
+.env
+.env.local

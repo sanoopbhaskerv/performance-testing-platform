@@ -1,0 +1,120 @@
+# ─────────────────────────────────────────────────────────────────────────
+#  PERFORMANCE TESTING PLATFORM — GitHub Actions CI/CD Template
+#
+#  HOW TO USE:
+#  1. Copy this file to your repo: .github/workflows/perf-test.yml
+#  2. Add PERF_PLATFORM_URL and PERF_API_KEY to your GitHub Secrets
+#  3. DONE — tests will run automatically when your config file changes
+#     OR trigger manually from the GitHub Actions tab.
+# ─────────────────────────────────────────────────────────────────────────
+
+name: Performance Tests
+
+on:
+  push:
+    paths:
+      # Auto-triggers ONLY when your team's performance config changes
+      - "config/teams/**.yml"
+      - ".github/workflows/perf-test.yml"
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: "Test type to run"
+        required: true
+        default: "load"
+        type: choice
+        options: [load, endurance, spike]
+      team:
+        description: "Team name (must match team: field in your config YAML)"
+        required: true
+        default: "your-team-name"
+
+env:
+  PLATFORM_URL: ${{ secrets.PERF_PLATFORM_URL }} # e.g. https://perf-platform.internal.company.com
+  API_KEY: ${{ secrets.PERF_API_KEY }} # Issued by the platform admin
+
+jobs:
+  performance-test:
+    name: Run ${{ inputs.test_type || 'load' }} test
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reload team config on platform
+        run: |
+          curl -s -X POST "$PLATFORM_URL/api/v1/config/reload" \
+            -H "X-API-Key: $API_KEY" | jq .
+
+      - name: Trigger Performance Test
+        id: trigger
+        run: |
+          TEST_TYPE="${{ inputs.test_type || 'load' }}"
+          TEAM="${{ inputs.team || 'your-team-name' }}"
+
+          RESPONSE=$(curl -s -X POST "$PLATFORM_URL/api/v1/tests/run" \
+            -H "X-API-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"team\": \"$TEAM\", \"type\": \"$TEST_TYPE\"}")
+
+          echo "Trigger response: $RESPONSE"
+          RUN_ID=$(echo $RESPONSE | jq -r '.id')
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Started test run: $RUN_ID"
+
+      - name: Wait for Test Completion
+        id: poll
+        run: |
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          echo "Polling for test run: $RUN_ID"
+
+          for i in $(seq 1 120); do
+            RESPONSE=$(curl -s "$PLATFORM_URL/api/v1/tests/$RUN_ID" \
+              -H "X-API-Key: $API_KEY")
+            STATUS=$(echo $RESPONSE | jq -r '.status')
+            SLA=$(echo $RESPONSE | jq -r '.slaResult')
+            echo "[$i/120] Status: $STATUS | SLA: $SLA"
+
+            if [ "$STATUS" = "COMPLETED" ] || [ "$STATUS" = "FAILED" ]; then
+              echo "final_status=$STATUS" >> $GITHUB_OUTPUT
+              echo "sla_result=$SLA" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 15
+          done
+
+      - name: Download Report
+        if: always()
+        run: |
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          curl -s "$PLATFORM_URL/api/v1/tests/$RUN_ID/report" \
+            -H "X-API-Key: $API_KEY" \
+            -o perf-report.html
+          echo "Report downloaded: perf-report.html"
+
+      - name: Upload Report as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report-${{ steps.trigger.outputs.run_id }}
+          path: perf-report.html
+          retention-days: 30
+
+      - name: Fail on SLA Breach
+        if: steps.poll.outputs.sla_result == 'BREACH'
+        run: |
+          echo "❌ SLA BREACH — performance thresholds were exceeded!"
+          echo "Check the report artifact for details."
+          exit 1
+
+      - name: Fail on Test Failure
+        if: steps.poll.outputs.final_status == 'FAILED'
+        run: |
+          echo "❌ Test run FAILED — check the platform logs."
+          exit 1
+
+      - name: Success
+        if: steps.poll.outputs.final_status == 'COMPLETED' && steps.poll.outputs.sla_result == 'PASS'
+        run: echo "✅ Performance test PASSED — all SLA thresholds met!"

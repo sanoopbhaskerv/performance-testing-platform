@@ -1,0 +1,109 @@
+// ─────────────────────────────────────────────────────────────────────────
+//  PERFORMANCE TESTING PLATFORM — Jenkins Pipeline Template
+//
+//  HOW TO USE:
+//  1. Copy this file as 'Jenkinsfile' in your repository root
+//  2. Create a Jenkins pipeline job pointing to your repo
+//  3. Add PERF_PLATFORM_URL and PERF_API_KEY as Jenkins credentials
+// ─────────────────────────────────────────────────────────────────────────
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'TEST_TYPE', choices: ['load', 'endurance', 'spike'], description: 'Type of performance test')
+        string(name: 'TEAM',      defaultValue: 'your-team-name',          description: 'Team name (matches team: in YAML config)')
+    }
+
+    environment {
+        PLATFORM_URL = credentials('PERF_PLATFORM_URL')
+        API_KEY      = credentials('PERF_API_KEY')
+    }
+
+    stages {
+        stage('Reload Config') {
+            steps {
+                sh '''
+                  curl -s -X POST "$PLATFORM_URL/api/v1/config/reload" \
+                    -H "X-API-Key: $API_KEY" | python3 -m json.tool
+                '''
+            }
+        }
+
+        stage('Trigger Test') {
+            steps {
+                script {
+                    def response = sh(script: '''
+                      curl -s -X POST "$PLATFORM_URL/api/v1/tests/run" \
+                        -H "X-API-Key: $API_KEY" \
+                        -H "Content-Type: application/json" \
+                        -d "{\\"team\\": \\"$TEAM\\", \\"type\\": \\"$TEST_TYPE\\"}"
+                    ''', returnStdout: true).trim()
+
+                    def json = readJSON(text: response)
+                    env.RUN_ID = json.id
+                    echo "Test run started: ${env.RUN_ID}"
+                }
+            }
+        }
+
+        stage('Wait for Completion') {
+            steps {
+                script {
+                    def completed = false
+                    def slaBreached = false
+                    def attempts = 0
+
+                    while (!completed && attempts < 120) {
+                        sleep(time: 15, unit: 'SECONDS')
+                        attempts++
+                        def result = sh(script: '''
+                          curl -s "$PLATFORM_URL/api/v1/tests/$RUN_ID" -H "X-API-Key: $API_KEY"
+                        ''', returnStdout: true).trim()
+
+                        def data = readJSON(text: result)
+                        echo "[${attempts}] Status: ${data.status} | SLA: ${data.slaResult}"
+
+                        if (data.status == 'COMPLETED' || data.status == 'FAILED') {
+                            completed = true
+                            env.FINAL_STATUS = data.status
+                            env.SLA_RESULT   = data.slaResult ?: 'UNKNOWN'
+                            if (data.status == 'FAILED') error("Test run FAILED!")
+                            if (data.slaResult == 'BREACH') slaBreached = true
+                        }
+                    }
+
+                    if (slaBreached) {
+                        unstable(message: "SLA BREACH — performance thresholds exceeded!")
+                    }
+                }
+            }
+        }
+
+        stage('Download Report') {
+            steps {
+                sh '''
+                  curl -s "$PLATFORM_URL/api/v1/tests/$RUN_ID/report" \
+                    -H "X-API-Key: $API_KEY" \
+                    -o perf-report.html
+                '''
+                publishHTML(target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: '.',
+                    reportFiles: 'perf-report.html',
+                    reportName: 'Performance Report'
+                ])
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'perf-report.html', allowEmptyArchive: true
+        }
+        success { echo '✅ Performance test PASSED' }
+        unstable { echo '⚠️  SLA BREACH — check the report' }
+        failure  { echo '❌ Performance test FAILED' }
+    }
+}

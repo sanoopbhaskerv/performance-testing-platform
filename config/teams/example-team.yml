@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────
+#  PERFORMANCE TESTING PLATFORM — Team Configuration
+#
+#  Instructions:
+#  1. Copy this file to config/teams/<your-team-name>.yml
+#  2. Fill in YOUR values below
+#  3. Commit and push — CI/CD auto-triggers the test
+#  4. OR trigger manually via the Web UI or REST API
+#
+#  You do NOT need JMeter expertise. Just fill in this YAML.
+# ─────────────────────────────────────────────────────────────
+
+team: payment-service-team
+apiKey: "change-me-get-this-from-platform-admin"
+
+# ── Target Service ────────────────────────────────────────────
+targets:
+  - name: payment-service
+    baseUrl: "http://payment-service:8080" # Kubernetes service URL or external URL
+    healthCheckPath: "/actuator/health" # Platform checks this before running tests
+
+    # JVM settings — only needed for Java/Spring Boot services
+    # Leave jvmEnabled: false if your service is NOT Java-based
+    jvmEnabled: true
+    jvmHost: "demo-service"
+    jvmJmxPort: 9010 # JMX port exposed by your Java service
+
+# ── Test Scenarios ────────────────────────────────────────────
+tests:
+  load: # Simulates real traffic ramp-up, finds breaking point
+    enabled: true
+    rampUpUsers: 25 # Start with this many users
+    steadyStateUsers: 100 # Ramp up to this many users
+    rampUpDurationSeconds: 5 # Time to ramp up
+    steadyStateDurationSeconds: 10 # How long to hold steady state
+
+    scenarios:
+      - name: "core-api-flow"
+        endpoints:
+          - method: GET
+            path: "http://demo-service:8081/api/users"
+            headers:
+              Accept: "application/json"
+          - method: POST
+            path: "http://demo-service:8081/api/payments"
+            headers:
+              Content-Type: "application/json"
+            body: '{"amount": 100.0}'
+
+  endurance: # Long-running soak test — detects memory leaks over time
+    enabled: false
+    users: 20 # Concurrent users (keep low for endurance tests)
+    durationMinutes: 60 # How long to run (set high: 60–120 min)
+    memoryLeakThresholdMB: 100 # Fail if heap grows > this much during the test
+
+  spike: # Sudden burst of traffic — tests auto-scaling behaviour
+    enabled: false
+    baseUsers: 10 # Normal load during test
+    peakUsers: 300 # Sudden spike to this many users
+    spikeDurationSeconds: 30 # How long the spike lasts
+
+# ── SLA Pass/Fail Criteria ────────────────────────────────────
+# The CI/CD pipeline will fail if any of these are breached.
+sla:
+  maxP95LatencyMs: 500 # 95th percentile latency must be < 500ms
+  maxErrorRatePercent: 1.0 # Error rate must be < 1%
+  maxHeapUsagePercent: 80 # Heap usage must stay below 80% (JVM services only)
+
+# ── JVM Dump & Analysis (Opt-in — Only for Java/JVM Services) ─
+# If your service is NOT Java-based, leave both enabled: false
+# If your service IS Java-based, set enabled: true and configure jvmEnabled above
+analysis:
+  heapDump:
+    enabled: true # ← Set to true for Java/Kotlin/Scala services
+    triggerOnOOM: true # Auto-capture heap dump on OutOfMemoryError
+    triggerOnHeapPercent: 85 # Auto-capture when heap exceeds this % of max
+    manualTrigger: true # Allow on-demand via Web UI or POST /api/v1/dump/heap
+  threadDump:
+    enabled: true # ← Set to true for Java/Kotlin/Scala services
+    intervalSeconds: 30 # Capture thread dump every N seconds during test
+    captureOnDeadlock: true # Always capture immediately if deadlock is detected
+
+# ── Notifications ─────────────────────────────────────────────
+notifications:
+  slack:
+    enabled: false
+    webhookUrl: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    notifyOn:
+      - COMPLETED # Test finished successfully
+      - FAILED # Test execution failed (not SLA breach)
+      - SLA_BREACH # Test finished but SLA thresholds were exceeded
+  email:
+    enabled: false
+    recipients:
+      - "your-team@company.com"

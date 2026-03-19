@@ -1,0 +1,95 @@
+---
+# JMeter Job template.
+# This manifest is used as a BASE SPEC by JmeterTestOrchestrator.java — it is
+# rendered by Helm and then programmatically submitted to the K8s API per test run.
+# The platform-core app injects the team-specific env vars (TEST_TEAM, TEST_TYPE, etc.)
+# at runtime before submitting the Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Name is overridden at runtime: jmeter-<teamName>-<runId>
+  name: {{ include "performance-platform.fullname" . }}-jmeter-template
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: jmeter-job
+  annotations:
+    # Prometheus annotations — JMeter exposes metrics on port 9270 via JMeterPrometheusPlugin
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9270"
+spec:
+  # Never retry — test failures are reported back to the REST API, not retried silently
+  backoffLimit: 0
+  # Automatically clean up finished jobs after 1 hour
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "performance-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: jmeter-job
+    spec:
+      restartPolicy: Never
+
+      # ── Karpenter / Node scheduling ─────────────────────────────────────────
+      # JMeter jobs land on Karpenter-managed spot nodes in the perf-testing pool.
+      # Karpenter auto-provisions a node when this pod is pending and
+      # deprovisions it (consolidation) once the job completes.
+      nodeSelector:
+        karpenter.sh/nodepool: {{ .Values.karpenter.nodePool | quote }}
+        karpenter.sh/capacity-type: {{ .Values.karpenter.capacityType | quote }}
+      tolerations:
+        - key: "karpenter.sh/nodepool"
+          operator: "Equal"
+          value: {{ .Values.karpenter.nodePool | quote }}
+          effect: "NoSchedule"
+
+      serviceAccountName: {{ include "performance-platform.serviceAccountName" . }}
+
+      containers:
+        - name: jmeter
+          # Replace with your configured JMeter image (with JMeter + Prometheus plugin pre-installed)
+          image: "justb4/jmeter:5.6.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            # Injected by JmeterTestOrchestrator before submitting the Job to K8s API
+            - name: TEST_TEAM
+              value: "PLACEHOLDER_TEAM"
+            - name: TEST_TYPE
+              value: "PLACEHOLDER_TYPE"  # load | endurance | spike
+            - name: JMETER_HOME
+              value: {{ .Values.jmeter.home | quote }}
+            - name: TARGET_BASE_URL
+              value: "PLACEHOLDER_BASE_URL"
+            # DB for publishing results (written by JMeter back-end listener)
+            - name: RESULTS_DB_URL
+              value: {{ include "performance-platform.databaseUrl" . | quote }}
+            - name: RESULTS_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  key: username
+            - name: RESULTS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  key: password
+          volumeMounts:
+            - name: team-configs
+              mountPath: /config/teams
+              readOnly: true
+            - name: results
+              mountPath: /results
+          resources:
+            requests:
+              cpu: {{ .Values.resources.jmeterJob.requests.cpu }}
+              memory: {{ .Values.resources.jmeterJob.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.jmeterJob.limits.cpu }}
+              memory: {{ .Values.resources.jmeterJob.limits.memory }}
+
+      volumes:
+        - name: team-configs
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-team-configs
+        - name: results
+          emptyDir: {}

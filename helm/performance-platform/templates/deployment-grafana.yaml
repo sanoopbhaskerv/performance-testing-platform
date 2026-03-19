@@ -1,0 +1,250 @@
+{{- if .Values.grafana.enabled }}
+---
+# Grafana datasource provisioning — auto-wired to Prometheus on startup.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-grafana-datasources
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "performance-platform.fullname" . }}-prometheus:9090
+        isDefault: true
+        editable: false
+
+---
+# Grafana dashboard provisioning config — tells Grafana where to find dashboards.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-grafana-dashboards-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'perf-platform-dashboards'
+        orgId: 1
+        folder: 'Performance Platform'
+        type: file
+        disableDeletion: true
+        editable: false
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+# Pre-built Grafana dashboards — Load Test, JVM Runtime, Endurance Drift.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  load-test-overview.json: |
+    {
+      "title": "Load Test Overview",
+      "uid": "perf-load-test",
+      "tags": ["performance", "load-test"],
+      "schemaVersion": 38,
+      "panels": [
+        {
+          "title": "Requests per Second",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "rate(jmeter_responses_total[1m])", "legendFormat": "RPS" }],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        },
+        {
+          "title": "P95 Response Time (ms)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "histogram_quantile(0.95, rate(jmeter_response_duration_bucket[1m]))", "legendFormat": "P95" }],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        },
+        {
+          "title": "Error Rate (%)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "rate(jmeter_errors_total[1m]) / rate(jmeter_responses_total[1m]) * 100", "legendFormat": "Error %" }],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        },
+        {
+          "title": "Active Virtual Users",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "jmeter_active_threads", "legendFormat": "VUsers" }],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        }
+      ]
+    }
+
+  jvm-runtime.json: |
+    {
+      "title": "JVM Runtime",
+      "uid": "perf-jvm-runtime",
+      "tags": ["performance", "jvm"],
+      "schemaVersion": 38,
+      "panels": [
+        {
+          "title": "Heap Used vs Committed (MB)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [
+            { "expr": "jvm_memory_used_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Used MB" },
+            { "expr": "jvm_memory_committed_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Committed MB" }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        },
+        {
+          "title": "GC Pause Time (ms)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "rate(jvm_gc_pause_seconds_sum[1m]) * 1000", "legendFormat": "GC ms/s" }],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        },
+        {
+          "title": "Live Threads",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "jvm_threads_live_threads", "legendFormat": "Threads" }],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        }
+      ]
+    }
+
+  endurance-drift.json: |
+    {
+      "title": "Endurance Drift",
+      "uid": "perf-endurance-drift",
+      "tags": ["performance", "endurance", "memory-leak"],
+      "schemaVersion": 38,
+      "panels": [
+        {
+          "title": "Heap Growth Over Time (MB)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "jvm_memory_used_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Heap MB" }],
+          "description": "Steady upward drift here = memory leak candidate",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0}
+        },
+        {
+          "title": "GC Frequency (collections/min)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "rate(jvm_gc_pause_seconds_count[1m]) * 60", "legendFormat": "GC/min" }],
+          "description": "Increasing GC frequency over time = heap pressure",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        },
+        {
+          "title": "P99 Response Time Drift (ms)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{ "expr": "histogram_quantile(0.99, rate(jmeter_response_duration_bucket[5m]))", "legendFormat": "P99 ms" }],
+          "description": "P99 degrading over time = latency leak (thread contention or buffer growth)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        }
+      ]
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-grafana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "performance-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "performance-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.2
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: {{ .Values.grafana.adminPassword | quote }}
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-config
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: datasources
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-grafana-datasources
+        - name: dashboards-config
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-grafana-dashboards-config
+        - name: dashboards
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-grafana-dashboards
+        - name: grafana-data
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-grafana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "performance-platform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+{{- end }}

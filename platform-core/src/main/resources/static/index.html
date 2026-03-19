@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Performance Testing Platform</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0f1e;
+      --surface: #111827;
+      --surface2: #1e293b;
+      --border: #1e3a5f;
+      --accent: #3b82f6;
+      --accent2: #06b6d4;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #64748b;
+    }
+
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header {
+      background: linear-gradient(135deg, #0f2a4a 0%, #0a0f1e 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .logo h1 { font-size: 1.2rem; font-weight: 600; color: #f1f5f9; }
+    .logo p { font-size: 0.75rem; color: var(--muted); }
+    .header-badge { background: #14532d; color: #86efac; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+
+    .layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 73px); }
+
+    /* Sidebar */
+    .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 24px 16px; }
+    .sidebar-section { margin-bottom: 28px; }
+    .sidebar-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 10px; padding: 0 8px; }
+
+    .team-select { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 8px; font-family: inherit; font-size: 0.875rem; outline: none; cursor: pointer; appearance: none; }
+    .team-select:focus { border-color: var(--accent); }
+
+    .test-type-grid { display: grid; gap: 8px; }
+    .test-type-btn {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 12px 16px; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 0.875rem;
+      text-align: left; transition: all 0.2s; display: flex; align-items: center; gap: 10px;
+    }
+    .test-type-btn:hover { border-color: var(--accent); background: #1e3a5f22; }
+    .test-type-btn.active { border-color: var(--accent); background: #1e3a5f44; color: #93c5fd; }
+    .test-type-icon { font-size: 1.1rem; }
+    .test-type-info small { display: block; color: var(--muted); font-size: 0.72rem; margin-top: 2px; }
+
+    /* Main */
+    .main { padding: 32px; overflow-y: auto; }
+
+    .page-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }
+    .page-sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 28px; }
+
+    /* Run trigger card */
+    .run-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 28px; margin-bottom: 28px;
+    }
+    .run-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 20px; color: #93c5fd; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .form-group input, .form-group select {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 10px 14px; border-radius: 8px; font-family: inherit; font-size: 0.875rem; outline: none;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+
+    .run-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white; border: none; padding: 13px 32px; border-radius: 10px; font-family: inherit;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: opacity 0.2s;
+    }
+    .run-btn:hover { opacity: 0.92; }
+    .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* History table */
+    .history-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .history-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .history-header h2 { font-size: 1rem; font-weight: 600; color: #93c5fd; }
+    .refresh-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.8rem; transition: border-color 0.2s; }
+    .refresh-btn:hover { border-color: var(--accent); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 12px 20px; text-align: left; font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+    td { padding: 14px 20px; border-bottom: 1px solid #1e293b; font-size: 0.875rem; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1e293b44; }
+
+    .badge { padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; display: inline-block; }
+    .badge-running  { background: #1e3a5f; color: #60a5fa; }
+    .badge-complete { background: #14532d; color: #86efac; }
+    .badge-failed   { background: #7f1d1d; color: #fca5a5; }
+    .badge-pending  { background: #2d2a0a; color: #fde68a; }
+    .badge-pass     { background: #14532d; color: #86efac; }
+    .badge-breach   { background: #7f1d1d; color: #fca5a5; }
+
+    .report-link { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+    .report-link:hover { text-decoration: underline; }
+
+    /* Toast */
+    .toast {
+      position: fixed; top: 24px; right: 24px; z-index: 999;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 20px; display: flex; align-items: center; gap: 10px; font-size: 0.875rem;
+      transform: translateX(200%); transition: transform 0.3s ease; max-width: 360px;
+    }
+    .toast.show { transform: translateX(0); }
+    .toast.success { border-color: var(--green); }
+    .toast.error   { border-color: var(--red); }
+
+    /* Log viewer */
+    .log-box {
+      background: #050a14; border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; font-family: 'Courier New', monospace; font-size: 0.78rem;
+      color: #94a3b8; max-height: 180px; overflow-y: auto; margin-top: 16px;
+      white-space: pre-wrap; display: none;
+    }
+    .log-box.visible { display: block; }
+
+    .empty-state { padding: 48px; text-align: center; color: var(--muted); }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state p { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <h1>Performance Testing Platform</h1>
+      <p>Self-service load, endurance & spike testing</p>
+    </div>
+  </div>
+  <span class="header-badge" id="platformStatus">● Connecting...</span>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Team</div>
+      <select class="team-select" id="teamSelect" onchange="onTeamChange()">
+        <option value="">Select your team...</option>
+      </select>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Test Type</div>
+      <div class="test-type-grid">
+        <button class="test-type-btn active" id="btn-load" onclick="selectTestType('load')">
+          <span class="test-type-icon">📈</span>
+          <div class="test-type-info">
+            <strong>Load Test</strong>
+            <small>Ramp-up & steady state</small>
+          </div>
+        </button>
+        <button class="test-type-btn" id="btn-endurance" onclick="selectTestType('endurance')">
+          <span class="test-type-icon">⏱️</span>
+          <div class="test-type-info">
+            <strong>Endurance Test</strong>
+            <small>Soak test / memory leak detection</small>
+          </div>
+        </button>
+        <button class="test-type-btn" id="btn-spike" onclick="selectTestType('spike')">
+          <span class="test-type-icon">⚡</span>
+          <div class="test-type-info">
+            <strong>Spike Test</strong>
+            <small>Sudden burst of traffic</small>
+          </div>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <h2 class="page-title">Run Performance Test</h2>
+    <p class="page-sub">Select your team and test type, then click Run Test. No JMeter expertise needed.</p>
+
+    <div class="run-card">
+      <h2>⚙️ Configuration</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="Your team API key" />
+        </div>
+        <div class="form-group">
+          <label>Platform URL</label>
+          <input type="text" id="platformUrl" value="" placeholder="http://perf-platform:8080" />
+        </div>
+      </div>
+      <button class="run-btn" id="runBtn" onclick="runTest()" disabled>
+        <span id="runBtnIcon">▶</span>
+        <span id="runBtnText">Run Test</span>
+      </button>
+      <div class="log-box" id="logBox"></div>
+    </div>
+
+    <div class="history-card">
+      <div class="history-header">
+        <h2>📋 Test Run History</h2>
+        <button class="refresh-btn" onclick="loadHistory()">↻ Refresh</button>
+      </div>
+      <div id="historyContainer">
+        <div class="empty-state"><div class="icon">🔍</div><p>Select a team to see test history</p></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let selectedTestType = 'load';
+  let currentTeam = '';
+  let pollingInterval = null;
+
+  const API_URL = () => document.getElementById('platformUrl').value.replace(/\/$/, '') || '';
+  const API_KEY = () => document.getElementById('apiKeyInput').value;
+
+  async function init() {
+    // Auto-detect platform URL from current location
+    const loc = window.location;
+    document.getElementById('platformUrl').value = `${loc.protocol}//${loc.host}`;
+    await loadTeams();
+    checkHealth();
+  }
+
+  async function checkHealth() {
+    try {
+      const res = await fetch(`${API_URL()}/actuator/health`);
+      const badge = document.getElementById('platformStatus');
+      if (res.ok) {
+        badge.textContent = '● Platform Online';
+        badge.style.background = '#14532d';
+        badge.style.color = '#86efac';
+      } else throw new Error();
+    } catch {
+      const badge = document.getElementById('platformStatus');
+      badge.textContent = '● Platform Offline';
+      badge.style.background = '#7f1d1d';
+      badge.style.color = '#fca5a5';
+    }
+  }
+
+  async function loadTeams() {
+    try {
+      const res = await fetch(`${API_URL()}/api/v1/config/teams`, {
+        headers: { 'X-API-Key': API_KEY() }
+      });
+      if (!res.ok) return;
+      const teams = await res.json();
+      const sel = document.getElementById('teamSelect');
+      sel.innerHTML = '<option value="">Select your team...</option>';
+      teams.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      });
+    } catch(e) { console.error('Failed to load teams', e); }
+  }
+
+  function onTeamChange() {
+    currentTeam = document.getElementById('teamSelect').value;
+    const btn = document.getElementById('runBtn');
+    btn.disabled = !currentTeam || !API_KEY();
+    if (currentTeam) loadHistory();
+  }
+
+  function selectTestType(type) {
+    selectedTestType = type;
+    document.querySelectorAll('.test-type-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + type).classList.add('active');
+  }
+
+  async function runTest() {
+    if (!currentTeam) return showToast('Please select a team', 'error');
+    if (!API_KEY())   return showToast('Please enter your API key', 'error');
+
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    document.getElementById('runBtnIcon').textContent = '⏳';
+    document.getElementById('runBtnText').textContent  = 'Starting...';
+
+    const log = document.getElementById('logBox');
+    log.classList.add('visible');
+    log.textContent = `[${now()}] Triggering ${selectedTestType} test for team: ${currentTeam}...\n`;
+
+    try {
+      const res = await fetch(`${API_URL()}/api/v1/tests/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY() },
+        body: JSON.stringify({ team: currentTeam, type: selectedTestType })
+      });
+      const run = await res.json();
+      if (!res.ok) throw new Error(run.message || 'Failed to trigger test');
+
+      log.textContent += `[${now()}] Test run started — ID: ${run.id}\n[${now()}] Status: PENDING → Polling...\n`;
+      showToast(`Test started! Run ID: ${run.id.substring(0, 8)}...`, 'success');
+      pollTestRun(run.id, log);
+
+    } catch(e) {
+      log.textContent += `[${now()}] ERROR: ${e.message}\n`;
+      showToast(e.message, 'error');
+      resetRunBtn();
+    }
+  }
+
+  async function pollTestRun(runId, log) {
+    pollingInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL()}/api/v1/tests/${runId}`, {
+          headers: { 'X-API-Key': API_KEY() }
+        });
+        const run = await res.json();
+        log.textContent += `[${now()}] Status: ${run.status} | SLA: ${run.slaResult}\n`;
+        log.scrollTop = log.scrollHeight;
+
+        if (run.status === 'COMPLETED' || run.status === 'FAILED') {
+          clearInterval(pollingInterval);
+          const sla = run.slaResult === 'PASS' ? '✅ SLA PASSED' : (run.slaResult === 'BREACH' ? '❌ SLA BREACH' : '');
+          log.textContent += `[${now()}] Test complete! ${sla}\n`;
+          if (run.reportPath) {
+            log.textContent += `[${now()}] Report: ${API_URL()}/api/v1/tests/${runId}/report\n`;
+          }
+          showToast(run.status === 'COMPLETED' ? '✅ Test completed!' : '❌ Test failed!',
+                    run.status === 'COMPLETED' ? 'success' : 'error');
+          resetRunBtn();
+          loadHistory();
+        }
+      } catch(e) { console.error('Poll error', e); }
+    }, 5000);
+  }
+
+  async function loadHistory() {
+    if (!currentTeam) return;
+    try {
+      const res = await fetch(`${API_URL()}/api/v1/tests/history?team=${currentTeam}`, {
+        headers: { 'X-API-Key': API_KEY() }
+      });
+      const runs = await res.json();
+      renderHistory(runs);
+    } catch(e) { console.error('Failed to load history', e); }
+  }
+
+  function renderHistory(runs) {
+    const container = document.getElementById('historyContainer');
+    if (!runs || runs.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No test runs yet. Run your first test above!</p></div>';
+      return;
+    }
+    container.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Run ID</th><th>Type</th><th>Status</th><th>SLA</th><th>P95 Latency</th><th>Error Rate</th><th>Started</th><th>Report</th>
+        </tr></thead>
+        <tbody>${runs.map(r => `
+          <tr>
+            <td style="font-family:monospace;font-size:0.78rem;color:#64748b">${r.id.substring(0, 8)}...</td>
+            <td>${r.testType || '—'}</td>
+            <td><span class="badge badge-${(r.status||'').toLowerCase()}">${r.status || '—'}</span></td>
+            <td>${r.slaResult ? `<span class="badge badge-${r.slaResult === 'PASS' ? 'pass' : 'breach'}">${r.slaResult}</span>` : '—'}</td>
+            <td>${r.p95LatencyMs != null ? r.p95LatencyMs + ' ms' : '—'}</td>
+            <td>${r.errorRatePercent != null ? r.errorRatePercent.toFixed(2) + '%' : '—'}</td>
+            <td style="font-size:0.78rem;color:#64748b">${r.startedAt ? new Date(r.startedAt).toLocaleString() : '—'}</td>
+            <td>${r.reportPath ? `<a class="report-link" href="/api/v1/tests/${r.id}/report" target="_blank">Download ↗</a>` : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  function resetRunBtn() {
+    const btn = document.getElementById('runBtn');
+    btn.disabled = !currentTeam;
+    document.getElementById('runBtnIcon').textContent = '▶';
+    document.getElementById('runBtnText').textContent  = 'Run Test';
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = (type === 'success' ? '✅ ' : '❌ ') + msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }
+
+  function now() { return new Date().toTimeString().split(' ')[0]; }
+
+  document.getElementById('apiKeyInput').addEventListener('input', () => {
+    document.getElementById('runBtn').disabled = !currentTeam || !API_KEY();
+  });
+
+  window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
