@@ -23,7 +23,20 @@
     <springdoc.version>2.3.0</springdoc.version>
   </properties>
 
+  <!--
+    Modular monolith. Dependencies point inward: platform-domain depends on nothing,
+    platform-core depends on everything and owns application bootstrapping.
+    See docs/adr/003-engine-spi.md and CLAUDE.md §9 for the dependency rules, which are
+    enforced by ModuleDependencyRulesTest in platform-core.
+  -->
   <modules>
+    <module>platform-domain</module>
+    <module>platform-engine-spi</module>
+    <module>platform-results</module>
+    <module>platform-persistence</module>
+    <module>platform-orchestration</module>
+    <module>platform-api</module>
+    <module>engines/engine-jmeter</module>
     <module>platform-core</module>
   </modules>
 
@@ -34,6 +47,43 @@
         <groupId>org.springdoc</groupId>
         <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         <version>${springdoc.version}</version>
+      </dependency>
+
+      <!-- Internal modules -->
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-engine-spi</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-results</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-persistence</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-orchestration</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>engine-jmeter</artifactId>
+        <version>${project.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

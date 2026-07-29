@@ -150,19 +150,44 @@ mvn clean package -pl platform-core
 
 ```
 performance-testing-platform/
-├── pom.xml                         # Root Maven POM
-├── platform-core/                  # Spring Boot control plane
+├── pom.xml                         # Root Maven POM (reactor)
+├── platform-domain/                # Engine-neutral domain model (no Spring/JPA/K8s)
+├── platform-engine-spi/            # Engine contract
+├── platform-results/               # Result normalization and objective evaluation
+├── platform-persistence/           # PostgreSQL adapters and Flyway migrations
+├── platform-orchestration/         # Admission control, state machine, reconciliation
+├── platform-api/                   # /api/v2/** REST surface
+├── engines/
+│   └── engine-jmeter/              # JMeter provider for the engine SPI
+├── platform-core/                  # Spring Boot composition root — owns bootstrapping
 │   ├── pom.xml
 │   ├── Dockerfile
 │   └── src/main/
-│       ├── java/com/perfplatform/  # All Java source
+│       ├── java/com/perfplatform/  # V1 control plane (/api/v1/**)
 │       └── resources/
 │           ├── application.yml
 │           ├── templates/jmx/      # Freemarker JMX templates
-│           └── static/index.html   # Web UI
+│           └── static/index.html   # Legacy web UI
+├── platform-ui/                    # React UI (not a Maven module — build separately)
 ├── config/teams/                   # Team YAML configs
 │   └── example-team.yml
 ├── docker/                         # Local Docker Compose
 ├── helm/performance-platform/      # Kubernetes Helm chart (EKS)
-└── ci-templates/                   # GitHub Actions + Jenkins
+├── ci-templates/                   # GitHub Actions + Jenkins
+└── docs/
+    ├── architecture/               # Target architecture
+    ├── adr/                        # Architecture decision records
+    ├── migration/                  # Baseline report and V1→V2 strategy
+    ├── operations/
+    └── api/
 ```
+
+Dependencies point inward: `platform-domain` depends on nothing, `platform-core` depends on
+everything. The rules are in `CLAUDE.md` §9 and enforced by `ModuleDependencyRulesTest`.
+
+> **V2 migration in progress.** This repository is being evolved to the architecture in
+> [`docs/architecture/`](docs/architecture/performance-testing-platform-target-architecture.md).
+> `/api/v1/**` stays operational throughout. Before relying on V1 behavior, read
+> [`docs/migration/baseline-report.md`](docs/migration/baseline-report.md) — it records
+> verified defects in the current proof of concept, including one that makes any test at
+> 1,000 virtual users or any 60-minute endurance run generate an invalid JMeter plan.

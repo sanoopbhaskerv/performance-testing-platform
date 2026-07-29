@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.perfplatform.config.TeamConfig.SlaConfig;
+import com.perfplatform.results.metrics.PercentileCalculator;
 
 /**
  * Reads JMeter results CSV and evaluates SLA thresholds.
@@ -23,6 +24,11 @@ import com.perfplatform.config.TeamConfig.SlaConfig;
  * JMeter results CSV columns: timeStamp, elapsed, label, responseCode,
  * responseMessage, threadName, dataType, success, failureMessage,
  * bytes, sentBytes, grpThreads, allThreads, URL, Latency, IdleTime, Connect
+ *
+ * <p>V1 component. Percentile computation has moved to
+ * {@link PercentileCalculator} in {@code platform-results} so that V2 objective evaluation and
+ * V1 SLA evaluation cannot drift apart. The rest of this class — CSV parsing and threshold
+ * comparison — is replaced by the normalized result model in Increment 1D.
  */
 @Service
 public class SlaEvaluator {
@@ -77,9 +83,9 @@ public class SlaEvaluator {
         }
 
         Collections.sort(latencies);
-        long p50 = percentile(latencies, 50);
-        long p95 = percentile(latencies, 95);
-        long p99 = percentile(latencies, 99);
+        long p50 = PercentileCalculator.fromSorted(latencies, 50);
+        long p95 = PercentileCalculator.fromSorted(latencies, 95);
+        long p99 = PercentileCalculator.fromSorted(latencies, 99);
         double errorRate = totalRequests > 0 ? (totalErrors * 100.0 / totalRequests) : 0;
 
         log.info("SLA Metrics — P50: {}ms, P95: {}ms, P99: {}ms, Errors: {}%",
@@ -99,10 +105,5 @@ public class SlaEvaluator {
         String failureReason = passed ? null : String.join("; ", breaches);
 
         return new SlaResult(p50, p95, p99, errorRate, totalRequests, totalErrors, passed, failureReason);
-    }
-
-    private long percentile(List<Long> sorted, int percentile) {
-        int index = (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1;
-        return sorted.get(Math.max(0, Math.min(index, sorted.size() - 1)));
     }
 }

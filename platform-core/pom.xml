@@ -15,6 +15,39 @@
   <name>Platform Core</name>
 
   <dependencies>
+    <!--
+      Internal modules. platform-core is the composition root: it depends on every
+      implementation module and owns application bootstrapping. Nothing depends on it.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-engine-spi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-results</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-persistence</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-orchestration</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>engine-jmeter</artifactId>
+    </dependency>
+
     <!-- Spring Boot starters -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
