@@ -59,6 +59,35 @@ public final class SpecificationParser {
     /** YAML is a superset of JSON, so one factory accepts both submitted forms. */
     private final ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
+    /** Writes the stored form. Separate factory because the YAML one cannot emit JSON. */
+    private final ObjectMapper jsonMapper = new ObjectMapper();
+
+    /**
+     * Converts a submitted YAML or JSON document to the JSON text that gets stored.
+     *
+     * <p>Storage is JSON regardless of what was submitted, because the column is a JSON type and
+     * because YAML and JSON are two serializations of one model — keeping both would mean two
+     * stored forms of the same specification.
+     *
+     * <p>Field order and content are preserved exactly as submitted. Nothing is normalized here:
+     * the digest is taken over the canonical form of the <em>parsed model</em>, so re-ordering the
+     * text would change what is stored without changing what it means, and a consumer comparing
+     * their file to what the platform holds would see a diff that is not a difference.
+     *
+     * @throws IllegalArgumentException if the document cannot be read at all
+     */
+    public String toStoredJson(String document) {
+        if (document == null || document.isBlank()) {
+            throw new IllegalArgumentException("The submitted specification is empty");
+        }
+        try {
+            return jsonMapper.writeValueAsString(mapper.readTree(document));
+        } catch (JsonProcessingException e) {
+            // The parser message can quote request content, so it is not propagated.
+            throw new IllegalArgumentException("The submitted specification could not be read");
+        }
+    }
+
     /**
      * The outcome of parsing.
      *

@@ -29,6 +29,16 @@ public class OrchestrationProperties {
     private boolean reconciliationEnabled = true;
 
     /**
+     * Whether V1's team YAML is mirrored into the V2 registry at startup.
+     *
+     * <p>A migration adapter for the V1/V2 overlap: it lets a team that can use V1 author a V2
+     * definition without a separate onboarding step. Refused under a production profile — writing
+     * business data from a config file at boot is acceptable only while that file is the source of
+     * truth. Real onboarding arrives with identity management in Increment 4.
+     */
+    private boolean synchronizeTeamsFromYaml = true;
+
+    /**
      * How often a reconciliation pass runs.
      *
      * <p>Seconds, not milliseconds. Runs last minutes to hours, so polling faster buys nothing and
@@ -129,6 +139,14 @@ public class OrchestrationProperties {
 
     public void setReconciliationEnabled(boolean reconciliationEnabled) {
         this.reconciliationEnabled = reconciliationEnabled;
+    }
+
+    public boolean isSynchronizeTeamsFromYaml() {
+        return synchronizeTeamsFromYaml;
+    }
+
+    public void setSynchronizeTeamsFromYaml(boolean synchronizeTeamsFromYaml) {
+        this.synchronizeTeamsFromYaml = synchronizeTeamsFromYaml;
     }
 
     public Duration getReconciliationInterval() {

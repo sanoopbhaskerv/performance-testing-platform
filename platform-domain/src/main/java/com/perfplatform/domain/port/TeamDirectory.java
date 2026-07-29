@@ -1,5 +1,6 @@
 package com.perfplatform.domain.port;
 
+import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
 
 import java.util.Optional;
@@ -19,4 +20,13 @@ public interface TeamDirectory {
 
     /** The team with this name, or empty if there is none. */
     Optional<TeamId> findByName(String name);
+
+    /**
+     * The application with this name within the team, or empty if there is none.
+     *
+     * <p>Scoped to a team because application names are unique within one, not globally: two teams
+     * may each own a "proposal" application, and resolving one without its team would be ambiguous
+     * in exactly the place where the answer decides whose data is touched.
+     */
+    Optional<ApplicationId> findApplication(TeamId teamId, String name);
 }

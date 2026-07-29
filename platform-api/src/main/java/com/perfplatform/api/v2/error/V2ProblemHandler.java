@@ -1,9 +1,12 @@
 package com.perfplatform.api.v2.error;
 
+import com.perfplatform.api.v2.TestDefinitionController;
 import com.perfplatform.api.v2.security.CallerContextProvider;
+import com.perfplatform.domain.port.TestDefinitionRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.run.InvalidRunTransitionException;
 import com.perfplatform.domain.security.CallerContext;
+import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -109,6 +113,68 @@ public class V2ProblemHandler {
         return problem(HttpStatus.FORBIDDEN, "auth.forbidden",
                 "You are not permitted to perform this action.",
                 request, e);
+    }
+
+    // ── Definitions ──────────────────────────────────────────────────────
+
+    /**
+     * A specification that did not validate.
+     *
+     * <p>422 with every finding, not 400 with the first. The request was well formed; the document
+     * it carried is the problem, and a consumer fixing one field per round trip against an API that
+     * queues load tests is a consumer who gives up and hand-rolls the request.
+     */
+    @ExceptionHandler(TestDefinitionController.InvalidSpecificationException.class)
+    public ProblemDetail handleInvalidSpecification(
+            TestDefinitionController.InvalidSpecificationException e, HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_ENTITY, "specification.invalid",
+                "The submitted specification did not validate and was not stored.", request, e);
+
+        problem.setProperty("findings", e.findings().findings().stream()
+                .map(finding -> {
+                    Map<String, String> rendered = new LinkedHashMap<>();
+                    rendered.put("code", finding.code());
+                    rendered.put("severity", finding.severity().name());
+                    rendered.put("path", finding.path());
+                    rendered.put("message", finding.message());
+                    if (finding.remediation() != null) {
+                        rendered.put("remediation", finding.remediation());
+                    }
+                    return rendered;
+                })
+                .toList());
+        return problem;
+    }
+
+    /**
+     * A document naming a team or application the registry does not know.
+     *
+     * <p>The name is echoed because the caller supplied it; nothing is disclosed about what does
+     * exist. Names resolve, they never create — a typo must not manufacture a team with no owner,
+     * no quota and no approval policy.
+     */
+    @ExceptionHandler(AuthorTestDefinitionUseCase.UnknownOwnerException.class)
+    public ProblemDetail handleUnknownOwner(AuthorTestDefinitionUseCase.UnknownOwnerException e,
+            HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_ENTITY,
+                "specification." + e.field() + ".unknown", e.getMessage(), request, e);
+        problem.setProperty("field", "metadata." + e.field());
+        return problem;
+    }
+
+    @ExceptionHandler(AuthorTestDefinitionUseCase.UnknownDefinitionException.class)
+    public ProblemDetail handleUnknownDefinition(
+            AuthorTestDefinitionUseCase.UnknownDefinitionException e, HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "definition.notFound",
+                "No such test definition.", request, e);
+    }
+
+    @ExceptionHandler(TestDefinitionRepository.DuplicateDefinitionException.class)
+    public ProblemDetail handleDuplicateDefinition(
+            TestDefinitionRepository.DuplicateDefinitionException e, HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "definition.duplicate", e.getMessage(), request, e);
     }
 
     // ── Runs ─────────────────────────────────────────────────────────────

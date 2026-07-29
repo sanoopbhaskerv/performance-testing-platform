@@ -1,0 +1,214 @@
+package com.perfplatform.persistence.artifact;
+
+import com.perfplatform.domain.identity.ArtifactId;
+import com.perfplatform.domain.identity.RunnerShardId;
+import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.port.ArtifactStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Stream;
+
+/**
+ * An artifact store backed by a local directory.
+ *
+ * <p>For development and for the local execution provider. The production implementation is
+ * S3-compatible object storage and arrives with the Kubernetes provider in Increment 1E — this one
+ * cannot serve a multi-replica control plane, because a file written by one replica is invisible to
+ * the others.
+ *
+ * <p>It is nonetheless a real implementation of the port, not a stub: keys are the same shape as
+ * production's, content is digested and verified, and nothing outside this class ever sees a
+ * filesystem path. That is what makes the swap in 1E a configuration change rather than a
+ * refactoring.
+ *
+ * <h2>Writes are atomic</h2>
+ * Content is written to a temporary file and moved into place. A reader that opened a half-written
+ * results file would parse a truncated document and report a shorter test than the one that ran.
+ */
+public class FileSystemArtifactStore implements ArtifactStore {
+
+    private static final Logger log = LoggerFactory.getLogger(FileSystemArtifactStore.class);
+
+    private final Path root;
+    private final Clock clock;
+
+    /** Where artifacts and their metadata live, mirroring the production key layout. */
+    private final List<StoredArtifact> index = new ArrayList<>();
+
+    public FileSystemArtifactStore(Path root, Clock clock) {
+        this.root = root.toAbsolutePath().normalize();
+        this.clock = clock;
+        try {
+            Files.createDirectories(this.root);
+        } catch (IOException e) {
+            throw new ArtifactStoreException("Could not create the artifact root " + this.root, e);
+        }
+        log.info("Artifacts are stored on the local filesystem at {}. Not durable across replicas; "
+                + "object storage arrives in Increment 1E.", this.root);
+    }
+
+    private record StoredArtifact(ArtifactReference reference, Path file) {
+    }
+
+    @Override
+    public synchronized ArtifactReference store(ArtifactDescriptor descriptor, byte[] content) {
+        byte[] body = content == null ? new byte[0] : content;
+        String objectKey = keyFor(descriptor);
+        Path file = resolveWithinRoot(objectKey);
+
+        try {
+            Files.createDirectories(file.getParent());
+
+            // Written beside the target and moved, so a reader never sees a partial file.
+            Path temporary = Files.createTempFile(file.getParent(), ".partial-", ".tmp");
+            Files.write(temporary, body);
+            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            throw new ArtifactStoreException("Could not store artifact " + objectKey, e);
+        }
+
+        ArtifactReference reference = new ArtifactReference(
+                ArtifactId.generate(),
+                descriptor.runId(),
+                descriptor.shardId(),
+                descriptor.type(),
+                objectKey,
+                digestOf(body),
+                descriptor.contentType(),
+                body.length,
+                clock.instant());
+
+        // Re-storing the same key replaces its entry rather than appending a second one, so a
+        // repeated reconciliation pass does not double-count a run's artifacts.
+        index.removeIf(stored -> stored.reference().objectKey().equals(objectKey));
+        index.add(new StoredArtifact(reference, file));
+
+        return reference;
+    }
+
+    @Override
+    public synchronized Optional<byte[]> read(ArtifactReference reference) {
+        return index.stream()
+                .filter(stored -> stored.reference().objectKey().equals(reference.objectKey()))
+                .findFirst()
+                .map(StoredArtifact::file)
+                .flatMap(FileSystemArtifactStore::readFile);
+    }
+
+    @Override
+    public synchronized List<ArtifactReference> listForRun(TestRunId runId) {
+        return index.stream()
+                .map(StoredArtifact::reference)
+                .filter(reference -> reference.runId().equals(runId))
+                .toList();
+    }
+
+    /** Content by key, for callers holding a key rather than a reference. */
+    public synchronized Optional<byte[]> readByKey(String objectKey) {
+        return index.stream()
+                .filter(stored -> stored.reference().objectKey().equals(objectKey))
+                .findFirst()
+                .map(StoredArtifact::file)
+                .flatMap(FileSystemArtifactStore::readFile);
+    }
+
+    /**
+     * The key layout, matching what the S3 implementation will use.
+     *
+     * <p>{@code teams/{teamId}/runs/{runId}/...} — the team prefix first, so authorization is a
+     * property of the key. A caller who may not read a team's data cannot construct a key inside it.
+     */
+    static String keyFor(ArtifactDescriptor descriptor) {
+        StringBuilder key = new StringBuilder("teams/")
+                .append(descriptor.teamId().value())
+                .append("/runs/")
+                .append(descriptor.runId().value())
+                .append('/');
+
+        descriptor.shardId()
+                .ifPresentOrElse(
+                        shard -> key.append("shards/").append(shard.value()).append('/'),
+                        () -> key.append(sectionFor(descriptor.type())).append('/'));
+
+        return key.append(descriptor.fileName()).toString();
+    }
+
+    private static String sectionFor(ArtifactType type) {
+        return switch (type) {
+            case EXECUTION_PLAN -> "plan";
+            case REPORT -> "report";
+            case RESULTS, RUNNER_LOG, RUNNER_MANIFEST -> "analysis";
+        };
+    }
+
+    /**
+     * Resolves a key under the root, refusing anything that would escape it.
+     *
+     * <p>Keys are constructed internally from identifiers, so this should be unreachable. It is here
+     * because a path-traversal check that only exists where input is currently trusted is a check
+     * that disappears the moment the input source changes.
+     */
+    private Path resolveWithinRoot(String objectKey) {
+        Path resolved = root.resolve(objectKey).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new ArtifactStoreException(
+                    "Artifact key '" + objectKey + "' resolves outside the artifact root");
+        }
+        return resolved;
+    }
+
+    private static Optional<byte[]> readFile(Path file) {
+        try {
+            return Files.exists(file) ? Optional.of(Files.readAllBytes(file)) : Optional.empty();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static String digestOf(byte[] content) {
+        try {
+            return "sha256:" + HexFormat.of()
+                    .formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available in this JVM", e);
+        }
+    }
+
+    /** Removes everything under the root. For tests and local cleanup only. */
+    public synchronized void clear() {
+        index.clear();
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(java.util.Comparator.reverseOrder())
+                    .filter(path -> !path.equals(root))
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+        } catch (IOException e) {
+            throw new ArtifactStoreException("Could not clear the artifact root " + root, e);
+        }
+    }
+
+    /** UTF-8 convenience for text artifacts. */
+    public static byte[] utf8(String content) {
+        return content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
+    }
+}

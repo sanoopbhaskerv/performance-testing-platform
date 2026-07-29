@@ -1,5 +1,6 @@
 package com.perfplatform.v2;
 
+import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.port.TeamDirectory;
 import org.junit.jupiter.api.DisplayName;
@@ -30,7 +31,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ProductionSafetyGuardTest {
 
-    private static final TeamDirectory TEAMS = name -> Optional.of(TeamId.generate());
+    /** A directory in which every name resolves. */
+    private static final TeamDirectory TEAMS = resolvingEverything();
+
+    private static TeamDirectory resolvingEverything() {
+        return new TeamDirectory() {
+            @Override
+            public Optional<TeamId> findByName(String name) {
+                return Optional.of(TeamId.generate());
+            }
+
+            @Override
+            public Optional<ApplicationId> findApplication(TeamId teamId, String name) {
+                return Optional.of(ApplicationId.generate());
+            }
+        };
+    }
+
+    /** A directory that resolves only the named teams. */
+    private static TeamDirectory resolvingOnly(Map<String, TeamId> teams) {
+        return new TeamDirectory() {
+            @Override
+            public Optional<TeamId> findByName(String name) {
+                return Optional.ofNullable(teams.get(name));
+            }
+
+            @Override
+            public Optional<ApplicationId> findApplication(TeamId teamId, String name) {
+                return Optional.empty();
+            }
+        };
+    }
 
     private static OrchestrationConfiguration configurationFor(String... activeProfiles) {
         MockEnvironment environment = new MockEnvironment();
@@ -140,10 +171,8 @@ class ProductionSafetyGuardTest {
             OrchestrationProperties properties = new OrchestrationProperties();
             properties.getCapacity().setTeamOverrides(Map.of("no-such-team", 2));
 
-            TeamDirectory empty = name -> Optional.empty();
-
             var limits = new OrchestrationConfiguration(properties, environment)
-                    .capacityLimits(empty);
+                    .capacityLimits(resolvingOnly(Map.of()));
 
             assertThat(limits.teamOverrides()).isEmpty();
             assertThat(limits.limitFor(TeamId.generate())).isEqualTo(1);
@@ -159,11 +188,9 @@ class ProductionSafetyGuardTest {
             properties.getCapacity().setTeamOverrides(Map.of("advice", 2));
 
             TeamId advice = TeamId.generate();
-            TeamDirectory directory = name -> "advice".equals(name)
-                    ? Optional.of(advice) : Optional.empty();
 
             var limits = new OrchestrationConfiguration(properties, environment)
-                    .capacityLimits(directory);
+                    .capacityLimits(resolvingOnly(Map.of("advice", advice)));
 
             assertThat(limits.limitFor(advice)).isEqualTo(2);
             assertThat(limits.limitFor(TeamId.generate())).isEqualTo(1);

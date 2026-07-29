@@ -8,15 +8,22 @@ import com.perfplatform.domain.admission.CapacityLimits;
 import com.perfplatform.domain.admission.ConcurrencyAdmissionPolicy;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.identity.TeamId;
-import com.perfplatform.domain.plan.BaselineExecutionPlanCompiler;
 import com.perfplatform.domain.plan.ExecutionPlanCompiler;
+import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.DefinitionVersionCatalog;
 import com.perfplatform.domain.port.ExecutionPlanRepository;
 import com.perfplatform.domain.port.RunnerShardRepository;
 import com.perfplatform.domain.port.TeamDirectory;
+import com.perfplatform.domain.port.TeamProvisioning;
+import com.perfplatform.domain.port.TestDefinitionRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.orchestration.OrchestrationSettings;
+import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
+import com.perfplatform.engine.jmeter.JmeterEngineProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
+import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
+import com.perfplatform.orchestration.plan.EngineRegistry;
+import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.RunReconciler;
@@ -24,13 +31,16 @@ import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import com.perfplatform.persistence.definition.TestDefinitionRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 
 import java.time.Clock;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -107,9 +117,41 @@ public class OrchestrationConfiguration {
         return new ConcurrencyAdmissionPolicy();
     }
 
+    /**
+     * The engines this deployment has.
+     *
+     * <p>Spring supplies every {@link com.perfplatform.engine.spi.ExecutionEngineProvider} bean.
+     * Adding an engine is adding a bean; nothing here enumerates them.
+     */
     @Bean
-    public ExecutionPlanCompiler executionPlanCompiler() {
-        return new BaselineExecutionPlanCompiler();
+    public EngineRegistry engineRegistry(
+            List<com.perfplatform.engine.spi.ExecutionEngineProvider> providers) {
+        EngineRegistry registry = new EngineRegistry(providers);
+        log.info("Execution engines registered: {}", registry.engineIds());
+        return registry;
+    }
+
+    @Bean
+    public com.perfplatform.engine.spi.ExecutionEngineProvider jmeterEngineProvider() {
+        return new JmeterEngineProvider();
+    }
+
+    /**
+     * Plan compilation, dispatched to the engine the specification names.
+     *
+     * <p>Increment 1C compiled an engine-neutral envelope so the digest and storage contracts could
+     * be settled before any engine existed. The engine now produces the plan body, which is what
+     * moves compilation behind the SPI (Increment 1D) — and what makes the scenario weights and
+     * workload stages V1 discarded survive into the plan.
+     */
+    @Bean
+    public ExecutionPlanCompiler executionPlanCompiler(EngineRegistry engines) {
+        return new EngineDispatchingPlanCompiler(engines);
+    }
+
+    @Bean
+    public RunAnalyzer runAnalyzer() {
+        return new DefaultRunAnalyzer();
     }
 
     /**
@@ -130,7 +172,7 @@ public class OrchestrationConfiguration {
                     + "' is implemented; the Kubernetes provider arrives in Increment 1E.");
         }
 
-        if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of(PRODUCTION_PROFILES))) {
+        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
             throw new IllegalStateException(
                     "The 'fake' execution provider generates no load and must never run under a "
                             + "production profile. It would report successful runs for tests that "
@@ -163,7 +205,7 @@ public class OrchestrationConfiguration {
     public CallerContextProvider callerContextProvider(TeamConfigLoader teamConfigs,
             TeamDirectory teams) {
 
-        if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of(PRODUCTION_PROFILES))) {
+        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
             throw new IllegalStateException(
                     "The development caller-identity provider derives identity from V1 API keys and "
                             + "must never run under a production profile. Configure corporate OIDC "
@@ -174,6 +216,39 @@ public class OrchestrationConfiguration {
                 + "V1 API key and scoped to the team that owns it. Not for production.");
 
         return new DevelopmentCallerContextProvider(teamConfigs, teams);
+    }
+
+    @Bean
+    public AuthorTestDefinitionUseCase authorTestDefinitionUseCase(
+            TestDefinitionRepository definitions, TeamDirectory teams) {
+        return new AuthorTestDefinitionUseCase(definitions, teams);
+    }
+
+    /**
+     * Mirrors V1's team YAML into the V2 registry at startup.
+     *
+     * <p>Non-production only, and absent rather than inert under a production profile: a bean that
+     * exists but declines to act is one someone later "fixes" by removing the check. Real onboarding
+     * arrives with corporate identity in Increment 4.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "platform.orchestration", name = "synchronize-teams-from-yaml",
+            havingValue = "true", matchIfMissing = true)
+    public TeamRegistrySynchronizer teamRegistrySynchronizer(TeamConfigLoader teamConfigs,
+            TeamProvisioning provisioning) {
+
+        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
+            throw new IllegalStateException(
+                    "Team registry synchronization writes business data from a config file at boot "
+                            + "and must never run under a production profile. Onboard teams through "
+                            + "the platform's own process (Increment 4), or set "
+                            + "platform.orchestration.synchronize-teams-from-yaml=false.");
+        }
+
+        log.warn("Team registry synchronization from YAML is enabled: teams and applications "
+                + "declared in the team configuration will be created if absent. Development only.");
+
+        return new TeamRegistrySynchronizer(teamConfigs, provisioning);
     }
 
     @Bean

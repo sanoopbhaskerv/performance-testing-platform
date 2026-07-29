@@ -1,0 +1,92 @@
+package com.perfplatform.engine.jmeter;
+
+import com.perfplatform.domain.identity.ExecutionPlanId;
+import com.perfplatform.domain.identity.TestDefinitionVersionId;
+import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.plan.ExecutionPlan;
+import com.perfplatform.domain.spec.LoadModelType;
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.EnvironmentSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadModel;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ObservabilitySpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.SpecMetadata;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.TestSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
+import com.perfplatform.domain.spec.SpecificationDigest;
+import com.perfplatform.domain.spec.TargetClass;
+import com.perfplatform.domain.spec.WorkloadType;
+import com.perfplatform.domain.target.TargetAddress;
+import com.perfplatform.engine.spi.EnginePlan;
+import com.perfplatform.engine.spi.ShardAssignment;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+/** Specifications for the JMeter engine's tests. */
+final class JmeterFixtures {
+
+    static final TargetAddress TARGET = TargetAddress.parse("https://proposal.example.internal");
+
+    private JmeterFixtures() {
+    }
+
+    /** Two stages and three weighted scenarios — the shape V1 could not express. */
+    static PerformanceTestSpecification twoStagesThreeScenarios() {
+        return specification(List.of(
+                workload("api-load", List.of(
+                                new LoadStage(Duration.ofMinutes(5), 100),
+                                new LoadStage(Duration.ofMinutes(10), 200)),
+                        List.of(
+                                new ScenarioSpec("search-client", 60, "searchClient"),
+                                new ScenarioSpec("open-proposal", 30, "getProposal"),
+                                new ScenarioSpec("save-proposal", 10, "saveProposal")))));
+    }
+
+    /** A single stage at the platform's stated maximum concurrency. */
+    static PerformanceTestSpecification atMaximumConcurrency() {
+        return specification(List.of(
+                workload("api-load", List.of(new LoadStage(Duration.ofHours(1), 1_000)),
+                        List.of(new ScenarioSpec("search-client", 100, "searchClient")))));
+    }
+
+    static PerformanceTestSpecification specification(List<WorkloadSpec> workloads) {
+        return new PerformanceTestSpecification(
+                PerformanceTestSpecification.SUPPORTED_API_VERSION,
+                PerformanceTestSpecification.SUPPORTED_KIND,
+                new SpecMetadata("proposal-baseline", "advice", "proposal", Map.of()),
+                new TestSpec(
+                        new EnvironmentSpec("performance", "advice-perf", TargetClass.NON_PRODUCTION),
+                        List.of(), List.of(), List.of(),
+                        workloads,
+                        List.of(),
+                        new ObservabilitySpec("dynatrace", null, null, List.of()),
+                        null));
+    }
+
+    static WorkloadSpec workload(String name, List<LoadStage> stages, List<ScenarioSpec> scenarios) {
+        return new WorkloadSpec(name, WorkloadType.PROTOCOL, "jmeter", null,
+                new LoadModel(LoadModelType.STAGES, stages), scenarios, null, null, null);
+    }
+
+    static ShardAssignment shard(int index, int count) {
+        return new ShardAssignment(TestRunId.generate(), index, count, null);
+    }
+
+    /** A stored plan for the given specification, as the dispatcher would build it. */
+    static ExecutionPlan planFor(PerformanceTestSpecification specification) {
+        EnginePlan compiled = JmeterPlanCompiler.compile(specification);
+        return new ExecutionPlan(
+                ExecutionPlanId.generate(),
+                TestDefinitionVersionId.generate(),
+                JmeterEngineProvider.ENGINE_ID,
+                compiled.planJson(),
+                SpecificationDigest.ofCanonicalForm(compiled.planJson()),
+                new ExecutionPlan.CapacityEstimate(compiled.shardCount(),
+                        compiled.peakVirtualUsers(), compiled.durationSeconds()),
+                Instant.parse("2026-07-30T10:00:00Z"));
+    }
+}

@@ -1,9 +1,24 @@
 package com.perfplatform.engine.jmeter;
 
+import com.perfplatform.domain.plan.ExecutionPlan;
+import com.perfplatform.domain.results.SampleSet;
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
+import com.perfplatform.domain.spec.WorkloadType;
+import com.perfplatform.domain.target.TargetAddress;
+import com.perfplatform.domain.validation.ValidationFinding;
+import com.perfplatform.domain.validation.ValidationResult;
 import com.perfplatform.engine.spi.EngineCapabilities;
+import com.perfplatform.engine.spi.EnginePlan;
 import com.perfplatform.engine.spi.ExecutionEngineProvider;
+import com.perfplatform.engine.spi.RenderedWorkload;
+import com.perfplatform.engine.spi.RunnerOutput;
+import com.perfplatform.engine.spi.ShardAssignment;
 import com.perfplatform.engine.spi.WorkloadKind;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -57,5 +72,97 @@ public final class JmeterEngineProvider implements ExecutionEngineProvider {
     @Override
     public EngineCapabilities capabilities() {
         return CAPABILITIES;
+    }
+
+    /**
+     * Engine-capability validation.
+     *
+     * <p>Only what JMeter can answer about itself. Whether the document is well formed, whether the
+     * target is permitted and whether the team has quota were all decided before this is called;
+     * repeating those checks here would put the same rule in two places, and the two would drift.
+     */
+    @Override
+    public ValidationResult validate(PerformanceTestSpecification specification) {
+        List<ValidationFinding> findings = new ArrayList<>();
+
+        List<WorkloadSpec> mine = JmeterPlanCompiler.protocolWorkloads(specification);
+        if (mine.isEmpty()) {
+            findings.add(ValidationFinding.error("engine.jmeter.noWorkload", "/spec/workloads",
+                    "No protocol workload is assigned to the JMeter engine.",
+                    "Set engine: jmeter on at least one protocol workload."));
+            return ValidationResult.of(findings);
+        }
+
+        for (int i = 0; i < mine.size(); i++) {
+            WorkloadSpec workload = mine.get(i);
+            String path = "/spec/workloads/" + i;
+
+            if (workload.model() == null || workload.model().type() == null) {
+                findings.add(ValidationFinding.error("engine.jmeter.noLoadModel", path + "/model",
+                        "Workload '" + workload.name() + "' declares no load model.",
+                        "Add a staged model describing how load changes over time."));
+            } else {
+                String model = workload.model().type().name().toLowerCase(Locale.ROOT);
+                if (!CAPABILITIES.supportedWorkloadModels().contains(model)) {
+                    findings.add(ValidationFinding.error("engine.jmeter.unsupportedLoadModel",
+                            path + "/model/type",
+                            "JMeter does not implement the '" + model + "' load model.",
+                            "Supported models: "
+                                    + String.join(", ", CAPABILITIES.supportedWorkloadModels())));
+                }
+            }
+
+            // The per-shard ceiling, not the per-run one. Exceeding it is not an error: it is what
+            // sharding exists for, and the capacity profile decides how many shards to use. It is
+            // reported so the decision is visible rather than silent.
+            if (workload.peakUsers() > CAPABILITIES.maxConfiguredConcurrency()) {
+                findings.add(ValidationFinding.warning("engine.jmeter.shardingRequired",
+                        path + "/model",
+                        "Workload '" + workload.name() + "' peaks at " + workload.peakUsers()
+                                + " users, above the configured per-shard ceiling of "
+                                + CAPABILITIES.maxConfiguredConcurrency()
+                                + ". It will be split across shards.",
+                        "No action needed. Shard count comes from the calibrated capacity profile."));
+            }
+
+            if (workload.scenarios().isEmpty()) {
+                findings.add(ValidationFinding.error("engine.jmeter.noScenarios", path + "/scenarios",
+                        "Workload '" + workload.name() + "' declares no scenarios, so there is "
+                                + "nothing to execute.",
+                        "Add at least one weighted scenario."));
+            }
+        }
+
+        // A browser workload in the same specification is not an error — a hybrid test is a
+        // supported shape — but JMeter will not run it, and saying so avoids the assumption that
+        // triggering this specification exercises the browser journeys too.
+        if (!specification.workloadsOfType(WorkloadType.BROWSER).isEmpty()) {
+            findings.add(ValidationFinding.info("engine.jmeter.browserWorkloadIgnored",
+                    "/spec/workloads",
+                    "This specification declares browser workloads. JMeter will not execute them; "
+                            + "browser execution arrives with the Playwright engine."));
+        }
+
+        return ValidationResult.of(findings);
+    }
+
+    @Override
+    public EnginePlan compile(PerformanceTestSpecification specification) {
+        return JmeterPlanCompiler.compile(specification);
+    }
+
+    @Override
+    public RenderedWorkload render(PerformanceTestSpecification specification, ExecutionPlan plan,
+            ShardAssignment assignment, TargetAddress target) {
+        return JmeterWorkloadRenderer.render(specification, plan, assignment, target);
+    }
+
+    @Override
+    public SampleSet parse(RunnerOutput output) {
+        SampleSet combined = SampleSet.empty();
+        for (RunnerOutput.ShardResult shard : output.shardResults()) {
+            combined = combined.merge(JtlParser.parse(shard.resultData()));
+        }
+        return combined;
     }
 }

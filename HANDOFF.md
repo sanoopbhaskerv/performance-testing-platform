@@ -2,7 +2,7 @@
 
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`, then this file.
-**Last updated:** Increment 1C complete. Not committed — see §1.
+**Last updated:** Increment 1C complete and committed (`3290e75`). Increment 1D **partially complete and uncommitted** — see §1 and §6.
 
 ---
 
@@ -14,14 +14,14 @@
 | 1A — modular skeleton | **Complete** `19f3c38` | 8 Maven modules |
 | 1B — canonical specification | **Complete** `13fb724` | see §4 |
 | 1B follow-up — schema conformance | **Complete** `9826a92` | `SchemaConformanceTest` |
-| 1C — durable run orchestration | **Complete, uncommitted** | see §3 |
-| 1D onward | **Not started** | — |
+| 1C — durable run orchestration | **Complete** `3290e75` | see §3 |
+| 1D — JMeter engine SPI and local provider | **Part 1 of 2, uncommitted** | see §3a and §6 |
+| 1E onward | **Not started** | — |
 
-**486 tests green, 0 skipped** (was 272 at the end of 1B).
+**549 tests green, 0 skipped** (272 at the end of 1B, 486 at the end of 1C).
 
-**The 1C working tree is uncommitted.** Nothing has been committed, pushed, tagged or merged for this
-increment — CLAUDE.md §6 requires explicit authorization for all four, and it was not given. Run
-`git status --short` to see the change set before doing anything else.
+**1C is committed but not pushed.** Pushing, tagging and opening a PR still require explicit
+authorization (CLAUDE.md §6). **1D's work is uncommitted** — run `git status --short` first.
 
 **PR #1 is open** and covers the four committed increments:
 https://github.com/sanoopbhaskerv/performance-testing-platform/pull/1
@@ -47,6 +47,13 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - Single test across the reactor: **`-Dsurefire.failIfNoSpecifiedTests=false`** (not `-DfailIfNoSpecifiedTests=false`).
 - `-pl <module>` alone fails unless dependencies are installed in `~/.m2`; list them or run the full reactor.
 - **Docker 29 rejects API < 1.44.** Testcontainers' docker-java negotiates lower and then *silently skips* every integration test rather than failing. Fixed permanently via `docker.api.version` → surefire `api.version` in the root pom. **If integration tests ever report `Skipped`, that is a false green — investigate, do not accept it.**
+- **Testcontainers occasionally fails a whole module with an SSL/connection error.** Seen once as
+  25 errors across `platform-persistence`; passed on immediate retry with no code change. If a
+  PostgreSQL module fails wholesale with `An error occurred while setting up the SSL connection`,
+  retry before investigating.
+- **`Map.copyOf` returns an *unordered* map** whose iteration order is randomized per JVM run. It
+  silently broke `NormalizedRunResult`'s documented stable ordering and only failed on a later run.
+  Use `Collections.unmodifiableMap(new LinkedHashMap<>(…))` where order is part of the contract.
 - **`@Scheduled(fixedDelayString=…)` does not accept `10s`.** It takes milliseconds or ISO-8601. `ReconciliationScheduler` registers its task through `SchedulingConfigurer` using the already-parsed `Duration` instead, so the config file keeps one value in one format.
 
 ---
@@ -86,6 +93,72 @@ Flyway `V3__run_orchestration.sql` (postgresql + h2): `execution_plans`, `test_r
 
 ### Test counts (all green, 0 skipped)
 domain 192 · engine-spi 9 · results 12 · **persistence 55 (PostgreSQL Testcontainers)** · orchestration 45 · api 86 · engine-jmeter 7 · core 80 = **486**
+
+---
+
+## 3a. Increment 1D — what is done, and what is not
+
+### Done and tested
+
+**Prerequisite — definitions are now reachable over HTTP.** `POST /api/v2/test-definitions`,
+`POST /api/v2/test-definitions/{id}/versions`, `GET /{id}`, `GET /{id}/versions`
+(`TestDefinitionController`, `AuthorTestDefinitionUseCase`, `TestDefinitionRepository` port +
+`TestDefinitionStore`). Team and application are resolved from the document's metadata; names
+resolve, they never create.
+
+**Prerequisite — team onboarding.** `TeamRegistrySynchronizer` mirrors V1's team YAML into the V2
+registry at startup (`TeamProvisioning` port + store). Non-production profiles only; refused under a
+production profile like the other development-only components. This was the open question from 1C —
+the chosen answer was the YAML sync, over admin endpoints (no caller holds `platform:admin`) and
+auto-provisioning (a typo would manufacture a team with no owner or quota).
+
+**The engine SPI is real.** `ExecutionEngineProvider` now has `validate`, `compile`, `render` and
+`parse`. `EngineRegistry` + `EngineDispatchingPlanCompiler` replaced the 1C placeholder compiler and
+**are wired** — the end-to-end test now compiles plans through `JmeterEngineProvider`.
+
+**JMeter compile/render/parse, with four baseline defects fixed:**
+- **D1** (numeric corruption at ≥1,000 — the platform's own stated maximum): `JmxWriter` appends
+  numbers as numbers. No formatter in the path, so the defect class is unrepresentable, not patched.
+- **D3** (endurance silently ran the load test's scenarios): the compiler reads the workload it was
+  given.
+- **D4** (scenario boundaries and weights discarded): each scenario becomes a weighted
+  `ThroughputController`, and samplers are named for their scenario so per-scenario objectives work.
+- **D5** (malformed rows skewed the error-rate denominator): `JtlParser` counts unreadable rows and
+  the reducer keeps them in the denominator.
+
+**Results and objectives.** `Sample`/`SampleSet`/`OperationMetrics`/`NormalizedRunResult` in the
+domain; `RunResultReducer` and `ObjectiveEvaluator` in `platform-results`; `RunAnalyzer` port +
+`DefaultRunAnalyzer`. An incomplete run or an unmeasured scope reports `INDETERMINATE` and can never
+report a pass.
+
+**Artifacts and schema.** `ArtifactStore` port + `FileSystemArtifactStore`; `ResultCatalog` port +
+`ResultCatalogStore`; Flyway `V4__artifacts_and_objectives.sql` (both vendors).
+
+**Target safety.** `TargetAddress`, `TargetPolicy` (metadata endpoints, link-local, multicast,
+wildcard and unresolvable hosts all refused), `TargetResolver` port.
+
+### Not done — 1D is not finished
+
+1. **`LocalJmeterExecutionProvider` does not exist.** The fake provider is still the only execution
+   path, so "a V2 API-only definition runs locally end to end" and "cancellation stops the local
+   process" are **not** met.
+2. **The reconciler has no analysis stage.** It still goes `ANALYZING → COMPLETED` immediately. It
+   does not render workloads to artifacts, collect JTL, call the analyzer, or persist objective
+   outcomes — so none of the results machinery above is reachable from a real run yet.
+3. **`TargetResolver` has no implementation.** The port and the safety policy exist; nothing
+   resolves a team+application+environment to an address. The intended source is V1 team YAML
+   `targets[].baseUrl`, matching the team-sync adapter.
+4. **No tests for the definition endpoints or the team synchronizer.**
+5. **Docs not updated for 1D**, and `BaselineExecutionPlanCompiler` is now dead code (superseded by
+   `EngineDispatchingPlanCompiler`) but still present with its tests.
+
+### A gap worth knowing about before continuing
+
+**A specification has no endpoints.** Scenarios name an `operationId` from an imported source, and
+importers are Increment 2. Until then the renderer emits `GET /{operationId}` against the resolved
+target. The pipeline is exercised end to end, but the requests do not reproduce a real request's
+method, headers or body. This is visible in the generated plan rather than hidden, and it means 1D's
+"runs locally end to end" is structurally true and semantically thin.
 
 ---
 
@@ -161,7 +234,27 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ---
 
-## 6. Next increment: 1D only
+## 6. Next: finish 1D, then 1E
+
+Finish 1D in this order — each step unblocks the next:
+
+1. **`TargetResolver` implementation** in `platform-core`, reading V1 team YAML `targets[].baseUrl`,
+   non-production only, calling `TargetPolicy.require` before returning. Nothing can render without it.
+2. **Reconciler analysis stage.** Render the workload per shard → store via `ArtifactStore` → record
+   via `ResultCatalog`; on `ANALYZING`, read the results artifacts → `engine.parse` →
+   `RunAnalyzer.analyze` → persist outcomes → `COMPLETED` or `FAILED`. The reconciler's constructor
+   is already 11 arguments; group the new collaborators rather than adding five more.
+3. **`LocalJmeterExecutionProvider`.** `ProcessBuilder` with an argument list (never a shell string),
+   a timeout from plan duration plus grace, `destroyForcibly` on cancel, sanitized stdout/stderr, and
+   a dev-profile guard as loud as the fake provider's. CLAUDE.md §15.
+4. **Tests** for the definition endpoints, the team synchronizer, the artifact store's key layout and
+   traversal refusal, and an end-to-end run that reaches `COMPLETED` with objective outcomes stored.
+5. **Delete `BaselineExecutionPlanCompiler`** and its test; fold anything still useful into the
+   JMeter compiler's tests.
+6. **Docs**: `docs/operations/runner-calibration.md`, and update `docs/api/v2-examples.md` with the
+   definition endpoints.
+
+### Then Increment 1E only
 
 JMeter engine SPI and local provider (CLAUDE.md §28).
 

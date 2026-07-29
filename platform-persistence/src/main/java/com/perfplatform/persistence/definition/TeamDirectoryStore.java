@@ -1,5 +1,6 @@
 package com.perfplatform.persistence.definition;
 
+import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.port.TeamDirectory;
 import org.springframework.stereotype.Repository;
@@ -12,9 +13,11 @@ import java.util.Optional;
 public class TeamDirectoryStore implements TeamDirectory {
 
     private final TeamJpaRepository teams;
+    private final ApplicationJpaRepository applications;
 
-    public TeamDirectoryStore(TeamJpaRepository teams) {
+    public TeamDirectoryStore(TeamJpaRepository teams, ApplicationJpaRepository applications) {
         this.teams = teams;
+        this.applications = applications;
     }
 
     @Override
@@ -24,5 +27,15 @@ public class TeamDirectoryStore implements TeamDirectory {
             return Optional.empty();
         }
         return teams.findByName(name.trim()).map(team -> TeamId.of(team.getId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ApplicationId> findApplication(TeamId teamId, String name) {
+        if (teamId == null || name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        return applications.findByTeamIdAndName(teamId.value(), name.trim())
+                .map(application -> ApplicationId.of(application.getId()));
     }
 }
