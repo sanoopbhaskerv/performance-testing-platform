@@ -23,7 +23,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * key and no run event table, so concurrent writers silently overwrite one another.
  */
 @DataJpaTest
-@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@TestPropertySource(properties = {
+        // Increment 1B moved schema ownership from Hibernate to Flyway. Running these V1
+        // characterization tests against the Flyway-created schema is what proves the baseline
+        // migration reproduces the table the V1 entity expects — the risk the ddl-auto swap
+        // carries. Letting Hibernate build the schema here would test the entity against itself
+        // and prove nothing about the migration.
+        "spring.jpa.hibernate.ddl-auto=none",
+        "spring.flyway.enabled=true",
+        "spring.flyway.locations=classpath:db/migration/{vendor}"
+})
 class TestRunPersistenceCharacterizationTest {
 
     @Autowired

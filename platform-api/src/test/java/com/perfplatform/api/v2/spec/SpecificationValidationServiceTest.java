@@ -1,0 +1,302 @@
+package com.perfplatform.api.v2.spec;
+
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.SourceType;
+import com.perfplatform.domain.spec.TargetClass;
+import com.perfplatform.domain.spec.WorkloadType;
+import com.perfplatform.domain.validation.Severity;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.time.Duration;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises parsing and validation against the specification examples that ship in
+ * {@code specification/examples/}.
+ */
+class SpecificationValidationServiceTest {
+
+    private final SpecificationValidationService service =
+            new SpecificationValidationService(new SpecificationParser());
+
+    @Nested
+    @DisplayName("published valid examples")
+    class ValidExamples {
+
+        @ParameterizedTest(name = "{0} parses and validates")
+        @ValueSource(strings = {"api-only.yaml", "browser-only.yaml", "hybrid.yaml"})
+        @DisplayName("every shipped valid example is valid")
+        void validExamplesValidate(String name) {
+            var outcome = service.validate(ExampleFixtures.valid(name));
+
+            assertThat(outcome.findings().errors())
+                    .as("errors in %s: %s", name, outcome.findings().errors())
+                    .isEmpty();
+            assertThat(outcome.isValid()).isTrue();
+            assertThat(outcome.digest()).isPresent();
+        }
+
+        @Test
+        @DisplayName("the API example maps onto the domain model faithfully")
+        void mapsApiExample() {
+            var outcome = service.validate(ExampleFixtures.valid("api-only.yaml"));
+            PerformanceTestSpecification spec = outcome.specification().orElseThrow();
+
+            assertThat(spec.apiVersion()).isEqualTo(PerformanceTestSpecification.SUPPORTED_API_VERSION);
+            assertThat(spec.metadata().team()).isEqualTo("advice-implementation");
+            assertThat(spec.metadata().labels()).containsEntry("tier", "tier-0");
+            assertThat(spec.spec().environment().targetClass()).isEqualTo(TargetClass.NON_PRODUCTION);
+            assertThat(spec.spec().sources().get(0).type()).isEqualTo(SourceType.OPENAPI);
+            assertThat(spec.spec().datasets().get(0).partitionByShard()).isTrue();
+
+            var workload = spec.spec().workloads().get(0);
+            assertThat(workload.type()).isEqualTo(WorkloadType.PROTOCOL);
+            assertThat(workload.model().stages()).hasSize(3);
+            assertThat(workload.model().stages().get(0).duration()).isEqualTo(Duration.ofMinutes(5));
+            assertThat(workload.peakUsers()).isEqualTo(600);
+            assertThat(workload.scenarios()).extracting("name")
+                    .containsExactly("search-client", "open-proposal", "save-proposal");
+            assertThat(workload.scenarios()).extracting("weight").containsExactly(60, 30, 10);
+
+            assertThat(spec.spec().objectives().get(0).threshold().canonicalForm()).isEqualTo("750ms");
+            assertThat(spec.spec().governance().maxDuration()).isEqualTo(Duration.ofMinutes(45));
+        }
+
+        @Test
+        @DisplayName("scenario weights and boundaries survive parsing, unlike V1")
+        void preservesScenarioBoundaries() {
+            var outcome = service.validate(ExampleFixtures.valid("hybrid.yaml"));
+            var workload = outcome.specification().orElseThrow().spec().workloads().get(0);
+
+            assertThat(workload.scenarios()).hasSize(3);
+            assertThat(workload.scenarios().stream().mapToInt(s -> s.weight()).sum()).isEqualTo(100);
+        }
+
+        @Test
+        @DisplayName("the hybrid example separates protocol and browser budgets")
+        void separatesBudgets() {
+            var spec = service.validate(ExampleFixtures.valid("hybrid.yaml"))
+                    .specification().orElseThrow();
+
+            assertThat(spec.peakProtocolUsers()).isEqualTo(600);
+            assertThat(spec.peakBrowserSessions()).isEqualTo(5);
+            assertThat(spec.spec().workloads().get(1).startWhen().workload())
+                    .isEqualTo("api-background-load");
+        }
+
+        @Test
+        @DisplayName("an equivalent JSON document produces the same digest as the YAML")
+        void jsonAndYamlAgree() {
+            String yaml = ExampleFixtures.valid("browser-only.yaml");
+            String json = """
+                    {
+                      "apiVersion": "performance.ameriprise.com/v1alpha1",
+                      "kind": "PerformanceTest",
+                      "metadata": {
+                        "name": "proposal-journey",
+                        "team": "advice-implementation",
+                        "application": "proposal"
+                      },
+                      "spec": {
+                        "environment": {
+                          "name": "performance",
+                          "runnerCell": "advice-perf-eks",
+                          "targetClass": "non-production"
+                        },
+                        "sources": [{
+                          "name": "proposal-browser",
+                          "type": "playwright",
+                          "git": {
+                            "repository": "ssh://bitbucket/proposal-e2e.git",
+                            "ref": "8f121c7a9d4e2b6c1f0a3e5d7c9b8a4f6e2d1c0b",
+                            "path": "tests/performance/proposal-journey.spec.ts"
+                          }
+                        }],
+                        "workloads": [{
+                          "name": "browser-experience",
+                          "type": "browser",
+                          "engine": "playwright",
+                          "sourceRef": "proposal-browser",
+                          "browserUsers": 5,
+                          "iterationsPerUser": 3
+                        }],
+                        "objectives": [{
+                          "metric": "browser.journey.duration",
+                          "scope": "browser-experience",
+                          "percentile": 95,
+                          "threshold": "8s"
+                        }],
+                        "governance": {
+                          "maxDuration": "30m",
+                          "approvalPolicy": "non-production-standard",
+                          "retention": "90d"
+                        }
+                      }
+                    }
+                    """;
+
+            assertThat(service.validate(json).digest())
+                    .isEqualTo(service.validate(yaml).digest());
+        }
+    }
+
+    @Nested
+    @DisplayName("published invalid examples")
+    class InvalidExamples {
+
+        @ParameterizedTest(name = "{0} produces {1}")
+        @CsvSource({
+                "inline-secret.yaml, spec.secret.inline-value",
+                "mutable-git-ref.yaml, spec.source.git.ref.mutable",
+                "no-workloads.yaml, spec.workload.missing",
+                "unresolved-references.yaml, spec.workload.sourceRef.unresolved",
+                "unitless-threshold.yaml, spec.parse.threshold.invalid",
+                "duration-exceeds-governance.yaml, spec.governance.maxDuration.exceeded",
+                "unsupported-engine.yaml, spec.parse.enum.invalid"
+        })
+        @DisplayName("each invalid example produces its documented stable finding code")
+        void invalidExamplesProduceStableCodes(String name, String expectedCode) {
+            var outcome = service.validate(ExampleFixtures.invalid(name));
+
+            assertThat(outcome.findings().codes()).contains(expectedCode);
+            assertThat(outcome.isValid()).isFalse();
+            assertThat(outcome.digest())
+                    .as("a rejected specification must not be given a digest")
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("the unresolved-reference example reports both broken references at once")
+        void reportsAllUnresolvedReferences() {
+            var outcome = service.validate(ExampleFixtures.invalid("unresolved-references.yaml"));
+
+            assertThat(outcome.findings().codes())
+                    .contains("spec.workload.sourceRef.unresolved", "spec.objective.scope.unresolved");
+        }
+
+        @Test
+        @DisplayName("a rejected secret finding never echoes the credential")
+        void neverEchoesCredential() {
+            var outcome = service.validate(ExampleFixtures.invalid("inline-secret.yaml"));
+
+            assertThat(outcome.findings().findings())
+                    .allSatisfy(finding -> assertThat(finding.message())
+                            .doesNotContain("eyJhbGciOiJIUzI1NiJ9"));
+        }
+    }
+
+    @Nested
+    @DisplayName("structural parsing")
+    class Structural {
+
+        @Test
+        @DisplayName("an empty document is reported, not thrown")
+        void reportsEmptyDocument() {
+            assertThat(service.validate("").findings().codes()).containsExactly("spec.parse.empty");
+            assertThat(service.validate(null).findings().codes()).containsExactly("spec.parse.empty");
+        }
+
+        @Test
+        @DisplayName("malformed YAML is reported without echoing document content")
+        void reportsMalformedYaml() {
+            var outcome = service.validate("apiVersion: [unclosed\n  kind: ]bad");
+
+            assertThat(outcome.findings().codes()).contains("spec.parse.malformed");
+            assertThat(outcome.isValid()).isFalse();
+        }
+
+        /**
+         * Silently ignoring an unknown field is the dangerous option: a consumer who writes
+         * {@code targetUser} would get a workload running at a load they never chose.
+         */
+        @Test
+        @DisplayName("an unknown field is rejected rather than silently ignored")
+        void rejectsUnknownField() {
+            String document = ExampleFixtures.valid("api-only.yaml")
+                    .replace("            targetUsers: 200", "            targetUser: 200");
+            var outcome = service.validate(document);
+
+            assertThat(outcome.findings().codes()).contains("spec.parse.unknownField");
+            assertThat(outcome.isValid()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a wrongly typed field is reported with its path")
+        void reportsTypeErrorWithPath() {
+            String document = ExampleFixtures.valid("api-only.yaml")
+                    .replace("            targetUsers: 200", "            targetUsers: many");
+            var outcome = service.validate(document);
+
+            assertThat(outcome.findings().findings())
+                    .anyMatch(finding -> finding.code().equals("spec.parse.type.invalid")
+                            && finding.path().equals("/spec/workloads/0/model/stages/0/targetUsers"));
+        }
+
+        @Test
+        @DisplayName("an unparseable duration is reported with guidance")
+        void reportsInvalidDuration() {
+            String document = ExampleFixtures.valid("api-only.yaml")
+                    .replace("maxDuration: 45m", "maxDuration: 45 minutes");
+            var outcome = service.validate(document);
+
+            assertThat(outcome.findings().codes()).contains("spec.parse.duration.invalid");
+        }
+
+        @Test
+        @DisplayName("structural and semantic findings are reported together in one response")
+        void reportsAllLayersAtOnce() {
+            String document = ExampleFixtures.valid("api-only.yaml")
+                    .replace("      sourceRef: proposal-api", "      sourceRef: missing-source")
+                    .replace("    maxDuration: 45m", "    maxDurationn: 45m");
+            var outcome = service.validate(document);
+
+            assertThat(outcome.findings().codes())
+                    .contains("spec.parse.unknownField", "spec.workload.sourceRef.unresolved");
+        }
+
+        @Test
+        @DisplayName("findings are ordered errors first")
+        void ordersErrorsFirst() {
+            var outcome = service.validate(ExampleFixtures.invalid("unresolved-references.yaml"));
+
+            assertThat(outcome.findings().findings())
+                    .isSortedAccordingTo((a, b) -> b.severity().compareTo(a.severity()));
+            assertThat(outcome.findings().findings().get(0).severity()).isEqualTo(Severity.ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("digest")
+    class Digest {
+
+        @Test
+        @DisplayName("reformatting a document does not change its digest")
+        void reformattingDoesNotChangeDigest() {
+            String original = ExampleFixtures.valid("api-only.yaml");
+            // Strip comments and blank lines: same test, different bytes.
+            String reformatted = original.lines()
+                    .filter(line -> !line.trim().startsWith("#"))
+                    .filter(line -> !line.isBlank())
+                    .reduce("", (a, b) -> a + b + "\n");
+
+            assertThat(service.validate(reformatted).digest())
+                    .isEqualTo(service.validate(original).digest());
+        }
+
+        @Test
+        @DisplayName("changing a target user count changes the digest")
+        void materialChangeChangesDigest() {
+            String original = ExampleFixtures.valid("api-only.yaml");
+            String changed = original.replace("targetUsers: 600", "targetUsers: 601");
+
+            assertThat(service.validate(changed).digest())
+                    .isNotEqualTo(service.validate(original).digest());
+        }
+    }
+}

@@ -25,8 +25,10 @@ after V2 reaches functional parity and the removal is explicitly approved.
 | Item | Value | Status |
 |---|---|---|
 | Working branch | `feature/platform-v2-foundation` | Created by the user; work continues here |
-| POC tag | `v1-poc` at the baseline commit | **Not yet created** — requires explicit authorization |
-| Remote push | — | **Not performed.** No push, PR, merge, tag or image publish has occurred |
+| POC tag | `v1-poc` at the baseline commit | **Not created** — requires explicit authorization |
+| Remote push | `origin/feature/platform-v2-foundation` | Pushed with user authorization |
+| Pull request | [#1](https://github.com/sanoopbhaskerv/performance-testing-platform/pull/1) | Open. Further commits on this branch update it |
+| Merge / image publish | — | **Not performed.** Neither has been authorized |
 
 The `v1-poc` tag is recommended so the proof of concept remains retrievable after V1 components
 are eventually deleted. Creating it requires user authorization (CLAUDE.md §7, §31).
@@ -65,8 +67,9 @@ so production traffic can be routed elsewhere.
 | JMX Freemarker templates | **Evolve** | Inputs to the engine-SPI plan compiler; defects D1–D4 fixed | 1D |
 | `SlaEvaluator` | **Preserve behind a new model** | Normalized result model + objective evaluation | 1D |
 | `PercentileCalculator` (extracted 1A) | **Preserved** | Already moved to `platform-results` | 1A ✅ |
-| `TeamConfig` / `TeamConfigLoader` | **Isolate** | Canonical `PerformanceTestSpecification`; YAML becomes an importer | 1B |
-| `TestRun` JPA entity | **Replace** | Flyway-managed schema, typed domain aggregate, response DTOs | 1B/1C |
+| Hibernate `ddl-auto: update` | **Replaced** | Flyway owns the schema, including V1's `test_runs` | 1B ✅ |
+| `TeamConfig` / `TeamConfigLoader` | **Isolate** | Canonical `PerformanceTestSpecification` ✅ delivered 1B; YAML importer still to come | 1B |
+| `TestRun` JPA entity | **Replace** | Flyway now owns the schema ✅ 1B; typed run aggregate and response DTOs | 1B/1C |
 | `ApiKeyAuthFilter` | **Replace** | Team-bound caller model, OIDC + scoped service identities | 4 |
 | Public report endpoints | **Replace** | Authorized, time-limited download grants | 1E |
 | Local filesystem artifacts | **Replace** | `ArtifactStore` (filesystem for dev, S3-compatible for prod) | 1D/1E |
@@ -84,7 +87,7 @@ The authoritative list — with evidence, thresholds and owning increment — is
 
 | Increment | Must fix |
 |---|---|
-| 1B | S7 (entity as response), `ddl-auto` → Flyway |
+| 1B | ✅ `ddl-auto` → Flyway (done); S7 (entity as response) still open on V1 — V2 uses DTOs |
 | 1C | S6 (no idempotency key), four-state model, no cancellation, no admission control |
 | 1D | **D1 (numeric corruption at ≥1,000 — blocks the platform's stated maximum load)**, D2 (spike template missing), D3 (endurance uses load scenarios), D4 (scenario flattening), D5 (error-rate denominator) |
 | 1E | S3, S4 (public artifacts), D6 (health coupled to optional SMTP), pod-local artifact paths |

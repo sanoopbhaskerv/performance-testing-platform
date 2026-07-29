@@ -1,0 +1,480 @@
+package com.perfplatform.domain.validation;
+
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.EnvironmentSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.GovernanceSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadModel;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.SourceSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.SpecMetadata;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StartCondition;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.TestSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
+import com.perfplatform.domain.spec.SourceType;
+import com.perfplatform.domain.spec.SpecificationFixtures;
+import com.perfplatform.domain.spec.Threshold;
+import com.perfplatform.domain.spec.WorkloadType;
+import com.perfplatform.domain.spec.LoadModelType;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Each test derives an invalid specification from a valid fixture by making one deliberate
+ * change, and asserts the stable finding code a CI pipeline would key on.
+ */
+class SemanticValidatorTest {
+
+    @Nested
+    @DisplayName("valid fixtures")
+    class ValidFixtures {
+
+        @Test
+        @DisplayName("the API-only example is valid")
+        void apiOnlyIsValid() {
+            ValidationResult result = SemanticValidator.validate(SpecificationFixtures.apiOnly());
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the browser-only example is valid")
+        void browserOnlyIsValid() {
+            ValidationResult result = SemanticValidator.validate(SpecificationFixtures.browserOnly());
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the hybrid example is valid")
+        void hybridIsValid() {
+            ValidationResult result = SemanticValidator.validate(SpecificationFixtures.hybrid());
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.isValid()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("document envelope")
+    class DocumentEnvelope {
+
+        @Test
+        @DisplayName("an unsupported apiVersion is rejected")
+        void rejectsUnsupportedApiVersion() {
+            PerformanceTestSpecification spec = SpecificationFixtures.apiOnly();
+            var changed = new PerformanceTestSpecification("performance.ameriprise.com/v2",
+                    spec.kind(), spec.metadata(), spec.spec());
+
+            assertThat(SemanticValidator.validate(changed).codes())
+                    .contains("spec.apiVersion.unsupported");
+        }
+
+        @Test
+        @DisplayName("a missing kind is rejected")
+        void rejectsMissingKind() {
+            PerformanceTestSpecification spec = SpecificationFixtures.apiOnly();
+            var changed = new PerformanceTestSpecification(spec.apiVersion(), null,
+                    spec.metadata(), spec.spec());
+
+            assertThat(SemanticValidator.validate(changed).codes()).contains("spec.kind.missing");
+        }
+
+        @Test
+        @DisplayName("a null specification produces a single finding rather than throwing")
+        void handlesNullSpecification() {
+            ValidationResult result = SemanticValidator.validate(null);
+
+            assertThat(result.codes()).containsExactly("spec.missing");
+        }
+    }
+
+    @Nested
+    @DisplayName("names")
+    class Names {
+
+        @Test
+        @DisplayName("an uppercase name is rejected because names become object keys and labels")
+        void rejectsInvalidName() {
+            var result = SemanticValidator.validate(withMetadata(
+                    new SpecMetadata("Proposal_Workflow", "advice-implementation", "proposal", Map.of())));
+
+            assertThat(result.codes()).contains("spec.name.invalid");
+        }
+
+        @Test
+        @DisplayName("a name longer than 63 characters is rejected")
+        void rejectsOverlongName() {
+            var result = SemanticValidator.validate(withMetadata(
+                    new SpecMetadata("a".repeat(64), "advice-implementation", "proposal", Map.of())));
+
+            assertThat(result.codes()).contains("spec.name.tooLong");
+        }
+
+        @Test
+        @DisplayName("a missing team is rejected, because authorization starts there")
+        void rejectsMissingTeam() {
+            var result = SemanticValidator.validate(withMetadata(
+                    new SpecMetadata("proposal-workflow", null, "proposal", Map.of())));
+
+            assertThat(result.errors())
+                    .anyMatch(finding -> finding.path().equals("/metadata/team"));
+        }
+    }
+
+    @Nested
+    @DisplayName("workloads")
+    class Workloads {
+
+        @Test
+        @DisplayName("a specification with no workloads is rejected")
+        void rejectsNoWorkloads() {
+            assertThat(SemanticValidator.validate(withWorkloads(List.of())).codes())
+                    .contains("spec.workload.missing");
+        }
+
+        @Test
+        @DisplayName("a protocol workload with no load model is rejected")
+        void rejectsProtocolWorkloadWithoutModel() {
+            var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter",
+                    null, null, List.of(), null, null, null);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.model.missing");
+        }
+
+        @Test
+        @DisplayName("a workload whose every stage targets zero users is rejected")
+        void rejectsWorkloadGeneratingNoLoad() {
+            var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter", null,
+                    new LoadModel(LoadModelType.STAGES,
+                            List.of(new LoadStage(Duration.ofMinutes(5), 0))),
+                    List.of(), null, null, null);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.users.allZero");
+        }
+
+        @Test
+        @DisplayName("a stage with a zero duration is rejected")
+        void rejectsZeroDurationStage() {
+            var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter", null,
+                    new LoadModel(LoadModelType.STAGES,
+                            List.of(new LoadStage(Duration.ZERO, 100))),
+                    List.of(), null, null, null);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.duration.invalid");
+        }
+
+        @Test
+        @DisplayName("duplicate workload names are rejected, because objectives reference them")
+        void rejectsDuplicateWorkloadNames() {
+            var workload = SpecificationFixtures.apiWorkload();
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload, workload))).codes())
+                    .contains("spec.workload.name.duplicate");
+        }
+
+        @Test
+        @DisplayName("a sourceRef that matches no declared source is rejected")
+        void rejectsUnresolvedSourceRef() {
+            var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter",
+                    "does-not-exist",
+                    new LoadModel(LoadModelType.STAGES,
+                            List.of(new LoadStage(Duration.ofMinutes(5), 100))),
+                    List.of(), null, null, null);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.sourceRef.unresolved");
+        }
+
+        @Test
+        @DisplayName("a browser workload with no browserUsers is rejected")
+        void rejectsBrowserWorkloadWithoutUsers() {
+            var workload = new WorkloadSpec("journey", WorkloadType.BROWSER, "playwright",
+                    null, null, List.of(), null, null, 3);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.browserUsers.missing");
+        }
+
+        @Test
+        @DisplayName("a startWhen referencing an unknown workload is rejected")
+        void rejectsUnresolvedStartCondition() {
+            var browser = new WorkloadSpec("journey", WorkloadType.BROWSER, "playwright", null,
+                    null, List.of(), new StartCondition("nonexistent", "steady-state"), 5, 3);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(browser))).codes())
+                    .contains("spec.workload.startWhen.unresolved");
+        }
+
+        @Test
+        @DisplayName("a workload waiting on itself is rejected")
+        void rejectsSelfReferencingStartCondition() {
+            var browser = new WorkloadSpec("journey", WorkloadType.BROWSER, "playwright", null,
+                    null, List.of(), new StartCondition("journey", "steady-state"), 5, 3);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(browser))).codes())
+                    .contains("spec.workload.startWhen.selfReference");
+        }
+    }
+
+    @Nested
+    @DisplayName("scenarios")
+    class Scenarios {
+
+        @Test
+        @DisplayName("weights that do not sum to 100 warn but do not block")
+        void warnsOnWeightsNotSummingToOneHundred() {
+            var workload = workloadWithScenarios(List.of(
+                    new ScenarioSpec("a", 60, "opA"),
+                    new ScenarioSpec("b", 30, "opB"),
+                    new ScenarioSpec("c", 20, "opC")));
+
+            ValidationResult result = SemanticValidator.validate(withWorkloads(List.of(workload)));
+
+            assertThat(result.codes()).contains("spec.scenario.weights.sum");
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.warnings())
+                    .anyMatch(finding -> finding.message().contains("110"));
+        }
+
+        @Test
+        @DisplayName("a zero weight is rejected, because the scenario would never run")
+        void rejectsZeroWeight() {
+            var workload = workloadWithScenarios(List.of(
+                    new ScenarioSpec("a", 100, "opA"),
+                    new ScenarioSpec("b", 0, "opB")));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.scenario.weight.invalid");
+        }
+
+        @Test
+        @DisplayName("duplicate scenario names are rejected")
+        void rejectsDuplicateScenarioNames() {
+            var workload = workloadWithScenarios(List.of(
+                    new ScenarioSpec("a", 50, "opA"),
+                    new ScenarioSpec("a", 50, "opB")));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.scenario.name.duplicate");
+        }
+    }
+
+    @Nested
+    @DisplayName("sources")
+    class Sources {
+
+        @Test
+        @DisplayName("a Playwright source pinned to a branch is rejected as mutable")
+        void rejectsMutableGitRef() {
+            var source = new SourceSpec("browser", SourceType.PLAYWRIGHT, null,
+                    new SourceSpec.GitSource("ssh://bitbucket/e2e.git", "main",
+                            "tests/journey.spec.ts", null));
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source))).codes())
+                    .contains("spec.source.git.ref.mutable");
+        }
+
+        @Test
+        @DisplayName("a commit SHA is accepted as an immutable ref")
+        void acceptsCommitSha() {
+            assertThat(SemanticValidator.validate(SpecificationFixtures.browserOnly()).codes())
+                    .doesNotContain("spec.source.git.ref.mutable");
+        }
+
+        @Test
+        @DisplayName("a path escaping the checked-out workspace is rejected")
+        void rejectsPathTraversal() {
+            var source = new SourceSpec("browser", SourceType.PLAYWRIGHT, null,
+                    new SourceSpec.GitSource("ssh://bitbucket/e2e.git",
+                            "8f121c7a9d4e2b6c1f0a3e5d7c9b8a4f6e2d1c0b",
+                            "../../etc/passwd", null));
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source))).codes())
+                    .contains("spec.source.git.path.traversal");
+        }
+
+        @Test
+        @DisplayName("duplicate source names are rejected")
+        void rejectsDuplicateSourceNames() {
+            var source = new SourceSpec("api", SourceType.OPENAPI, "artifact://a.yaml", null);
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source, source))).codes())
+                    .contains("spec.source.name.duplicate");
+        }
+
+        @Test
+        @DisplayName("a document source with no uri is rejected")
+        void rejectsDocumentSourceWithoutUri() {
+            var source = new SourceSpec("api", SourceType.OPENAPI, null, null);
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source))).codes())
+                    .contains("spec.source.uri.missing");
+        }
+    }
+
+    @Nested
+    @DisplayName("objectives")
+    class Objectives {
+
+        @Test
+        @DisplayName("an objective scoped to an unknown workload is rejected")
+        void rejectsUnresolvedScope() {
+            var objective = new ObjectiveSpec("http.response.time", "nonexistent", 95,
+                    Threshold.parse("750ms"));
+
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .contains("spec.objective.scope.unresolved");
+        }
+
+        @Test
+        @DisplayName("a percentile outside 1-100 is rejected")
+        void rejectsInvalidPercentile() {
+            var objective = new ObjectiveSpec("http.response.time", null, 150,
+                    Threshold.parse("750ms"));
+
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .contains("spec.objective.percentile.invalid");
+        }
+
+        @Test
+        @DisplayName("declaring no objectives warns, because the test cannot pass or fail")
+        void warnsOnNoObjectives() {
+            ValidationResult result = SemanticValidator.validate(withObjectives(List.of()));
+
+            assertThat(result.codes()).contains("spec.objective.missing");
+            assertThat(result.isValid()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("secrets and governance")
+    class SecretsAndGovernance {
+
+        @Test
+        @DisplayName("an inline credential in secretRef is rejected")
+        void rejectsInlineSecret() {
+            var spec = withAuthentication("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123");
+
+            assertThat(SemanticValidator.validate(spec).codes()).contains("spec.secret.inline-value");
+        }
+
+        @Test
+        @DisplayName("the finding for an inline credential never echoes the value")
+        void doesNotEchoSecretValue() {
+            String secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+            ValidationResult result = SemanticValidator.validate(withAuthentication(secret));
+
+            assertThat(result.findings())
+                    .allSatisfy(finding -> {
+                        assertThat(finding.message()).doesNotContain(secret);
+                        assertThat(finding.remediation() == null ? "" : finding.remediation())
+                                .doesNotContain(secret);
+                    });
+        }
+
+        @Test
+        @DisplayName("a vault reference is accepted")
+        void acceptsVaultReference() {
+            assertThat(SemanticValidator.validate(
+                    withAuthentication("vault://performance/proposal/client")).codes())
+                    .doesNotContain("spec.secret.inline-value");
+        }
+
+        @Test
+        @DisplayName("stages running past maxDuration are rejected rather than silently truncated")
+        void rejectsStagesExceedingMaxDuration() {
+            PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+            var body = base.spec();
+            var changed = new PerformanceTestSpecification(base.apiVersion(), base.kind(),
+                    base.metadata(),
+                    new TestSpec(body.environment(), body.sources(), body.authentication(),
+                            body.datasets(), body.workloads(), body.objectives(),
+                            body.observability(),
+                            new GovernanceSpec(Duration.ofMinutes(5), "non-production-standard",
+                                    Duration.ofDays(90))));
+
+            assertThat(SemanticValidator.validate(changed).codes())
+                    .contains("spec.governance.maxDuration.exceeded");
+        }
+    }
+
+    @Test
+    @DisplayName("findings are ordered errors first and deduplicated")
+    void findingsAreOrderedAndDeduplicated() {
+        ValidationResult result = SemanticValidator.validate(withWorkloads(List.of()));
+        ValidationResult doubled = result.merge(result);
+
+        assertThat(doubled.findings()).isEqualTo(result.findings());
+        assertThat(result.findings())
+                .isSortedAccordingTo((a, b) -> b.severity().compareTo(a.severity()));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private static PerformanceTestSpecification withMetadata(SpecMetadata metadata) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), metadata, base.spec());
+    }
+
+    private static PerformanceTestSpecification withWorkloads(List<WorkloadSpec> workloads) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(), body.authentication(),
+                        body.datasets(), workloads, List.of(), body.observability(),
+                        body.governance()));
+    }
+
+    private static PerformanceTestSpecification withSources(List<SourceSpec> sources) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter", null,
+                new LoadModel(LoadModelType.STAGES,
+                        List.of(new LoadStage(Duration.ofMinutes(5), 100))),
+                List.of(), null, null, null);
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), sources, body.authentication(), body.datasets(),
+                        List.of(workload), List.of(), body.observability(), body.governance()));
+    }
+
+    private static PerformanceTestSpecification withObjectives(List<ObjectiveSpec> objectives) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(), body.authentication(),
+                        body.datasets(), body.workloads(), objectives, body.observability(),
+                        body.governance()));
+    }
+
+    private static PerformanceTestSpecification withAuthentication(String secretRef) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(),
+                        List.of(new PerformanceTestSpecification.AuthenticationSpec(
+                                "test-user", "oauth2-client-credentials", secretRef)),
+                        body.datasets(), body.workloads(), body.objectives(), body.observability(),
+                        body.governance()));
+    }
+
+    private static WorkloadSpec workloadWithScenarios(List<ScenarioSpec> scenarios) {
+        return new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter", null,
+                new LoadModel(LoadModelType.STAGES,
+                        List.of(new LoadStage(Duration.ofMinutes(5), 100))),
+                scenarios, null, null, null);
+    }
+}

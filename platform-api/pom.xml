@@ -30,6 +30,29 @@
       <artifactId>platform-orchestration</artifactId>
     </dependency>
 
+    <!--
+      Spring Web and Validation for the V2 controllers; Jackson YAML to accept the
+      GitOps serialization of the same canonical specification the UI and API produce.
+      Jackson is confined to this module: the domain must stay free of serialization
+      annotations so its shape is not dictated by a wire format.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

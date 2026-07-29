@@ -17,9 +17,21 @@ spring:
       enabled: true
       path: /h2-console
 
+  # Flyway owns the schema. Previously the shape of test_runs was a side effect of editing a JPA
+  # entity — no review, no history, no deliberate roll-forward. ddl-auto is now 'none' so a schema
+  # change is a reviewed migration (CLAUDE.md §12).
+  #
+  # baseline-on-migrate lets an existing deployment, whose test_runs table was created by the old
+  # ddl-auto:update, adopt Flyway without Flyway trying to recreate it.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
+    baseline-version: 0
+
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     show-sql: false
     properties:
       hibernate:

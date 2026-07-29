@@ -38,7 +38,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
         "platform.config-dir=src/test/resources/test-teams",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
+        // Schema comes from Flyway as of Increment 1B, matching production configuration.
+        "spring.jpa.hibernate.ddl-auto=none"
 })
 class ApiAuthorizationCharacterizationTest {
 

@@ -1,0 +1,277 @@
+package com.perfplatform.domain.spec;
+
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AuthenticationSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadModel;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ObservabilitySpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.SourceSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
+
+import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
+import java.util.TreeMap;
+
+/**
+ * Produces the canonical text form of a specification, from which its digest is taken.
+ *
+ * <p>Two specifications that mean the same thing must produce the same digest. Without
+ * canonicalization the digest would follow the input's incidental details — YAML key order,
+ * indentation, quoting style, {@code 60m} versus {@code 1h}, {@code 1s} versus {@code 1000ms} —
+ * and a reformatted file would look like a different test. That matters because the digest is
+ * what makes a run reproducible and what a runner's results are checked against before they are
+ * accepted.
+ *
+ * <p>The rules:
+ * <ul>
+ *   <li>Fields are emitted in a fixed order defined here, not in input order.</li>
+ *   <li>Map keys are sorted; list order is preserved, because list order is meaningful — load
+ *       stages run in sequence and reordering them is a different test.</li>
+ *   <li>Durations and thresholds are normalized to a single form.</li>
+ *   <li>Absent and empty values are emitted identically, so adding an empty list changes nothing.</li>
+ *   <li>Values are escaped, so a value containing a delimiter cannot forge structure.</li>
+ * </ul>
+ *
+ * <p>Deliberately not JSON: this is a digest input, not an interchange format. Writing it by hand
+ * keeps the digest independent of any serialization library's formatting decisions, which would
+ * otherwise become an unversioned part of the contract — a library upgrade could silently change
+ * every stored digest and invalidate every existing definition version.
+ *
+ * <p>This encoding is part of the {@code v1alpha1} contract. Changing it changes every digest,
+ * so it must be versioned alongside the schema.
+ */
+public final class SpecificationCanonicalizer {
+
+    /** Bumped whenever the encoding changes, so stored digests can be distinguished. */
+    public static final String CANONICAL_FORM_VERSION = "v1alpha1";
+
+    private static final String ABSENT = "~";
+
+    private SpecificationCanonicalizer() {
+    }
+
+    /** The canonical form of a specification. Never null; a null input yields a stable marker. */
+    public static String canonicalize(PerformanceTestSpecification specification) {
+        StringBuilder out = new StringBuilder(512);
+        out.append("canonicalForm=").append(CANONICAL_FORM_VERSION).append('\n');
+
+        if (specification == null) {
+            return out.append("specification=").append(ABSENT).append('\n').toString();
+        }
+
+        field(out, "apiVersion", specification.apiVersion());
+        field(out, "kind", specification.kind());
+
+        var metadata = specification.metadata();
+        if (metadata == null) {
+            field(out, "metadata", null);
+        } else {
+            field(out, "metadata.name", metadata.name());
+            field(out, "metadata.team", metadata.team());
+            field(out, "metadata.application", metadata.application());
+            // Sorted so that label declaration order cannot change the digest.
+            for (Map.Entry<String, String> label : new TreeMap<>(metadata.labels()).entrySet()) {
+                field(out, "metadata.labels[" + escape(label.getKey()) + "]", label.getValue());
+            }
+        }
+
+        var body = specification.spec();
+        if (body == null) {
+            field(out, "spec", null);
+            return out.toString();
+        }
+
+        canonicalizeEnvironment(out, body.environment());
+        canonicalizeSources(out, body.sources());
+        canonicalizeAuthentication(out, body.authentication());
+        canonicalizeDatasets(out, body.datasets());
+        canonicalizeWorkloads(out, body.workloads());
+        canonicalizeObjectives(out, body.objectives());
+        canonicalizeObservability(out, body.observability());
+
+        var governance = body.governance();
+        if (governance == null) {
+            field(out, "spec.governance", null);
+        } else {
+            field(out, "spec.governance.maxDuration", duration(governance.maxDuration()));
+            field(out, "spec.governance.approvalPolicy", governance.approvalPolicy());
+            field(out, "spec.governance.retention", duration(governance.retention()));
+        }
+
+        return out.toString();
+    }
+
+    private static void canonicalizeEnvironment(StringBuilder out,
+            PerformanceTestSpecification.EnvironmentSpec environment) {
+        if (environment == null) {
+            field(out, "spec.environment", null);
+            return;
+        }
+        field(out, "spec.environment.name", environment.name());
+        field(out, "spec.environment.runnerCell", environment.runnerCell());
+        field(out, "spec.environment.targetClass", name(environment.targetClass()));
+    }
+
+    private static void canonicalizeSources(StringBuilder out, List<SourceSpec> sources) {
+        field(out, "spec.sources.count", String.valueOf(sources.size()));
+        for (int i = 0; i < sources.size(); i++) {
+            SourceSpec source = sources.get(i);
+            String prefix = "spec.sources[" + i + "]";
+            field(out, prefix + ".name", source.name());
+            field(out, prefix + ".type", name(source.type()));
+            field(out, prefix + ".uri", source.uri());
+            var git = source.git();
+            if (git == null) {
+                field(out, prefix + ".git", null);
+            } else {
+                field(out, prefix + ".git.repository", git.repository());
+                field(out, prefix + ".git.ref", git.ref());
+                field(out, prefix + ".git.path", git.path());
+                field(out, prefix + ".git.project", git.project());
+            }
+        }
+    }
+
+    private static void canonicalizeAuthentication(StringBuilder out,
+            List<AuthenticationSpec> authentications) {
+        field(out, "spec.authentication.count", String.valueOf(authentications.size()));
+        for (int i = 0; i < authentications.size(); i++) {
+            AuthenticationSpec authentication = authentications.get(i);
+            String prefix = "spec.authentication[" + i + "]";
+            field(out, prefix + ".name", authentication.name());
+            field(out, prefix + ".type", authentication.type());
+            // The reference, not a resolved value: the digest must stay stable across rotation.
+            field(out, prefix + ".secretRef", authentication.secretRef());
+        }
+    }
+
+    private static void canonicalizeDatasets(StringBuilder out, List<DatasetSpec> datasets) {
+        field(out, "spec.datasets.count", String.valueOf(datasets.size()));
+        for (int i = 0; i < datasets.size(); i++) {
+            DatasetSpec dataset = datasets.get(i);
+            String prefix = "spec.datasets[" + i + "]";
+            field(out, prefix + ".name", dataset.name());
+            var source = dataset.source();
+            field(out, prefix + ".source.type", source == null ? null : source.type());
+            field(out, prefix + ".source.uri", source == null ? null : source.uri());
+            field(out, prefix + ".partitionByShard", String.valueOf(dataset.partitionByShard()));
+        }
+    }
+
+    private static void canonicalizeWorkloads(StringBuilder out, List<WorkloadSpec> workloads) {
+        field(out, "spec.workloads.count", String.valueOf(workloads.size()));
+        for (int i = 0; i < workloads.size(); i++) {
+            WorkloadSpec workload = workloads.get(i);
+            String prefix = "spec.workloads[" + i + "]";
+            field(out, prefix + ".name", workload.name());
+            field(out, prefix + ".type", name(workload.type()));
+            field(out, prefix + ".engine", workload.engine());
+            field(out, prefix + ".sourceRef", workload.sourceRef());
+
+            LoadModel model = workload.model();
+            if (model == null) {
+                field(out, prefix + ".model", null);
+            } else {
+                field(out, prefix + ".model.type", name(model.type()));
+                field(out, prefix + ".model.stages.count", String.valueOf(model.stages().size()));
+                for (int s = 0; s < model.stages().size(); s++) {
+                    LoadStage stage = model.stages().get(s);
+                    // Stage order is preserved: stages run in sequence, so reordering them is a
+                    // different test and must produce a different digest.
+                    field(out, prefix + ".model.stages[" + s + "].duration", duration(stage.duration()));
+                    field(out, prefix + ".model.stages[" + s + "].targetUsers",
+                            String.valueOf(stage.targetUsers()));
+                }
+            }
+
+            List<ScenarioSpec> scenarios = workload.scenarios();
+            field(out, prefix + ".scenarios.count", String.valueOf(scenarios.size()));
+            for (int s = 0; s < scenarios.size(); s++) {
+                ScenarioSpec scenario = scenarios.get(s);
+                field(out, prefix + ".scenarios[" + s + "].name", scenario.name());
+                field(out, prefix + ".scenarios[" + s + "].weight", String.valueOf(scenario.weight()));
+                field(out, prefix + ".scenarios[" + s + "].operationId", scenario.operationId());
+            }
+
+            var startWhen = workload.startWhen();
+            if (startWhen == null) {
+                field(out, prefix + ".startWhen", null);
+            } else {
+                field(out, prefix + ".startWhen.workload", startWhen.workload());
+                field(out, prefix + ".startWhen.stage", startWhen.stage());
+            }
+
+            field(out, prefix + ".browserUsers", number(workload.browserUsers()));
+            field(out, prefix + ".iterationsPerUser", number(workload.iterationsPerUser()));
+        }
+    }
+
+    private static void canonicalizeObjectives(StringBuilder out, List<ObjectiveSpec> objectives) {
+        field(out, "spec.objectives.count", String.valueOf(objectives.size()));
+        for (int i = 0; i < objectives.size(); i++) {
+            ObjectiveSpec objective = objectives.get(i);
+            String prefix = "spec.objectives[" + i + "]";
+            field(out, prefix + ".metric", objective.metric());
+            field(out, prefix + ".scope", objective.scope());
+            field(out, prefix + ".percentile", number(objective.percentile()));
+            field(out, prefix + ".threshold",
+                    objective.threshold() == null ? null : objective.threshold().canonicalForm());
+        }
+    }
+
+    private static void canonicalizeObservability(StringBuilder out, ObservabilitySpec observability) {
+        if (observability == null) {
+            field(out, "spec.observability", null);
+            return;
+        }
+        field(out, "spec.observability.provider", observability.provider());
+        field(out, "spec.observability.correlationHeader", observability.correlationHeader());
+        field(out, "spec.observability.serviceTagSelector", observability.serviceTagSelector());
+
+        // Sorted: which series are collected is a set, so declaration order is not meaningful.
+        StringJoiner collected = new StringJoiner(",");
+        observability.collect().stream().sorted().forEach(item -> collected.add(escape(item)));
+        field(out, "spec.observability.collect", collected.toString());
+    }
+
+    // ── Encoding ─────────────────────────────────────────────────────────
+
+    private static void field(StringBuilder out, String key, String value) {
+        out.append(key).append('=').append(value == null ? ABSENT : escape(value)).append('\n');
+    }
+
+    /**
+     * Escapes so that no value can introduce a delimiter and forge structure. Without this a
+     * label value containing a newline could make two different specifications canonicalize
+     * identically, and therefore share a digest.
+     */
+    private static String escape(String value) {
+        StringBuilder escaped = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\' -> escaped.append("\\\\");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '=' -> escaped.append("\\u003d");
+                default -> escaped.append(c);
+            }
+        }
+        return escaped.toString();
+    }
+
+    private static String duration(java.time.Duration value) {
+        return value == null ? null : HumanDuration.format(value);
+    }
+
+    private static String number(Integer value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static String name(Enum<?> value) {
+        return value == null ? null : value.name();
+    }
+}

@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://performance.ameriprise.com/schema/v1alpha1/performance-test.schema.json",
+  "title": "PerformanceTest",
+  "description": "Canonical, engine-neutral description of a performance test. The web UI, the REST API and YAML/GitOps all produce exactly this document. Engine-specific plans are generated from it after validation; consumers never author JMX or Playwright harness configuration directly.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "performance.ameriprise.com/v1alpha1",
+      "description": "Schema version. Pinned so a future schema change is an explicit migration rather than a silent reinterpretation."
+    },
+    "kind": {
+      "type": "string",
+      "const": "PerformanceTest"
+    },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "Lowercase alphanumeric with hyphens. Names appear in artifact object keys and Kubernetes labels, which are length-limited and character-restricted."
+    },
+
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+\\s*(ms|s|m|h|d)|[Pp].*)$",
+      "description": "A duration such as 30s, 5m, 2h or 90d. ISO-8601 (PT5M) is also accepted.",
+      "examples": ["30s", "5m", "45m", "2h", "90d"]
+    },
+
+    "threshold": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(ms|s|%)$",
+      "description": "An objective threshold with an explicit unit. A unit-less value is rejected rather than assumed, because a mis-scaled threshold silently changes a test's pass/fail outcome.",
+      "examples": ["750ms", "8s", "1%", "0.5%"]
+    },
+
+    "secretRef": {
+      "type": "string",
+      "pattern": "^(vault|awssecrets|azurekeyvault|k8s|env)://.+",
+      "description": "A reference to a credential held in the approved secret manager. Never the credential itself: this document is stored, rendered, returned by the validate endpoint and often committed to Git, so an inline value is a disclosure.",
+      "examples": ["vault://performance/proposal/client"]
+    },
+
+    "metadata": {
+      "type": "object",
+      "required": ["name", "team", "application"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name", "description": "Unique within the owning team." },
+        "team": { "$ref": "#/$defs/name", "description": "Owning team. Every authorization decision starts here." },
+        "application": { "$ref": "#/$defs/name", "description": "The application under test." },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Free-form metadata for search and reporting. Never used for policy decisions."
+        }
+      }
+    },
+
+    "spec": {
+      "type": "object",
+      "required": ["environment", "workloads"],
+      "additionalProperties": false,
+      "properties": {
+        "environment": { "$ref": "#/$defs/environment" },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/source" } },
+        "authentication": { "type": "array", "items": { "$ref": "#/$defs/authentication" } },
+        "datasets": { "type": "array", "items": { "$ref": "#/$defs/dataset" } },
+        "workloads": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/workload" } },
+        "objectives": { "type": "array", "items": { "$ref": "#/$defs/objective" } },
+        "observability": { "$ref": "#/$defs/observability" },
+        "governance": { "$ref": "#/$defs/governance" }
+      }
+    },
+
+    "environment": {
+      "type": "object",
+      "required": ["name", "runnerCell", "targetClass"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "runnerCell": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The execution cell that runs the workload. Determines which targets are reachable."
+        },
+        "targetClass": {
+          "type": "string",
+          "enum": ["non-production", "production"],
+          "description": "Drives approval policy. Declared here but verified server-side against the application's registered environments — a specification cannot promote its own target to a safer class."
+        }
+      }
+    },
+
+    "source": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "type": {
+          "type": "string",
+          "enum": ["openapi", "postman", "har", "curl", "manual", "playwright"],
+          "description": "k6 is not an accepted source type in this release."
+        },
+        "uri": {
+          "type": "string",
+          "description": "Stored artifact reference for document sources, e.g. artifact://proposal/openapi.yaml."
+        },
+        "git": {
+          "type": "object",
+          "required": ["repository", "ref", "path"],
+          "additionalProperties": false,
+          "description": "Coordinates for a Playwright source.",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "ref": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{7,40}$",
+              "description": "An immutable commit SHA. A branch or tag is rejected: it can move after review, so the code that ran would not be recoverable from the stored version."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Test path relative to the repository root. Must not escape the checked-out workspace."
+            },
+            "project": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "playwright" } }, "required": ["type"] },
+          "then": { "required": ["git"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["openapi", "postman", "har", "curl"] } },
+            "required": ["type"]
+          },
+          "then": { "required": ["uri"] }
+        }
+      ]
+    },
+
+    "authentication": {
+      "type": "object",
+      "required": ["name", "type", "secretRef"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "type": { "type": "string", "minLength": 1, "examples": ["oauth2-client-credentials", "basic", "bearer"] },
+        "secretRef": { "$ref": "#/$defs/secretRef" }
+      }
+    },
+
+    "dataset": {
+      "type": "object",
+      "required": ["name", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "source": {
+          "type": "object",
+          "required": ["type", "uri"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["object-storage", "inline"] },
+            "uri": { "type": "string", "minLength": 1 }
+          }
+        },
+        "partitionByShard": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, each shard receives a non-overlapping slice. When false and the run is sharded, every generator replays the same rows, which distorts results and can duplicate writes to the target."
+        }
+      }
+    },
+
+    "workload": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "type": { "type": "string", "enum": ["protocol", "browser"] },
+        "engine": {
+          "type": "string",
+          "enum": ["jmeter", "playwright", "browserstack-playwright"],
+          "description": "Requested engine. Validated against declared engine capabilities. k6 is not approved for this release."
+        },
+        "sourceRef": { "type": "string", "description": "Name of a source declared under spec.sources." },
+        "model": { "$ref": "#/$defs/loadModel" },
+        "scenarios": { "type": "array", "items": { "$ref": "#/$defs/scenario" } },
+        "startWhen": {
+          "type": "object",
+          "required": ["workload"],
+          "additionalProperties": false,
+          "description": "Starts this workload when another reaches a named stage. Used to measure a browser cohort during protocol steady state.",
+          "properties": {
+            "workload": { "type": "string", "minLength": 1 },
+            "stage": { "type": "string" }
+          }
+        },
+        "browserUsers": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent browser sessions. Budgeted separately from protocol virtual users: a browser session costs orders of magnitude more, so these are never counted against the same ceiling."
+        },
+        "iterationsPerUser": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "protocol" } }, "required": ["type"] },
+          "then": { "required": ["model"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "browser" } }, "required": ["type"] },
+          "then": { "required": ["browserUsers"] }
+        }
+      ]
+    },
+
+    "loadModel": {
+      "type": "object",
+      "required": ["type", "stages"],
+      "additionalProperties": false,
+      "description": "Load, stress, spike and endurance tests are all expressed as a staged ramp. The platform models the shape rather than naming fixed test types.",
+      "properties": {
+        "type": { "type": "string", "enum": ["stages"] },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["duration", "targetUsers"],
+            "additionalProperties": false,
+            "properties": {
+              "duration": { "$ref": "#/$defs/duration" },
+              "targetUsers": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Stage order is significant: stages run in sequence, and a final stage targeting zero expresses ramp-down."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "scenario": {
+      "type": "object",
+      "required": ["name", "weight"],
+      "additionalProperties": false,
+      "description": "A weighted journey. Weights are what produce a realistic traffic mix instead of an even spread across every endpoint.",
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Relative share of iterations. Weights across a workload should sum to 100."
+        },
+        "operationId": { "type": "string" }
+      }
+    },
+
+    "objective": {
+      "type": "object",
+      "required": ["metric", "threshold"],
+      "additionalProperties": false,
+      "description": "The pass/fail contract. A test with no objectives can neither pass nor fail.",
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1,
+          "examples": ["http.response.time", "http.error.rate", "browser.journey.duration"]
+        },
+        "scope": { "type": "string", "description": "Workload this applies to. Omit to apply to the whole test." },
+        "percentile": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "threshold": { "$ref": "#/$defs/threshold" }
+      }
+    },
+
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["dynatrace", "none"] },
+        "correlationHeader": {
+          "type": "string",
+          "description": "Injected into workload traffic so application telemetry can be correlated to this run.",
+          "default": "X-Performance-Test-Run-Id"
+        },
+        "serviceTagSelector": { "type": "string" },
+        "collect": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["service-response-time", "failure-rate", "cpu", "memory", "database-time", "downstream-calls"]
+          }
+        }
+      }
+    },
+
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDuration": {
+          "$ref": "#/$defs/duration",
+          "description": "Ceiling for this test. Enforced server-side alongside the platform limit; the lower of the two applies."
+        },
+        "approvalPolicy": { "type": "string" },
+        "retention": { "$ref": "#/$defs/duration" }
+      }
+    }
+  }
+}
