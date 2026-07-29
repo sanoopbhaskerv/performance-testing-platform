@@ -298,6 +298,18 @@ public final class SpecificationParser {
         rejectUnknownFields(node, path, Set.of("duration", "targetUsers"), findings);
 
         Duration duration = duration(node, "duration", path + "/duration", findings);
+
+        // Absence must be reported here rather than defaulting to zero. Zero is a legitimate
+        // authored value — a final stage targeting zero users is how ramp-down is expressed — so
+        // once the default is applied, a stage that forgot its user count is indistinguishable
+        // from one that deliberately generates no load.
+        if (!node.hasNonNull("targetUsers")) {
+            findings.add(ValidationFinding.error("spec.parse.requiredField.missing",
+                    path + "/targetUsers",
+                    "targetUsers is required.",
+                    "State the target concurrent users for this stage. Use 0 to ramp down."));
+        }
+
         Integer targetUsers = integer(node, "targetUsers", path + "/targetUsers", findings);
         return new LoadStage(duration, targetUsers == null ? 0 : targetUsers);
     }

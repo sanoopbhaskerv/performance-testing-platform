@@ -55,7 +55,7 @@ Flyway migrations under `db/migration/{postgresql,h2}` — `V1__baseline_v1_test
 **`spring.jpa.hibernate.ddl-auto` changed `update` → `none`; Flyway now owns the whole schema**, including V1's `test_runs`.
 
 ### Test counts (all green, 0 skipped)
-domain 97 · engine-spi 9 · results 12 · **persistence 15 (PostgreSQL Testcontainers)** · api 25 · engine-jmeter 7 · core 64 = **229**
+domain 97 · engine-spi 9 · results 12 · **persistence 15 (PostgreSQL Testcontainers)** · api 68 · engine-jmeter 7 · core 64 = **272**
 
 ---
 
@@ -63,7 +63,7 @@ domain 97 · engine-spi 9 · results 12 · **persistence 15 (PostgreSQL Testcont
 
 - **Domain has no Jackson.** Parsing lives in `platform-api` as explicit `JsonNode` traversal, not data binding — keeps serialization annotations out of the domain, gives every finding an exact JSON-pointer path, and turns an unknown field into a finding instead of a 500.
 - **Unknown fields are rejected.** Silently ignoring `targetUser` (typo for `targetUsers`) would run a test at a load nobody chose.
-- **No JSON Schema validator library.** CLAUDE.md §31 makes a new unapproved dependency a pause condition. The schema is published for consumers/IDE tooling; structural validation is hand-written. **Known drift risk** between the two — flagged for the dependency decision (`com.networknt:json-schema-validator`).
+- **No JSON Schema validator library — decided, not deferred by accident.** CLAUDE.md §31 makes a new unapproved dependency a pause condition, and the parser is not redundant with the schema anyway: something must map YAML to typed `Duration`/`Threshold` values regardless, and every safety-relevant rule lives in `SemanticValidator`, which JSON Schema cannot express. Drift is a DX problem, not a safety one. Closed instead with `SchemaConformanceTest` (enums, required fields, secret-scheme list). **Revisit only if** the schema grows rules the parser cannot mirror or teams need bit-identical answers — and then ask for **test scope first**.
 - **Canonical form is hand-written, not JSON.** Digest input must not depend on a serialization library's formatting, or a library upgrade silently changes every stored digest. Version-tagged (`canonicalForm=v1alpha1`) and escaped so a value containing `=` or a newline cannot forge structure.
 - **`validate` returns 200 even when invalid.** The findings are the answer. 400 is reserved for a malformed *request*, so CI can distinguish "your spec has errors" from "transport failure".
 - **Thresholds require an explicit unit.** `750` is rejected rather than assumed to be ms — guessing silently changes pass/fail.

@@ -241,6 +241,12 @@ public final class SemanticValidator {
             if (dataset.source() == null || isBlank(dataset.source().uri())) {
                 findings.add(ValidationFinding.error("spec.dataset.source.missing",
                         path + "/source", "A dataset requires a source uri.", null));
+            } else if (isBlank(dataset.source().type())) {
+                findings.add(ValidationFinding.error("spec.dataset.source.type.missing",
+                        path + "/source/type",
+                        "A dataset source requires a type.",
+                        "Use object-storage for a stored dataset, or inline for values carried "
+                                + "in the specification."));
             }
             if (!dataset.partitionByShard()) {
                 findings.add(ValidationFinding.warning("spec.dataset.partition.disabled",
@@ -311,6 +317,13 @@ public final class SemanticValidator {
                     "A protocol workload requires a staged load model.",
                     "Declare stages with a duration and target user count."));
         } else {
+            if (workload.model().type() == null) {
+                findings.add(ValidationFinding.error("spec.workload.model.type.missing",
+                        path + "/model/type",
+                        "A load model requires a type.",
+                        "Set type: stages. Load, stress, spike and endurance tests are all "
+                                + "expressed as a staged ramp."));
+            }
             var stages = workload.model().stages();
             for (int s = 0; s < stages.size(); s++) {
                 var stage = stages.get(s);

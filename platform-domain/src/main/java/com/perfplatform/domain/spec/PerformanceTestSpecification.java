@@ -174,13 +174,21 @@ public record PerformanceTestSpecification(
             return model.stages().stream().mapToInt(LoadStage::targetUsers).max().orElse(0);
         }
 
-        /** Total wall-clock duration of the staged model, or zero for a browser workload. */
+        /**
+         * Total wall-clock duration of the staged model, or zero for a browser workload.
+         *
+         * <p>Stages with no duration are skipped rather than propagated. This is called during
+         * validation of a specification that may well be malformed — a stage missing its duration
+         * is reported as its own finding, and this must not throw before that finding is
+         * returned, since it would surface as a 500 from the validate endpoint instead.
+         */
         public Duration totalDuration() {
             if (model == null || model.stages().isEmpty()) {
                 return Duration.ZERO;
             }
             return model.stages().stream()
                     .map(LoadStage::duration)
+                    .filter(java.util.Objects::nonNull)
                     .reduce(Duration.ZERO, Duration::plus);
         }
     }
