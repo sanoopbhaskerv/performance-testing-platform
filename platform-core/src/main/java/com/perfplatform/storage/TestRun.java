@@ -5,9 +5,18 @@ import java.time.Instant;
 
 /**
  * Persists each test run for history and reporting.
+ *
+ * <p>This is the V1 model and it is unchanged apart from its table name. Increment 1C gave the
+ * V2 orchestration model the {@code test_runs} name that CLAUDE.md §12 specifies for it, so V1's
+ * table was renamed to {@code v1_test_runs} by the same migration. Columns, data, constraints and
+ * behavior are untouched; only the mapping moved. V1's characterization tests are the check.
+ *
+ * <p>Superseded by {@code com.perfplatform.domain.run.TestRun}, which is engine-neutral, has a
+ * validated state machine and an append-only event log. This class stays until V2 reaches
+ * functional parity and its removal is explicitly approved.
  */
 @Entity
-@Table(name = "test_runs")
+@Table(name = "v1_test_runs")
 public class TestRun {
 
     public enum Status {

@@ -33,9 +33,14 @@ spring:
     hibernate:
       ddl-auto: none
     show-sql: false
+    # No explicit dialect. Hibernate 6 detects it from the JDBC connection, and hardcoding a
+    # default of H2Dialect meant a PostgreSQL deployment that did not also set DB_DIALECT emitted
+    # H2 syntax against PostgreSQL — the failure surfaces only on the JSON columns, so it looked
+    # like a working deployment until the first specification was stored. Set DB_DIALECT only if a
+    # specific dialect is genuinely needed.
     properties:
       hibernate:
-        dialect: ${DB_DIALECT:org.hibernate.dialect.H2Dialect}
+        dialect: ${DB_DIALECT:}
 
   # Mail (email notifications)
   mail:
@@ -63,6 +68,41 @@ platform:
 
   # Eclipse MAT binary path (for heap dump analysis)
   mat-home: ${MAT_HOME:/opt/mat}
+
+  # Durable run orchestration (V2). Every value here is enforced server-side; nothing in a
+  # submitted specification can influence it. See docs/operations/run-lifecycle.md.
+  orchestration:
+    # 'fake' progresses runs through their lifecycle without generating load. The application
+    # refuses to start with it under a production profile — a platform reporting successful runs
+    # that never executed is worse than one that fails loudly. Kubernetes arrives in Increment 1E.
+    execution-provider: ${EXECUTION_PROVIDER:fake}
+
+    reconciliation-enabled: ${RECONCILIATION_ENABLED:true}
+    # Runs last minutes to hours, so polling faster buys nothing and costs a round trip per
+    # replica per tick.
+    reconciliation-interval: 10s
+
+    # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
+    # actively working on to a peer mid-provision.
+    lease-duration: 2m
+    # Too short fails healthy runs during a slow GC pause; too long leaves a dead run holding a
+    # capacity slot.
+    heartbeat-tolerance: 5m
+    # Added to a plan's duration to form the runner's hard deadline: covers startup, ramp-down and
+    # artifact upload, none of which appear in the plan's stage arithmetic.
+    execution-grace: 10m
+    validation-grace: 1m
+    claim-batch-size: 20
+
+    # CLAUDE.md §13. Ten is the worst-case ceiling, not a target — normal operation is three or
+    # four. One per team by default is what stops a single team occupying every global slot.
+    capacity:
+      global-max-runs: ${MAX_CONCURRENT_RUNS:10}
+      default-team-max-runs: ${MAX_CONCURRENT_RUNS_PER_TEAM:1}
+      # Raise a specific team to the policy-approved maximum of 2 by name, e.g.
+      # team-overrides:
+      #   advice-implementation: 2
+      team-overrides: {}
 
 # Actuator endpoints
 management:

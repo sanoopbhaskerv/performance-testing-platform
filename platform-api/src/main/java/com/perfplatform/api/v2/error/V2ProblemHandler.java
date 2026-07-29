@@ -1,5 +1,11 @@
 package com.perfplatform.api.v2.error;
 
+import com.perfplatform.api.v2.security.CallerContextProvider;
+import com.perfplatform.domain.port.TestRunRepository;
+import com.perfplatform.domain.run.InvalidRunTransitionException;
+import com.perfplatform.domain.security.CallerContext;
+import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,10 +13,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.net.URI;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -45,6 +54,142 @@ public class V2ProblemHandler {
             HttpServletRequest request) {
         return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "request.contentType.unsupported",
                 "Submit the specification as application/yaml or application/json.",
+                request, e);
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ProblemDetail handleMissingHeader(MissingRequestHeaderException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "request.header.missing",
+                "Required header '" + e.getHeaderName() + "' is missing.",
+                request, e);
+    }
+
+    /**
+     * Field-level validation failures.
+     *
+     * <p>Every field is reported, not the first. A caller fixing one field per round trip against an
+     * API that queues load tests is a caller who gives up and hand-rolls the request.
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ProblemDetail handleInvalidBody(MethodArgumentNotValidException e,
+            HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "request.body.invalid",
+                "The request body failed validation.", request, e);
+
+        problem.setProperty("findings", e.getBindingResult().getFieldErrors().stream()
+                .map(error -> Map.of(
+                        "path", error.getField(),
+                        "message", String.valueOf(error.getDefaultMessage())))
+                .toList());
+        return problem;
+    }
+
+    // ── Authentication and authorization ─────────────────────────────────
+
+    @ExceptionHandler(CallerContextProvider.UnauthenticatedException.class)
+    public ProblemDetail handleUnauthenticated(CallerContextProvider.UnauthenticatedException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNAUTHORIZED, "auth.unauthenticated",
+                "This request carries no usable identity.",
+                request, e);
+    }
+
+    /**
+     * An authenticated caller who may not do this.
+     *
+     * <p>The response never says whether the failure was a missing scope or the wrong team, and
+     * never names the resource's owner. Distinguishing them tells an unauthorized caller which
+     * teams and runs exist, which is itself a disclosure.
+     */
+    @ExceptionHandler(CallerContext.AuthorizationException.class)
+    public ProblemDetail handleUnauthorized(CallerContext.AuthorizationException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.FORBIDDEN, "auth.forbidden",
+                "You are not permitted to perform this action.",
+                request, e);
+    }
+
+    // ── Runs ─────────────────────────────────────────────────────────────
+
+    @ExceptionHandler(TriggerTestRunUseCase.UnknownDefinitionVersionException.class)
+    public ProblemDetail handleUnknownVersion(
+            TriggerTestRunUseCase.UnknownDefinitionVersionException e, HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "definitionVersion.notFound",
+                "No such test definition version.",
+                request, e);
+    }
+
+    /**
+     * A run identifier that names nothing the caller may see.
+     *
+     * <p>Deliberately indistinguishable from a run that does not exist. Returning 403 for someone
+     * else's run and 404 for a fictional one turns the endpoint into an oracle for which run
+     * identifiers are real.
+     */
+    @ExceptionHandler(CancelTestRunUseCase.UnknownRunException.class)
+    public ProblemDetail handleUnknownRun(CancelTestRunUseCase.UnknownRunException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "run.notFound",
+                "No such test run.",
+                request, e);
+    }
+
+    /**
+     * A specification that did not pass validation.
+     *
+     * <p>422 rather than 400: the request was well formed and understood, and the problem is with
+     * what it refers to. A caller can tell "I sent bad JSON" from "the test itself is not runnable".
+     */
+    @ExceptionHandler(TriggerTestRunUseCase.VersionNotExecutableException.class)
+    public ProblemDetail handleNotExecutable(TriggerTestRunUseCase.VersionNotExecutableException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "definitionVersion.notExecutable",
+                "This definition version did not pass validation and cannot be executed.",
+                request, e);
+    }
+
+    /**
+     * An idempotency key reused for a different request.
+     *
+     * <p>The detail names the run the key already belongs to, which is safe — the caller supplied
+     * the key and owns the run — and is the one fact needed to resolve the situation.
+     */
+    @ExceptionHandler(TestRunRepository.IdempotencyConflictException.class)
+    public ProblemDetail handleIdempotencyConflict(TestRunRepository.IdempotencyConflictException e,
+            HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.CONFLICT, "run.idempotencyKey.conflict",
+                "This idempotency key was already used for a different request. "
+                        + "Use a new key, or resubmit the original request unchanged.",
+                request, e);
+        problem.setProperty("existingRunId", e.existingRunId().toString());
+        return problem;
+    }
+
+    @ExceptionHandler(CancelTestRunUseCase.RunNotCancellableException.class)
+    public ProblemDetail handleNotCancellable(CancelTestRunUseCase.RunNotCancellableException e,
+            HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.CONFLICT, "run.notCancellable",
+                e.getMessage(), request, e);
+        problem.setProperty("state", e.state().name());
+        return problem;
+    }
+
+    /**
+     * A concurrent modification, or a transition the state machine forbids.
+     *
+     * <p>Both are 409 because both mean the same thing to a caller: the run is not where you thought
+     * it was. Re-read it and decide again.
+     */
+    @ExceptionHandler({
+            TestRunRepository.OptimisticLockException.class,
+            InvalidRunTransitionException.class})
+    public ProblemDetail handleConflict(RuntimeException e, HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "run.conflict",
+                "The run changed while this request was being processed. Re-read it and retry.",
                 request, e);
     }
 

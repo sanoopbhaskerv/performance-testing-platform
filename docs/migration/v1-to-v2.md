@@ -52,6 +52,21 @@ These hold for the entire foundation phase:
 7. Maven coordinates and the `com.perfplatform` package root are not renamed during the
    architecture migration. Corporate naming is a separate, later decision.
 
+### V1's run table was renamed in Increment 1C
+
+`test_runs` → `v1_test_runs`, by Flyway migration `V3__run_orchestration.sql`. The V2 orchestration
+model took the `test_runs` name that CLAUDE.md §12 specifies for it.
+
+This is a rename, not a reshape: columns, data, constraints and the index are preserved exactly, the
+V1 JPA entity is repointed in the same commit, and V1's behavior is unchanged — the characterization
+tests are the check. Renaming V1's table rather than decorating V2's is deliberate: `v1_test_runs`
+disappears when V1 does, whereas a `v2_` prefix on the table the platform will use forever would
+outlive the reason for it.
+
+**Operational note.** An existing deployment applies this migration in place. Rolling the application
+back to a pre-1C version after `V3` has run will break V1's history endpoints, because the entity
+would look for a table that is now named something else.
+
 ---
 
 ## 4. Component disposition

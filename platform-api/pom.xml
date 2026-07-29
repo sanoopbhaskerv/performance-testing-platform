@@ -53,6 +53,18 @@
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
     </dependency>
 
+    <!--
+      MockMvc, so the V2 controllers and their RFC 7807 problem mapping are tested at the HTTP
+      boundary rather than by calling methods. Status codes and problem bodies are the contract CI
+      integrations key on, and a method-level test cannot show what a caller actually receives.
+      Already used in platform-core; no new dependency is introduced to the repository.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

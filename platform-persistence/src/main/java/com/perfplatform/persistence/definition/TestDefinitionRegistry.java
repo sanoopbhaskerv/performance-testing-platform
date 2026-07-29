@@ -140,6 +140,17 @@ public class TestDefinitionRegistry {
         return versions.findByDefinitionIdAndVersionNumber(definitionId.value(), versionNumber);
     }
 
+    /**
+     * Looks up a version by its own identifier.
+     *
+     * <p>The lookup a run needs: a trigger names an immutable version directly, without knowing or
+     * caring which definition it belongs to.
+     */
+    @Transactional(readOnly = true)
+    public Optional<TestDefinitionVersionEntity> findVersionById(TestDefinitionVersionId id) {
+        return versions.findById(id.value());
+    }
+
     @Transactional(readOnly = true)
     public Optional<TestDefinitionVersionEntity> findLatestVersion(TestDefinitionId definitionId) {
         return versions.findByDefinitionIdOrderByVersionNumberDesc(definitionId.value())

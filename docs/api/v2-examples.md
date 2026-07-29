@@ -12,6 +12,10 @@
 
 ```text
 POST /api/v2/test-definitions/validate
+POST /api/v2/test-runs
+GET  /api/v2/test-runs/{runId}
+GET  /api/v2/test-runs/{runId}/events
+POST /api/v2/test-runs/{runId}/cancel
 ```
 
 Validates a specification. **Creates nothing and executes nothing** — safe to call from a pull
@@ -181,6 +185,167 @@ fi
 
 ---
 
+## Triggering a run
+
+```bash
+curl -X POST https://performance.example.internal/api/v2/test-runs \
+  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Idempotency-Key: nightly-baseline-2026-07-29" \
+  -H "Content-Type: application/json" \
+  -d '{"definitionVersionId":"3f2b1c8e-5d4a-4a1b-9c7e-2f6d8b0a1e33"}'
+```
+
+```http
+HTTP/1.1 202 Accepted
+Location: /api/v2/test-runs/9c1f0b44-2a77-4a1e-8d3b-6f0e2c5a7b91
+Idempotent-Replay: false
+```
+
+```json
+{
+  "id": "9c1f0b44-2a77-4a1e-8d3b-6f0e2c5a7b91",
+  "teamId": "b81e2f3a-1c44-4a9d-9f21-3d5e7a0c4b18",
+  "definitionVersionId": "3f2b1c8e-5d4a-4a1b-9c7e-2f6d8b0a1e33",
+  "executionPlanId": null,
+  "status": "QUEUED",
+  "environment": "performance",
+  "requestedBy": "team:advice-implementation",
+  "requestedAt": "2026-07-29T22:00:00Z",
+  "queuedAt": "2026-07-29T22:00:00Z",
+  "cancellationRequested": false
+}
+```
+
+`202`, not `201`: the run exists but nothing has executed, and reporting it as created would suggest
+the test had started. The request never blocks — a performance test runs for minutes to hours.
+
+The run's team comes from the definition version, never from the request. A caller states *what* to
+run, not who to bill it to.
+
+### The idempotency key is required
+
+Repeating a request with the same key returns the **original run** and sets
+`Idempotent-Replay: true`. This matters more here than in most APIs: the duplicate would not be a
+wasted row but a second load test against a real system, doubling the traffic and invalidating both
+sets of results.
+
+Keys are scoped per team, so two teams can both use `nightly-baseline`.
+
+Reusing a key for a *different* definition version is a `409`, not a replay:
+
+```json
+{
+  "type": "https://performance.ameriprise.com/problems/run.idempotencyKey.conflict",
+  "status": 409,
+  "code": "run.idempotencyKey.conflict",
+  "detail": "This idempotency key was already used for a different request. Use a new key, or resubmit the original request unchanged.",
+  "existingRunId": "9c1f0b44-2a77-4a1e-8d3b-6f0e2c5a7b91",
+  "correlationId": "…"
+}
+```
+
+Silently returning the first run would tell a pipeline its new test had been accepted when it had
+not, and it would read the old run's results as if they described the new one.
+
+### Trigger failures
+
+| Situation | Status | `code` |
+|---|---|---|
+| No `Idempotency-Key` header | 400 | `request.header.missing` |
+| Missing or malformed `definitionVersionId` | 400 | `request.body.invalid` |
+| No such definition version | 404 | `definitionVersion.notFound` |
+| Version failed validation | 422 | `definitionVersion.notExecutable` |
+| Key reused for a different version | 409 | `run.idempotencyKey.conflict` |
+| Caller not permitted | 403 | `auth.forbidden` |
+
+`422` rather than `400` for an unrunnable version: the request was well formed and understood, and
+the problem is with what it refers to. A pipeline can tell "I sent bad JSON" from "the test itself is
+not runnable".
+
+---
+
+## Polling a run
+
+```bash
+curl https://performance.example.internal/api/v2/test-runs/$RUN_ID \
+  -H "X-API-Key: $PERF_API_KEY"
+```
+
+`status` moves `QUEUED → PROVISIONING → RUNNING → ANALYZING → COMPLETED`. Terminal states are
+`COMPLETED`, `FAILED`, `CANCELLED`, `REJECTED` and `EXPIRED`; see
+[run-lifecycle.md](../operations/run-lifecycle.md).
+
+A failed run carries a stable `failureCode` and a sanitized `failureReason`. Neither ever contains a
+stack trace, a connection string or a Kubernetes object — those go to the platform's own logs behind
+the `correlationId`.
+
+A run identifier that names another team's run returns `404`, the same as one that does not exist.
+Returning `403` for one and `404` for the other would turn the endpoint into an oracle for which run
+identifiers are real.
+
+---
+
+## Reading a run's history
+
+```bash
+curl "https://performance.example.internal/api/v2/test-runs/$RUN_ID/events?afterSequence=12" \
+  -H "X-API-Key: $PERF_API_KEY"
+```
+
+```json
+[
+  {
+    "sequence": 13,
+    "type": "STATE_CHANGED",
+    "previousState": "QUEUED",
+    "newState": "PROVISIONING",
+    "actor": "system:reconciler",
+    "detail": {"reason": "Admitted by capacity policy"},
+    "occurredAt": "2026-07-29T22:04:11Z"
+  }
+]
+```
+
+Append-only, in order. Pass `afterSequence` to resume from the last event seen rather than re-reading
+a history that can be long for a run lasting hours — the same cursor Server-Sent Events will use for
+resumption in a later increment.
+
+`detail` carries short operational facts only. It never contains request bodies, headers or secret
+values: run events are read by every member of a team and exported to operational tooling.
+
+---
+
+## Cancelling a run
+
+```bash
+curl -X POST "https://performance.example.internal/api/v2/test-runs/$RUN_ID/cancel?reason=Wrong+environment" \
+  -H "X-API-Key: $PERF_API_KEY"
+```
+
+```json
+{
+  "outcome": "CANCELLATION_REQUESTED",
+  "run": { "id": "9c1f0b44-…", "status": "RUNNING", "cancellationRequested": true }
+}
+```
+
+`outcome` is reported separately from `status` because they answer different questions. A run still
+`RUNNING` with `CANCELLATION_REQUESTED` has been asked to stop and has not stopped yet; a caller
+shown only the status would conclude the request had been ignored.
+
+| `outcome` | Meaning |
+|---|---|
+| `CANCELLED` | Nothing was executing; the run stopped immediately |
+| `CANCELLATION_REQUESTED` | A runner is still being terminated |
+| `ALREADY_CANCELLED` | The run was already cancelled |
+
+Repeating a cancellation succeeds. Cancelling a run that has *finished* is a `409`
+(`run.notCancellable`) — that is a mistake about which run is being stopped, not a retry.
+
+See [cancellation-and-recovery.md](../operations/cancellation-and-recovery.md).
+
+---
+
 ## Planned endpoints
 
 Not yet implemented. Listed so integrations can be designed against the intended shape.
@@ -189,12 +354,11 @@ Not yet implemented. Listed so integrations can be designed against the intended
 POST   /api/v2/test-definitions                      # create a definition
 GET    /api/v2/test-definitions/{definitionId}
 POST   /api/v2/test-definitions/{definitionId}/versions
-POST   /api/v2/test-runs                             # requires an idempotency key; returns 202 + Location
-GET    /api/v2/test-runs/{runId}
-GET    /api/v2/test-runs/{runId}/events
-POST   /api/v2/test-runs/{runId}/cancel
 GET    /api/v2/test-runs/{runId}/report
 GET    /api/v2/test-runs/{runId}/artifacts
 ```
 
-Run endpoints arrive in Increment 1C.
+Definition endpoints are the first thing Increment 1D needs: without them a definition version can
+only be created through the storage layer, so the run endpoints above are not yet reachable end to
+end by a consumer. Report and artifact endpoints arrive with results normalization (1D) and durable
+artifact storage (1E).

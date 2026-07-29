@@ -133,7 +133,7 @@ class TestDefinitionRegistryPostgresTest {
                     String.class);
 
             assertThat(tables).contains("teams", "applications", "test_definitions",
-                    "test_definition_versions", "test_runs", "flyway_schema_history");
+                    "test_definition_versions", "v1_test_runs", "flyway_schema_history");
         }
 
         @Test
@@ -147,11 +147,16 @@ class TestDefinitionRegistryPostgresTest {
             assertThat(type).isEqualTo("jsonb");
         }
 
+        /**
+         * Increment 1C gave the V2 orchestration model the {@code test_runs} name and renamed V1's
+         * table to {@code v1_test_runs}. The rename must not have reshaped it: V1 keeps working
+         * against the same columns, and this asserts that rather than the name alone.
+         */
         @Test
-        @DisplayName("the V1 test_runs table is reproduced so V1 keeps working under Flyway")
+        @DisplayName("the V1 run table is reproduced intact so V1 keeps working under Flyway")
         void v1TableIsPreserved() {
             List<String> columns = jdbc.queryForList("""
-                    SELECT column_name FROM information_schema.columns WHERE table_name = 'test_runs'
+                    SELECT column_name FROM information_schema.columns WHERE table_name = 'v1_test_runs'
                     """, String.class);
 
             assertThat(columns).contains("id", "team", "test_type", "status", "sla_result",

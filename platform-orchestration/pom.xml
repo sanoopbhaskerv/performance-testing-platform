@@ -29,6 +29,18 @@
       <artifactId>platform-engine-spi</artifactId>
     </dependency>
 
+    <!--
+      The logging facade only. CLAUDE.md §8 requires structured log fields (runId, teamId, engine)
+      on orchestration decisions, and reconciliation is where "why did this run not start" is
+      answered. slf4j-api is already the facade used throughout platform-core and is pulled in by
+      Spring Boot regardless; declaring it here keeps this module's dependency list honest rather
+      than relying on it arriving transitively. No binding is added — the composition root chooses.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
