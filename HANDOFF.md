@@ -2,7 +2,7 @@
 
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`, then this file.
-**Last updated:** Increment 1B complete, verified, **uncommitted**.
+**Last updated:** Increment 1B complete, committed and pushed. Working tree clean.
 
 ---
 
@@ -10,15 +10,23 @@
 
 | Increment | Status | Evidence |
 |---|---|---|
-| 0 — baseline protection | **Complete, committed** `4685388` | 53 characterization tests; `docs/migration/baseline-report.md` |
-| 1A — modular skeleton | **Complete, committed** `19f3c38` | 8 Maven modules |
-| 1B — canonical specification | **Complete, verified, UNCOMMITTED** | 229 tests green; see §3 |
-| 1C onward | Not started | — |
+| 0 — baseline protection | **Complete** `4685388` | 53 characterization tests; `docs/migration/baseline-report.md` |
+| 1A — modular skeleton | **Complete** `19f3c38` | 8 Maven modules |
+| 1B — canonical specification | **Complete** `13fb724` | see §3 |
+| 1B follow-up — schema conformance | **Complete** `9826a92` | `SchemaConformanceTest`; four divergences fixed |
+| 1C onward | **Not started** | — |
 
-**PR #1 is open** (covers 0 and 1A): https://github.com/sanoopbhaskerv/performance-testing-platform/pull/1
-New commits on `feature/platform-v2-foundation` land in that PR.
+**272 tests green, 0 skipped.** Working tree clean; branch in sync with `origin`.
 
-**Immediate next action:** commit 1B and push (PR #1 updates automatically). Then **stop** — 1C is a separate gated increment.
+**PR #1 is open and covers all four commits:**
+https://github.com/sanoopbhaskerv/performance-testing-platform/pull/1
+Further commits on `feature/platform-v2-foundation` land in it automatically.
+
+`v1-poc` tag exists on the remote at the baseline commit `9233d96` (created by the user).
+
+**Immediate next action:** nothing outstanding. 1C is the next gated increment — do not start it without the user asking.
+
+**Known gap before 1C can be exercised end-to-end:** `TestDefinitionRegistry` can create definitions and append versions, but no HTTP endpoint reaches it — the only V2 path today is `/validate`. Since `POST /api/v2/test-runs` must reference an immutable definition version, `POST /api/v2/test-definitions` and `.../versions` need to exist first. Recommended: fold them into the front of 1C.
 
 ---
 
