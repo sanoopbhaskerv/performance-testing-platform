@@ -45,11 +45,16 @@ const STARTER_SPECIFICATION = `apiVersion: performance.ameriprise.com/v1alpha1
 kind: PerformanceTest
 
 metadata:
-  # These names must already be registered. The team comes from your API key's team,
-  # and the application must match one of that team's configured targets.
+  # These names must already be registered. The team is the one your API key belongs to,
+  # and the application must match one of that team's configured targets — that
+  # correspondence is how the platform decides where a run's traffic may go, and it is
+  # deliberately not something a specification can choose for itself.
+  #
+  # These defaults match the local-dev team that ships in config/teams, so this document
+  # runs as-is on a laptop. Change them to your own team and target.
   name: checkout-baseline
-  team: alpha
-  application: alpha-service
+  team: local-dev
+  application: local-service
 
 spec:
   environment:
