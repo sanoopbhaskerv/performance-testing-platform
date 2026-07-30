@@ -159,15 +159,77 @@ public final class ObjectiveEvaluator {
                         + thresholdValue + ".");
     }
 
+    /**
+     * The measurements an objective's scope refers to.
+     *
+     * <p>Three cases, in order. An objective may name the whole test, a single operation, or a
+     * workload — and a workload is not an operation, it is a set of them. Operations are reported as
+     * {@code workload/scenario}, so a workload scope is resolved by combining every operation under
+     * that prefix.
+     *
+     * <p>A scope that matches nothing returns empty, and the objective is reported as
+     * indeterminate. It is not quietly widened to the whole run: a mistyped scope would then be
+     * judged against traffic it was never written about, and would pass or fail for the wrong reason.
+     */
     private static Optional<OperationMetrics> scopeMetrics(NormalizedRunResult result, String scope) {
         if (OperationMetrics.ALL.equals(scope)) {
             return Optional.of(result.overall());
         }
-        // A scope naming a workload rather than an operation falls back to the aggregate: an
-        // objective written against "api-background-load" means the whole of that workload.
-        return result.operation(scope).or(() -> result.byOperation().isEmpty()
-                ? Optional.of(result.overall())
-                : Optional.empty());
+
+        Optional<OperationMetrics> exact = result.operation(scope);
+        if (exact.isPresent()) {
+            return exact;
+        }
+
+        List<OperationMetrics> withinWorkload = result.byOperation().entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(scope + "/"))
+                .map(java.util.Map.Entry::getValue)
+                .toList();
+
+        return withinWorkload.isEmpty()
+                ? Optional.empty()
+                : Optional.of(combine(scope, withinWorkload));
+    }
+
+    /**
+     * Combines several operations into one set of measurements for a workload-scoped objective.
+     *
+     * <p>Percentiles cannot be averaged — the p95 of a workload is not the mean of its operations'
+     * p95s — so the highest is taken. That is the conservative direction: a workload passes only if
+     * every operation in it would have passed, which is what "this workload responds within 750ms"
+     * means to whoever wrote it.
+     */
+    private static OperationMetrics combine(String scope, List<OperationMetrics> parts) {
+        long samples = 0;
+        long errors = 0;
+        long unparsed = 0;
+        long min = Long.MAX_VALUE;
+        long max = 0;
+        long weightedMean = 0;
+        long p50 = 0;
+        long p90 = 0;
+        long p95 = 0;
+        long p99 = 0;
+        long throughput = 0;
+
+        for (OperationMetrics part : parts) {
+            samples += part.sampleCount();
+            errors += part.errorCount();
+            unparsed += part.unparsedCount();
+            min = Math.min(min, part.minMillis());
+            max = Math.max(max, part.maxMillis());
+            weightedMean += part.meanMillis() * part.sampleCount();
+            p50 = Math.max(p50, part.p50Millis());
+            p90 = Math.max(p90, part.p90Millis());
+            p95 = Math.max(p95, part.p95Millis());
+            p99 = Math.max(p99, part.p99Millis());
+            throughput += part.throughputPerSecondMilli();
+        }
+
+        return new OperationMetrics(scope, samples, errors, unparsed,
+                min == Long.MAX_VALUE ? 0 : min, max,
+                samples == 0 ? 0 : weightedMean / samples,
+                p50, p90, p95, p99, throughput);
     }
 
     /**

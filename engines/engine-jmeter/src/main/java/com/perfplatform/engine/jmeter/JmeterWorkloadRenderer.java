@@ -138,7 +138,7 @@ final class JmeterWorkloadRenderer {
                 .endWithChildren();
 
         for (ScenarioSpec scenario : JmeterPlanCompiler.sortedScenarios(workload)) {
-            writeScenario(jmx, scenario, target);
+            writeScenario(jmx, workload, scenario, target);
         }
 
         jmx.endChildren();
@@ -151,7 +151,8 @@ final class JmeterWorkloadRenderer {
      * executes on every iteration, which is an even spread — the behaviour V1 had and the reason a
      * realistic journey mix could not be expressed.
      */
-    private static void writeScenario(JmxWriter jmx, ScenarioSpec scenario, TargetAddress target) {
+    private static void writeScenario(JmxWriter jmx, WorkloadSpec workload, ScenarioSpec scenario,
+            TargetAddress target) {
         jmx.element("ThroughputController", attributes("ThroughputControllerGui",
                         "ThroughputController", scenario.name()))
                 .intProp("ThroughputController.style", PERCENT_EXECUTION)
@@ -166,16 +167,19 @@ final class JmeterWorkloadRenderer {
                         """.formatted(scenario.weight()))
                 .endWithChildren();
 
-        writeSampler(jmx, scenario, target);
+        writeSampler(jmx, workload, scenario, target);
 
         jmx.endChildren();
     }
 
-    private static void writeSampler(JmxWriter jmx, ScenarioSpec scenario, TargetAddress target) {
-        // The sampler is named for its scenario, which is what carries scenario identity into the
-        // results file and makes per-scenario objectives evaluable.
+    private static void writeSampler(JmxWriter jmx, WorkloadSpec workload, ScenarioSpec scenario,
+            TargetAddress target) {
+
+        // Named {workload}/{scenario}, because that is the label JMeter writes into the results and
+        // the platform reads back. Objectives are scoped by workload and by scenario, so both parts
+        // have to be in the name for either kind of objective to be evaluable. V1 wrote neither.
         jmx.element("HTTPSamplerProxy", attributes("HttpTestSampleGui", "HTTPSamplerProxy",
-                        scenario.name()))
+                        workload.name() + "/" + scenario.name()))
                 .raw("""
                         <elementProp name="HTTPsampler.Arguments" elementType="Arguments" \
                         guiclass="HTTPArgumentsPanel" testclass="Arguments">

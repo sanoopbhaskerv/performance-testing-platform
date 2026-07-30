@@ -7,6 +7,7 @@ import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.spec.SpecificationDigest;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -33,6 +34,13 @@ import java.util.Objects;
  * @param planId      the compiled plan to execute
  * @param planDigest  expected plan digest; the runner echoes it back and results that disagree are
  *                    rejected rather than merged
+ * @param workloadKey artifact key of the rendered workload this shard executes. A key, not a path:
+ *                    the control plane and the runner do not share a filesystem, and a path would be
+ *                    a promise about one that does not exist
+ * @param operationLabels the labels this shard's results will be reported under, as
+ *                    {@code workload/scenario}. Carried so a runner can label its output the way the
+ *                    platform expects to read it — objectives are scoped by workload and by
+ *                    scenario, and results that used different names could not be judged against them
  * @param deadline    hard wall-clock ceiling; the provider must stop the workload at this point
  *                    even if the plan believes it has more to do
  */
@@ -45,6 +53,8 @@ public record ProvisionRequest(
         String engine,
         ExecutionPlanId planId,
         SpecificationDigest planDigest,
+        String workloadKey,
+        List<String> operationLabels,
         Duration deadline) {
 
     public ProvisionRequest {
@@ -54,6 +64,10 @@ public record ProvisionRequest(
         Objects.requireNonNull(planId, "planId");
         Objects.requireNonNull(planDigest, "planDigest");
         Objects.requireNonNull(deadline, "deadline");
+        if (workloadKey == null || workloadKey.isBlank()) {
+            throw new IllegalArgumentException("workloadKey must not be null or blank");
+        }
+        operationLabels = operationLabels == null ? List.of() : List.copyOf(operationLabels);
         if (engine == null || engine.isBlank()) {
             throw new IllegalArgumentException("engine must not be null or blank");
         }

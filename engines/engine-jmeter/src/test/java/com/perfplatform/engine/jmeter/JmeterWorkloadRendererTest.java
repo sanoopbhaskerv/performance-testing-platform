@@ -96,12 +96,21 @@ class JmeterWorkloadRendererTest {
             assertThat(jmx).contains("<value>10.0</value>");
         }
 
+        /**
+         * The label is {@code workload/scenario}, not the scenario alone.
+         *
+         * <p>Both parts are needed. JMeter writes this name into the results, and objectives are
+         * scoped by workload <em>and</em> by scenario — a label carrying only the scenario makes a
+         * workload-scoped objective unresolvable, and one carrying only the workload makes a
+         * scenario-scoped objective unresolvable. V1 wrote neither.
+         */
         @Test
-        @DisplayName("a sampler is named for its scenario, so results carry scenario identity")
-        void samplersAreNamedForScenarios() {
-            // This is what makes per-scenario objectives evaluable: the name becomes the JTL label.
+        @DisplayName("a sampler is named workload/scenario, so both kinds of objective can be judged")
+        void samplersCarryWorkloadAndScenario() {
             assertThat(renderDefault(JmeterFixtures.twoStagesThreeScenarios()))
-                    .contains("testclass=\"HTTPSamplerProxy\" testname=\"search-client\"");
+                    .contains("testclass=\"HTTPSamplerProxy\" testname=\"api-load/search-client\"")
+                    .contains("testname=\"api-load/open-proposal\"")
+                    .contains("testname=\"api-load/save-proposal\"");
         }
     }
 

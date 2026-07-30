@@ -5,7 +5,6 @@ import com.perfplatform.domain.admission.ConcurrencyAdmissionPolicy;
 import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
-import com.perfplatform.domain.plan.BaselineExecutionPlanCompiler;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
 import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunFailureCode;
@@ -17,9 +16,13 @@ import com.perfplatform.orchestration.OrchestrationSettings;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.support.InMemoryTestRunRepository;
 import com.perfplatform.orchestration.support.OrchestrationFixtures;
+import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
+import com.perfplatform.orchestration.plan.EngineRegistry;
+import com.perfplatform.orchestration.support.OrchestrationFixtures.InMemoryArtifacts;
 import com.perfplatform.orchestration.support.OrchestrationFixtures.InMemoryPlanRepository;
 import com.perfplatform.orchestration.support.OrchestrationFixtures.InMemoryShardRepository;
 import com.perfplatform.orchestration.support.OrchestrationFixtures.StubDefinitionVersionCatalog;
+import com.perfplatform.orchestration.support.OrchestrationFixtures.StubEngineProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -77,6 +80,8 @@ class RunReconcilerTest {
     private final InMemoryShardRepository shards = new InMemoryShardRepository();
     private final InMemoryPlanRepository plans = new InMemoryPlanRepository();
     private final StubDefinitionVersionCatalog versions = new StubDefinitionVersionCatalog();
+    private final InMemoryArtifacts artifacts = new InMemoryArtifacts();
+    private final EngineRegistry engines = new EngineRegistry(List.of(new StubEngineProvider()));
 
     private FakeExecutionProvider provider;
     private TriggerTestRunUseCase trigger;
@@ -86,7 +91,8 @@ class RunReconcilerTest {
 
     @BeforeEach
     void setUp() {
-        provider = FakeExecutionProvider.immediate(clock);
+        provider = new FakeExecutionProvider(clock, Duration.ZERO, Duration.ZERO,
+                artifacts, artifacts);
         trigger = new TriggerTestRunUseCase(runs, versions, clock);
         cancel = new CancelTestRunUseCase(runs, clock);
         team = TeamId.generate();
@@ -98,9 +104,13 @@ class RunReconcilerTest {
     }
 
     private RunReconciler reconciler(String owner, CapacityLimits limits) {
+        RunWorkloadService workloads = new RunWorkloadService(engines, artifacts, artifacts,
+                OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget());
+
         return new RunReconciler(runs, shards, plans, versions,
-                new BaselineExecutionPlanCompiler(), provider, new ConcurrencyAdmissionPolicy(),
-                limits, OrchestrationSettings.DEFAULTS, clock, owner);
+                new EngineDispatchingPlanCompiler(engines), provider,
+                new ConcurrencyAdmissionPolicy(), limits, OrchestrationSettings.DEFAULTS,
+                workloads, clock, owner);
     }
 
     private TestRun queueRun(String key) {

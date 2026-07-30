@@ -379,3 +379,48 @@ select.form-control {
   flex-shrink: 0;
   margin-top: 0.125rem;
 }
+
+
+/* ── Surface tabs ─────────────────────────────────────────────────────
+   V1 and V2 coexist until V2 reaches parity and V1's removal is approved
+   (CLAUDE.md §5), so switching between them is an explicit choice rather
+   than a redirect that silently takes one away.
+
+   These live here rather than in App.css because App.css is not imported
+   by anything — main.tsx loads only index.css. */
+
+.surface-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: auto;
+  margin-right: 1.25rem;
+}
+
+.surface-tab {
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  border-radius: 7px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.surface-tab:hover {
+  opacity: 1;
+}
+
+.surface-tab:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+}
+
+.surface-tab.active {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(129, 140, 248, 0.65);
+  opacity: 1;
+  font-weight: 600;
+}

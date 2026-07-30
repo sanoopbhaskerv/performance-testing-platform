@@ -1,5 +1,6 @@
 package com.perfplatform.orchestration.support;
 
+import com.perfplatform.domain.identity.ArtifactId;
 import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
 import com.perfplatform.domain.identity.TeamId;
@@ -8,9 +9,25 @@ import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.port.DefinitionVersionCatalog;
+import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.ExecutionPlanRepository;
 import com.perfplatform.domain.port.ExecutionPlanRepository.ImmutablePlanException;
+import com.perfplatform.domain.port.ResultCatalog;
+import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.RunnerShardRepository;
+import com.perfplatform.domain.port.TargetResolver;
+import com.perfplatform.domain.results.NormalizedRunResult;
+import com.perfplatform.domain.results.ObjectiveOutcome;
+import com.perfplatform.domain.results.Sample;
+import com.perfplatform.domain.results.SampleSet;
+import com.perfplatform.domain.target.TargetAddress;
+import com.perfplatform.engine.spi.EngineCapabilities;
+import com.perfplatform.engine.spi.EnginePlan;
+import com.perfplatform.engine.spi.ExecutionEngineProvider;
+import com.perfplatform.engine.spi.RenderedWorkload;
+import com.perfplatform.engine.spi.RunnerOutput;
+import com.perfplatform.engine.spi.ShardAssignment;
+import com.perfplatform.engine.spi.WorkloadKind;
 import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
@@ -158,5 +175,161 @@ public final class OrchestrationFixtures {
         public int count() {
             return plans.size();
         }
+    }
+
+    /**
+     * An artifact store and catalog in memory.
+     *
+     * <p>Combined because the reconciler's analysis path uses them together: content goes into one
+     * and its reference into the other, and a test that let them disagree would be testing a state
+     * the production wiring cannot reach.
+     */
+    public static final class InMemoryArtifacts implements ArtifactStore, ResultCatalog {
+
+        private final Map<String, byte[]> content = new HashMap<>();
+        private final List<ArtifactReference> references = new ArrayList<>();
+        private final Map<TestRunId, List<ObjectiveOutcome>> outcomes = new HashMap<>();
+
+        @Override
+        public ArtifactReference store(ArtifactDescriptor descriptor, byte[] body) {
+            String key = "teams/%s/runs/%s/%s/%s".formatted(descriptor.teamId().value(),
+                    descriptor.runId().value(),
+                    descriptor.shardId().map(id -> "shards/" + id.value()).orElse("run"),
+                    descriptor.fileName());
+
+            content.put(key, body == null ? new byte[0] : body);
+            ArtifactReference reference = new ArtifactReference(ArtifactId.generate(),
+                    descriptor.runId(), descriptor.shardId(), descriptor.type(), key,
+                    "sha256:test", descriptor.contentType(), body == null ? 0 : body.length,
+                    java.time.Instant.parse("2026-07-30T10:00:00Z"));
+
+            references.removeIf(existing -> existing.objectKey().equals(key));
+            references.add(reference);
+            return reference;
+        }
+
+        @Override
+        public Optional<byte[]> read(ArtifactReference reference) {
+            return Optional.ofNullable(content.get(reference.objectKey()));
+        }
+
+        @Override
+        public List<ArtifactReference> listForRun(TestRunId runId) {
+            return references.stream().filter(r -> r.runId().equals(runId)).toList();
+        }
+
+        @Override
+        public void recordArtifact(ArtifactReference reference) {
+            // Content and reference are stored together by store(), so this is already done.
+        }
+
+        @Override
+        public List<ArtifactReference> artifactsFor(TestRunId runId) {
+            return listForRun(runId);
+        }
+
+        @Override
+        public void recordObjectiveOutcomes(TestRunId runId, List<ObjectiveOutcome> recorded) {
+            outcomes.put(runId, List.copyOf(recorded));
+        }
+
+        @Override
+        public List<ObjectiveOutcome> objectiveOutcomesFor(TestRunId runId) {
+            return outcomes.getOrDefault(runId, List.of());
+        }
+    }
+
+    /** A resolver that always returns the same permitted address. */
+    public static TargetResolver fixedTarget() {
+        return (teamId, applicationName, environment) ->
+                Optional.of(TargetAddress.parse("http://localhost:8080"));
+    }
+
+    /** A resolver that resolves nothing, for testing the refusal path. */
+    public static TargetResolver noTarget() {
+        return (teamId, applicationName, environment) -> Optional.empty();
+    }
+
+    /**
+     * A minimal engine, so orchestration can be tested without depending on a real one.
+     *
+     * <p>Orchestration must not depend on {@code engine-jmeter} (CLAUDE.md §9), so its tests cannot
+     * use it. This implements the SPI just enough to exercise the control loop: it compiles a trivial
+     * plan, renders a marker file, and parses the JTL shape the fake provider writes.
+     */
+    public static final class StubEngineProvider implements ExecutionEngineProvider {
+
+        public static final String ENGINE_ID = "jmeter";
+
+        @Override
+        public String engineId() {
+            return ENGINE_ID;
+        }
+
+        @Override
+        public EngineCapabilities capabilities() {
+            return new EngineCapabilities(ENGINE_ID, Set.of(WorkloadKind.PROTOCOL),
+                    Set.of("manual"), Set.of("stages"), 500, true, true, "stub/engine:1.0.0");
+        }
+
+        @Override
+        public com.perfplatform.domain.validation.ValidationResult validate(
+                PerformanceTestSpecification specification) {
+            return com.perfplatform.domain.validation.ValidationResult.valid();
+        }
+
+        @Override
+        public EnginePlan compile(PerformanceTestSpecification specification) {
+            return new EnginePlan("{\"engine\":\"jmeter\",\"stub\":true}", 1,
+                    specification.peakProtocolUsers(), 900);
+        }
+
+        @Override
+        public RenderedWorkload render(PerformanceTestSpecification specification,
+                com.perfplatform.domain.plan.ExecutionPlan plan, ShardAssignment assignment,
+                TargetAddress target) {
+            return new RenderedWorkload("shard-%d.stub".formatted(assignment.shardIndex()),
+                    "text/plain", "shard=" + assignment.shardIndex()
+                    + " target=" + target.baseUrl()
+                    + " correlation=" + assignment.correlationValue());
+        }
+
+        /** Reads the same CSV shape the fake provider writes: timeStamp, elapsed, label, success. */
+        @Override
+        public SampleSet parse(RunnerOutput output) {
+            List<Sample> samples = new ArrayList<>();
+            long unparsed = 0;
+
+            for (RunnerOutput.ShardResult shard : output.shardResults()) {
+                String[] lines = shard.resultData().split("\n");
+                for (int i = 1; i < lines.length; i++) {
+                    String[] fields = lines[i].split(",");
+                    if (fields.length < 8) {
+                        if (!lines[i].isBlank()) {
+                            unparsed++;
+                        }
+                        continue;
+                    }
+                    try {
+                        samples.add(new Sample(fields[2], Long.parseLong(fields[1]),
+                                "true".equals(fields[7]), Long.parseLong(fields[0])));
+                    } catch (RuntimeException e) {
+                        unparsed++;
+                    }
+                }
+            }
+            return new SampleSet(samples, unparsed);
+        }
+    }
+
+    /** An analyzer that summarizes nothing and passes everything, for control-flow tests. */
+    public static RunAnalyzer permissiveAnalyzer() {
+        return (runId, engine, shardsExpected, shardsReported, samples, objectives) ->
+                new RunAnalyzer.Analysis(
+                        new NormalizedRunResult(runId, engine, Optional.empty(), Optional.empty(),
+                                shardsExpected, shardsReported,
+                                com.perfplatform.domain.results.OperationMetrics.empty("*"),
+                                Map.of()),
+                        List.of());
     }
 }

@@ -1,6 +1,8 @@
 package com.perfplatform.api.v2;
 
+import com.perfplatform.api.v2.dto.ArtifactResponse;
 import com.perfplatform.api.v2.dto.CancellationResponse;
+import com.perfplatform.api.v2.dto.ObjectiveOutcomeResponse;
 import com.perfplatform.api.v2.dto.RunEventResponse;
 import com.perfplatform.api.v2.dto.TestRunResponse;
 import com.perfplatform.api.v2.dto.TriggerTestRunRequest;
@@ -101,6 +103,44 @@ public class TestRunController {
                 .location(URI.create("/api/v2/test-runs/" + result.run().id()))
                 .header(IDEMPOTENT_REPLAY, Boolean.toString(result.replayed()))
                 .body(TestRunResponse.from(result.run()));
+    }
+
+    /**
+     * The caller's teams' runs, newest first.
+     *
+     * <p>No team parameter. The caller's teams are known from their identity, and accepting one would
+     * invite a request for a team they do not belong to — a question the API should not offer to
+     * answer at all rather than answer with a refusal.
+     */
+    @Operation(
+            summary = "List recent runs",
+            description = "Runs belonging to the caller's teams, newest first.")
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    public List<TestRunResponse> list(@RequestParam(defaultValue = "25") int limit) {
+        return readRun.listForCaller(callers.current(), limit).stream()
+                .map(TestRunResponse::from)
+                .toList();
+    }
+
+    @Operation(
+            summary = "Get a run's objective verdicts",
+            description = "Empty until the run has been analyzed. INDETERMINATE means the objective "
+                    + "could not be judged — incomplete results, or nothing measured in its scope.")
+    @GetMapping(value = "/{runId}/objectives", produces = MediaType.APPLICATION_JSON_VALUE)
+    public List<ObjectiveOutcomeResponse> objectives(@PathVariable String runId) {
+        return readRun.objectives(TestRunId.of(runId), callers.current()).stream()
+                .map(ObjectiveOutcomeResponse::from)
+                .toList();
+    }
+
+    @Operation(
+            summary = "List a run's artifacts",
+            description = "References only. Downloading is a separate authorized request.")
+    @GetMapping(value = "/{runId}/artifacts", produces = MediaType.APPLICATION_JSON_VALUE)
+    public List<ArtifactResponse> artifacts(@PathVariable String runId) {
+        return readRun.artifacts(TestRunId.of(runId), callers.current()).stream()
+                .map(ArtifactResponse::from)
+                .toList();
     }
 
     @Operation(summary = "Get a run's current state")

@@ -19,11 +19,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The guards that stop development-only components reaching production.
  *
- * <p>Two of Increment 1C's components are deliberately not production-ready: an execution provider
- * that generates no load, and a caller identity derived from V1 API keys. Both are useful and both
- * are dangerous in the wrong place — a platform reporting successful runs for tests that never
- * executed is worse than one that fails to start, because the reports look real and a team will act
- * on numbers that describe nothing.
+ * <p>Several components are deliberately not production-ready: an execution provider that generates
+ * no load, one that generates it inside this JVM, a caller identity derived from V1 API keys, and a
+ * target resolver reading V1 config. Each is useful and each is dangerous in the wrong place — a
+ * platform reporting successful runs for tests that never executed is worse than one that fails to
+ * start, because the reports look real and a team will act on numbers that describe nothing.
  *
  * <p>Asserted by constructing the configuration directly rather than booting a context under a
  * production profile: the expected outcome is that startup fails, and a test that asserted on a
@@ -76,7 +76,10 @@ class ProductionSafetyGuardTest {
         @Test
         @DisplayName("is available for local development")
         void availableLocally() {
-            assertThat(configurationFor("local").executionProvider(Clock.systemUTC()).providerId())
+            // A null artifact store simply means no synthetic results are written; the provider is
+            // still the one selected, which is what this asserts.
+            assertThat(configurationFor("local")
+                    .executionProvider(Clock.systemUTC(), null, null).providerId())
                     .isEqualTo("fake");
         }
 
@@ -84,17 +87,17 @@ class ProductionSafetyGuardTest {
         @DisplayName("is refused under the production profile")
         void refusedInProduction() {
             assertThatThrownBy(() ->
-                    configurationFor("production").executionProvider(Clock.systemUTC()))
+                    configurationFor("production").executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("generates no load")
-                    .hasMessageContaining("must never run under a production profile");
+                    .hasMessageContaining("must never run under a production profile")
+                    .hasMessageContaining("Increment 1E");
         }
 
         @Test
         @DisplayName("is refused under the shared-runner profile too")
         void refusedInSharedRunner() {
             assertThatThrownBy(() ->
-                    configurationFor("shared-runner").executionProvider(Clock.systemUTC()))
+                    configurationFor("shared-runner").executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class);
         }
 
@@ -112,8 +115,9 @@ class ProductionSafetyGuardTest {
             properties.setExecutionProvider("kubernetes");
 
             assertThatThrownBy(() -> new OrchestrationConfiguration(properties, environment)
-                    .executionProvider(Clock.systemUTC()))
+                    .executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Unsupported execution provider")
                     .hasMessageContaining("Increment 1E");
         }
     }
@@ -141,6 +145,31 @@ class ProductionSafetyGuardTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("V1 API keys")
                     .hasMessageContaining("Increment 4");
+        }
+    }
+
+    @Nested
+    @DisplayName("the V1 team-YAML target resolver")
+    class TargetResolution {
+
+        @Test
+        @DisplayName("is available for local development")
+        void availableLocally() {
+            assertThatCode(() -> configurationFor("local").targetResolver(null, null))
+                    .doesNotThrowAnyException();
+        }
+
+        /**
+         * A production deployment needs environment classification and a hostname allowlist
+         * (CLAUDE.md §20), neither of which V1's team YAML can express. Enabling production or
+         * unrestricted targets is a pause condition (§31), so this fails closed.
+         */
+        @Test
+        @DisplayName("is refused under the production profile")
+        void refusedInProduction() {
+            assertThatThrownBy(() -> configurationFor("production").targetResolver(null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("hostname allowlist");
         }
     }
 

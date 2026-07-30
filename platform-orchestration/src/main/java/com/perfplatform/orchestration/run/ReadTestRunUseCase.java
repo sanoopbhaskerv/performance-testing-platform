@@ -3,8 +3,12 @@ package com.perfplatform.orchestration.run;
 import com.perfplatform.domain.admission.AdmissionDecision;
 import com.perfplatform.domain.admission.AdmissionPolicy;
 import com.perfplatform.domain.admission.CapacityLimits;
+import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.port.ArtifactStore;
+import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.TestRunRepository;
+import com.perfplatform.domain.results.ObjectiveOutcome;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunState;
 import com.perfplatform.domain.run.TestRun;
@@ -12,6 +16,8 @@ import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase.UnknownRunException;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,15 +35,50 @@ public final class ReadTestRunUseCase {
     /** Bound on one page of history, so a long-running test cannot be asked for in one response. */
     private static final int MAX_EVENTS = 500;
 
+    /** Bound on one page of runs, so a long-lived team cannot be asked for in one response. */
+    private static final int MAX_RUNS = 100;
+
     private final TestRunRepository runs;
+    private final ResultCatalog results;
     private final AdmissionPolicy admissionPolicy;
     private final CapacityLimits limits;
 
-    public ReadTestRunUseCase(TestRunRepository runs, AdmissionPolicy admissionPolicy,
-            CapacityLimits limits) {
+    public ReadTestRunUseCase(TestRunRepository runs, ResultCatalog results,
+            AdmissionPolicy admissionPolicy, CapacityLimits limits) {
         this.runs = Objects.requireNonNull(runs, "runs");
+        this.results = Objects.requireNonNull(results, "results");
         this.admissionPolicy = Objects.requireNonNull(admissionPolicy, "admissionPolicy");
         this.limits = Objects.requireNonNull(limits, "limits");
+    }
+
+    /**
+     * The caller's teams' runs, newest first.
+     *
+     * <p>Scoped to the teams the caller belongs to rather than filtered afterwards: a listing that
+     * fetched everything and then removed what the caller may not see is one refactor away from
+     * forgetting the second step.
+     */
+    public List<TestRun> listForCaller(CallerContext caller, int limit) {
+        List<TestRun> visible = new ArrayList<>();
+        for (TeamId teamId : caller.teamIds()) {
+            if (caller.canAct(Scope.RUNS_READ, teamId)) {
+                visible.addAll(runs.findByTeam(teamId, Math.min(Math.max(limit, 1), MAX_RUNS)));
+            }
+        }
+        visible.sort(Comparator.comparing((TestRun run) -> run.timeline().requestedAt()).reversed());
+        return List.copyOf(visible);
+    }
+
+    /** A run's stored objective verdicts. */
+    public List<ObjectiveOutcome> objectives(TestRunId runId, CallerContext caller) {
+        get(runId, caller);
+        return results.objectiveOutcomesFor(runId);
+    }
+
+    /** A run's stored artifacts. References only — content is served through a download grant. */
+    public List<ArtifactStore.ArtifactReference> artifacts(TestRunId runId, CallerContext caller) {
+        get(runId, caller);
+        return results.artifactsFor(runId);
     }
 
     public TestRun get(TestRunId runId, CallerContext caller) {

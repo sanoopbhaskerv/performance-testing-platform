@@ -38,6 +38,15 @@ public enum RunFailureCode {
      */
     PLAN_DIGEST_MISMATCH,
 
+    /**
+     * The run executed cleanly but the system under test did not meet its objectives.
+     *
+     * <p>Distinct from every other code here: nothing went wrong with the <em>test</em>. It is a
+     * failure of the thing being measured, which is the only conclusion anyone asked for, and
+     * reporting it as a completed run would bury it.
+     */
+    OBJECTIVE_BREACHED,
+
     /** Analysis could not produce objective outcomes from the artifacts that were collected. */
     ANALYSIS_FAILED,
 

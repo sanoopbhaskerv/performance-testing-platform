@@ -5,7 +5,7 @@ apiKey: "test-key-beta"
 
 targets:
   - name: beta-service
-    baseUrl: "http://beta-service:8080"
+    baseUrl: "http://localhost:18098"
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 

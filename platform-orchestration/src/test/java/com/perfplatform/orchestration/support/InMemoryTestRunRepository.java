@@ -158,6 +158,15 @@ public final class InMemoryTestRunRepository implements TestRunRepository {
     }
 
     @Override
+    public List<TestRun> findByTeam(TeamId teamId, int limit) {
+        return runs.values().stream()
+                .filter(run -> run.teamId().equals(teamId))
+                .sorted(Comparator.comparing((TestRun run) -> run.timeline().requestedAt()).reversed())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    @Override
     public CapacitySnapshot currentCapacity() {
         Map<TeamId, Integer> byTeam = new HashMap<>();
         int global = 0;

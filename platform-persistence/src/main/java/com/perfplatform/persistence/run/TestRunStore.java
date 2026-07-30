@@ -223,6 +223,15 @@ public class TestRunStore implements TestRunRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public List<TestRun> findByTeam(TeamId teamId, int limit) {
+        return runs.findByTeamIdOrderByRequestedAtDesc(teamId.value()).stream()
+                .limit(Math.max(1, limit))
+                .map(TestRunMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public CapacitySnapshot currentCapacity() {
         Map<TeamId, Integer> byTeam = new HashMap<>();
         int global = 0;

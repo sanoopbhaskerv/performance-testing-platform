@@ -113,6 +113,16 @@ public class TestDefinitionController {
                         ValidationResult.valid()));
     }
 
+    @Operation(
+            summary = "List test definitions",
+            description = "Definitions belonging to the caller's teams.")
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    public List<TestDefinitionResponse> list() {
+        return authoring.listForCaller(callers.current()).stream()
+                .map(TestDefinitionResponse::of)
+                .toList();
+    }
+
     @Operation(summary = "Get a test definition")
     @GetMapping(value = "/{definitionId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public TestDefinitionResponse get(@PathVariable String definitionId) {

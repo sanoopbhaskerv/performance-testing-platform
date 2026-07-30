@@ -2,6 +2,7 @@ package com.perfplatform.persistence.definition;
 
 import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.port.TargetDirectory;
 import com.perfplatform.domain.port.TeamDirectory;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,7 +11,7 @@ import java.util.Optional;
 
 /** Resolves team names against the {@code teams} table. */
 @Repository
-public class TeamDirectoryStore implements TeamDirectory {
+public class TeamDirectoryStore implements TeamDirectory, TargetDirectory {
 
     private final TeamJpaRepository teams;
     private final ApplicationJpaRepository applications;
@@ -27,6 +28,15 @@ public class TeamDirectoryStore implements TeamDirectory {
             return Optional.empty();
         }
         return teams.findByName(name.trim()).map(team -> TeamId.of(team.getId()));
+    }
+
+    /** The reverse lookup, for adapters that bridge to V1 configuration keyed by team name. */
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<String> teamName(TeamId teamId) {
+        return teamId == null
+                ? Optional.empty()
+                : teams.findById(teamId.value()).map(TeamEntity::getName);
     }
 
     @Override

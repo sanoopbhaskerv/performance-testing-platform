@@ -157,6 +157,21 @@ public final class AuthorTestDefinitionUseCase {
         return definition;
     }
 
+    /**
+     * Every definition the caller's teams own.
+     *
+     * <p>Scoped to the caller's teams rather than filtered afterwards, for the same reason as the run
+     * listing: a query that fetched everything and then removed what the caller may not see is one
+     * refactor away from forgetting the second step.
+     */
+    public List<TestDefinitionSummary> listForCaller(CallerContext caller) {
+        List<TestDefinitionSummary> visible = new java.util.ArrayList<>();
+        caller.teamIds().stream()
+                .filter(teamId -> caller.canAct(Scope.DEFINITIONS_READ, teamId))
+                .forEach(teamId -> visible.addAll(definitions.listForTeam(teamId)));
+        return List.copyOf(visible);
+    }
+
     public List<StoredVersion> listVersions(TestDefinitionId definitionId, CallerContext caller) {
         get(definitionId, caller);
         return definitions.listVersions(definitionId);

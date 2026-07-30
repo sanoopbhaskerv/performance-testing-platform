@@ -9,12 +9,15 @@ import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.plan.ExecutionPlanCompiler;
+import com.perfplatform.domain.port.ArtifactStore.ArtifactReference;
 import com.perfplatform.domain.port.DefinitionVersionCatalog;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
 import com.perfplatform.domain.port.ExecutionPlanRepository;
+import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.RunnerShardRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.port.TestRunRepository.ClaimRequest;
+import com.perfplatform.domain.results.ObjectiveOutcome;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunFailureCode;
@@ -81,6 +84,9 @@ public final class RunReconciler {
     private final OrchestrationSettings settings;
     private final Clock clock;
 
+    /** Rendering and analysis — everything that talks to an engine or the artifact store. */
+    private final RunWorkloadService workloads;
+
     /**
      * Identifies this reconciler instance in claims and events.
      *
@@ -99,6 +105,7 @@ public final class RunReconciler {
             AdmissionPolicy admissionPolicy,
             CapacityLimits limits,
             OrchestrationSettings settings,
+            RunWorkloadService workloads,
             Clock clock,
             String owner) {
         this.runs = Objects.requireNonNull(runs, "runs");
@@ -110,6 +117,7 @@ public final class RunReconciler {
         this.admissionPolicy = Objects.requireNonNull(admissionPolicy, "admissionPolicy");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.workloads = Objects.requireNonNull(workloads, "workloads");
         this.clock = Objects.requireNonNull(clock, "clock");
         if (owner == null || owner.isBlank()) {
             throw new IllegalArgumentException("Reconciler owner must not be null or blank");
@@ -191,15 +199,7 @@ public final class RunReconciler {
         switch (run.state()) {
             case PROVISIONING -> provisionRunner(run, now, report);
             case RUNNING -> observeShards(run, now, report);
-            // No result normalization exists yet, so a run with all shards finished has nothing
-            // left to compute. Increment 1D puts real analysis here; the state and its transitions
-            // are already correct, which is why that change does not touch this control loop.
-            case ANALYZING -> {
-                runs.apply(run.transitionTo(RunState.COMPLETED, RunEvent.SYSTEM_ACTOR,
-                        "All shards finished", now));
-                log.info("Run completed runId={} teamId={}", run.id(), run.teamId());
-                report.completed();
-            }
+            case ANALYZING -> analyzeRun(run, now, report);
             default -> log.debug("Nothing to do for runId={} in state={}", run.id(), run.state());
         }
     }
@@ -240,8 +240,22 @@ public final class RunReconciler {
                 continue;
             }
 
+            // Rendered and stored before the runner is asked to start, so the file that executed is
+            // recoverable whatever happens to the runner afterwards.
+            ArtifactReference workload;
+            try {
+                workload = workloads.prepareShard(withPlan, plan, version, shard);
+            } catch (RunWorkloadService.TargetUnresolvableException e) {
+                // Not transient. A target that is not registered does not become registered by
+                // retrying, and a run that sat in PROVISIONING forever would hold a capacity slot
+                // while telling the consumer nothing. The message is the actionable part.
+                fail(withPlan, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+                return;
+            }
+
             ExecutionProvider.ProvisioningResult result = provider.provision(
-                    provisionRequest(withPlan, plan, shard));
+                    provisionRequest(withPlan, plan, shard, workload.objectKey(),
+                            RunWorkloadService.operationLabels(version.specification())));
 
             if (!result.isAccepted()) {
                 String reason = result.failureReason().orElse("The runner could not be created");
@@ -265,6 +279,56 @@ public final class RunReconciler {
         report.admitted();
     }
 
+    /**
+     * Reduces the run's results, judges them, and reaches a terminal state.
+     *
+     * <p>A run whose objectives were not met reaches {@code FAILED}, not {@code COMPLETED}. The run
+     * executed successfully but the system under test did not meet its contract, and reporting that
+     * as a completed run would bury the only conclusion anyone asked for. The failure code says
+     * which it was.
+     */
+    private void analyzeRun(TestRun run, Instant now, ReconciliationReport.Builder report) {
+        Optional<DefinitionVersion> version = versions.find(run.definitionVersionId());
+        Optional<ExecutionPlan> plan = run.executionPlanId().flatMap(plans::find);
+
+        if (version.isEmpty() || plan.isEmpty()) {
+            fail(run, RunFailureCode.ANALYSIS_FAILED,
+                    "The definition version or execution plan this run references is no longer "
+                            + "readable, so its results cannot be judged", now, report);
+            return;
+        }
+
+        RunAnalyzer.Analysis analysis = workloads.analyze(
+                run, plan.get(), version.get(), shards.findByRun(run.id()));
+
+        if (analysis.result().shardsReported() == 0) {
+            fail(run, RunFailureCode.RESULTS_INCOMPLETE,
+                    "No runner produced usable results, so nothing could be measured", now, report);
+            return;
+        }
+
+        if (!analysis.isSuccessful()) {
+            // Not every unmet objective is a breach: one that could not be judged at all is
+            // reported as incomplete results, because the two send an operator to different places.
+            boolean anyBreach = analysis.outcomes().stream()
+                    .anyMatch(outcome -> outcome.verdict() == ObjectiveOutcome.Verdict.BREACH);
+
+            fail(run,
+                    anyBreach ? RunFailureCode.OBJECTIVE_BREACHED : RunFailureCode.RESULTS_INCOMPLETE,
+                    anyBreach
+                            ? "The run completed but did not meet its objectives"
+                            : "The run completed but its objectives could not be judged",
+                    now, report);
+            return;
+        }
+
+        runs.apply(run.transitionTo(RunState.COMPLETED, RunEvent.SYSTEM_ACTOR,
+                "All objectives met", now));
+        log.info("Run completed runId={} teamId={} objectives={}",
+                run.id(), run.teamId(), analysis.outcomes().size());
+        report.completed();
+    }
+
     private ExecutionPlan resolvePlan(TestRun run, DefinitionVersion version, Instant now) {
         return run.executionPlanId()
                 .flatMap(plans::find)
@@ -280,7 +344,8 @@ public final class RunReconciler {
                 .toList();
     }
 
-    private ProvisionRequest provisionRequest(TestRun run, ExecutionPlan plan, RunnerShard shard) {
+    private ProvisionRequest provisionRequest(TestRun run, ExecutionPlan plan, RunnerShard shard,
+            String workloadKey, List<String> operationLabels) {
         return new ProvisionRequest(
                 run.id(),
                 run.teamId(),
@@ -290,6 +355,8 @@ public final class RunReconciler {
                 plan.engine(),
                 plan.id(),
                 plan.planDigest(),
+                workloadKey,
+                operationLabels,
                 deadlineFor(plan));
     }
 

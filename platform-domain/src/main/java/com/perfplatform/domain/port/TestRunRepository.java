@@ -155,6 +155,9 @@ public interface TestRunRepository {
      */
     List<TestRun> claimRuns(ClaimRequest request, Set<RunState> states);
 
+    /** A team's runs, newest first. Bounded, because a team accumulates runs indefinitely. */
+    List<TestRun> findByTeam(TeamId teamId, int limit);
+
     /** Capacity currently in use. For reporting; admission uses the snapshot taken during a claim. */
     CapacitySnapshot currentCapacity();
 

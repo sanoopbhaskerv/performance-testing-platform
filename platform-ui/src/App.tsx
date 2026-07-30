@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import PerformanceConsole from './v2/PerformanceConsole';
 import {
   Activity,
   Play,
@@ -38,6 +39,15 @@ function App() {
   const [selectedTeam, setSelectedTeam] = useState<string>('');
   const [apiKey, setApiKey] = useState<string>('');
   const [testType, setTestType] = useState<string>('load');
+
+  /**
+   * Which surface is showing.
+   *
+   * V2 is the default because it is the one that works end to end — durable runs, objectives,
+   * cancellation. V1 stays reachable until its replacement is verified and its removal approved
+   * (CLAUDE.md §5), which is why this is a tab and not a redirect.
+   */
+  const [surface, setSurface] = useState<'v2' | 'v1'>('v2');
 
   const [history, setHistory] = useState<TestRun[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
@@ -189,12 +199,51 @@ function App() {
           <Activity className="logo-icon" size={28} />
           <span>Antigravity<span className="text-gradient">Core</span></span>
         </div>
+        <nav className="surface-tabs" aria-label="Platform version">
+          <button
+            className={surface === 'v2' ? 'surface-tab active' : 'surface-tab'}
+            onClick={() => setSurface('v2')}
+            aria-current={surface === 'v2'}
+          >
+            Performance tests
+          </button>
+          <button
+            className={surface === 'v1' ? 'surface-tab active' : 'surface-tab'}
+            onClick={() => setSurface('v1')}
+            aria-current={surface === 'v1'}
+          >
+            Legacy (v1)
+          </button>
+        </nav>
         <div className="text-sm text-secondary flex items-center gap-2">
           <Server size={16} />
           <span>v1.0.0</span>
         </div>
       </header>
 
+      {surface === 'v2' && (
+        <main className="main-content">
+          <section className="glass-panel" style={{ marginBottom: '1.25rem' }}>
+            <div className="card-body">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="v2-key">Team API key</label>
+                <input
+                  id="v2-key"
+                  type="password"
+                  className="form-control"
+                  placeholder="X-API-Key for your team"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          </section>
+          <PerformanceConsole apiKey={apiKey} />
+        </main>
+      )}
+
+      {surface === 'v1' && (
       <main className="main-content">
         <div className="dashboard-grid">
 
@@ -365,6 +414,7 @@ function App() {
 
         </div>
       </main>
+      )}
     </div>
   );
 }

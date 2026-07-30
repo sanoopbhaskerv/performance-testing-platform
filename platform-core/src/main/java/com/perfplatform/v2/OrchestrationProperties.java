@@ -61,6 +61,12 @@ public class OrchestrationProperties {
     /** Most runs one reconciliation pass will claim. */
     private int claimBatchSize = 20;
 
+    /** JMeter installation, for the local execution provider. Empty means "search the usual places". */
+    private String jmeterHome = "";
+
+    /** Scratch and artifact root. Pod-local and temporary; never a durable artifact reference. */
+    private String workDirectory = "/tmp/perf-platform";
+
     private final Capacity capacity = new Capacity();
     private final Fake fake = new Fake();
 
@@ -195,6 +201,22 @@ public class OrchestrationProperties {
 
     public void setClaimBatchSize(int claimBatchSize) {
         this.claimBatchSize = claimBatchSize;
+    }
+
+    public String getJmeterHome() {
+        return jmeterHome;
+    }
+
+    public void setJmeterHome(String jmeterHome) {
+        this.jmeterHome = jmeterHome;
+    }
+
+    public String getWorkDirectory() {
+        return workDirectory;
+    }
+
+    public void setWorkDirectory(String workDirectory) {
+        this.workDirectory = workDirectory;
     }
 
     public Capacity getCapacity() {

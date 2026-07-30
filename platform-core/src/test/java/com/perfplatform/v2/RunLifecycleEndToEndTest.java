@@ -101,6 +101,15 @@ class RunLifecycleEndToEndTest {
     /** Matches {@code team:} in the alpha test fixture, which is what the key resolves to. */
     private static final String TEAM_NAME = "alpha";
 
+    /**
+     * Matches a {@code targets[].name} in the alpha fixture.
+     *
+     * <p>That correspondence is the contract: an application resolves to the team target of the same
+     * name, which is how the team synchronizer creates applications and how the target resolver finds
+     * their base URL. A run whose application names no target cannot be pointed anywhere.
+     */
+    private static final String APPLICATION_NAME = "alpha-service";
+
     private static final Instant NOW = Instant.parse("2026-07-29T10:15:30Z");
 
     @Autowired
@@ -143,7 +152,7 @@ class RunLifecycleEndToEndTest {
 
         ApplicationId applicationId = ApplicationId.generate();
         applications.saveAndFlush(new ApplicationEntity(applicationId.value(), teamId.value(),
-                "proposal", ApplicationEntity.TargetClass.NON_PRODUCTION, NOW));
+                APPLICATION_NAME, ApplicationEntity.TargetClass.NON_PRODUCTION, NOW));
 
         TestDefinitionEntity definition = registry.createDefinition(TestDefinitionId.generate(),
                 teamId, applicationId, "proposal-baseline-" + shortId(), "alice@example.com");
@@ -176,8 +185,10 @@ class RunLifecycleEndToEndTest {
         try {
             ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
             JsonNode root = yaml.readTree(Files.readString(example));
-            // Point the document at the team this test seeded, so the fixture reads coherently.
+            // Point the document at the team and application this test seeded, so the target
+            // resolver can find the base URL the run should address.
             ((ObjectNode) root.get("metadata")).put("team", TEAM_NAME);
+            ((ObjectNode) root.get("metadata")).put("application", APPLICATION_NAME);
             return new ObjectMapper().writeValueAsString(root);
         } catch (IOException e) {
             throw new IllegalStateException("Could not read " + example, e);
