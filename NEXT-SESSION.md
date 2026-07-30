@@ -85,18 +85,38 @@ Assemble from what is already persisted:
 | Artifacts | `ResultCatalog.artifactsFor` |
 | Plan digest, engine, shard count | `ExecutionPlanRepository.find` |
 
-**The one real gap:** `NormalizedRunResult` (p50/p90/p95/p99, throughput, error counts per
-operation) is computed during analysis and then **thrown away** — only the objective verdicts are
-stored. Two options, pick one and say which:
+**The one real gap — DECIDED, do not relitigate.** `NormalizedRunResult` (p50/p90/p95/p99,
+throughput, error counts per operation) is computed during analysis and then **thrown away**; only
+the objective verdicts are stored.
 
-1. **Persist it.** Add a `run_metrics` table in Flyway `V5`, written by
-   `RunWorkloadService.analyze`. Fast reads, survives artifact expiry. More schema.
-2. **Recompute on read** from the stored `results.jtl` via `engine.parse` + `RunResultReducer`.
-   No schema, and it proves the "analysis is re-runnable from stored artifacts" claim — but it
-   breaks once artifacts are expired by retention, and it is slow for a large JTL.
+**Persist it.** Flyway `V5` adds a `run_metrics` table, written by `RunWorkloadService.analyze` in
+the same transaction as the objective outcomes. A report that stops working once artifact retention
+expires is not a report, and recomputing a large JTL on every read is the wrong cost to pay on the
+path a person waits on.
 
-Recommendation: **(1)**, with (2) available as a verification path. A report that cannot be read
-after artifact retention expires is not a report.
+Shape it on `OperationMetrics`, one row per operation plus one for the `*` aggregate:
+
+```
+run_metrics(
+  id, run_id -> test_runs, operation,          -- '*' for the whole run
+  sample_count, error_count, unparsed_count,   -- unparsed stays in the error denominator (D5)
+  min_millis, max_millis, mean_millis,
+  p50_millis, p90_millis, p95_millis, p99_millis,
+  throughput_per_second_milli,                 -- scaled integer, never a double
+  shards_expected, shards_reported,            -- an incomplete run can never read as a pass
+  measured_from, measured_to, recorded_at,
+  UNIQUE (run_id, operation)
+)
+```
+
+Everything is an integer for the reason the rest of the platform is: these values decide pass or
+fail, and a comparison that can differ in the last bit between two reads is not a verdict. Write
+through a `ResultCatalog` method (`recordRunMetrics` / `runMetricsFor`), replacing on re-analysis
+exactly as `recordObjectiveOutcomes` does — a report showing one operation twice with different
+numbers is worse than no report.
+
+Recomputing from `results.jtl` via `engine.parse` + `RunResultReducer` stays available as a
+*verification* path, and is worth one test asserting the stored numbers match a recomputation.
 
 ### 2c. Report UI
 
