@@ -1,7 +1,8 @@
 # Handoff — live working state
 
 **Purpose:** If the current agent session ends, another agent picks up from here.
-**Read first:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`, then this file.
+**Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
+**Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
 **Last updated:** Increment 1D complete. A performance test can now be authored, triggered, watched and judged from the UI. See §3a.
 
 ---
