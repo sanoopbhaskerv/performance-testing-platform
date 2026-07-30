@@ -47,7 +47,59 @@ Other traps, all real, all hit at least once:
 
 ---
 
-## 2. First task: reports
+## 2. First: make a synthetic run unmistakable
+
+**Do this before the report work.** A report is precisely the artifact that gets screenshotted and
+pasted into tickets, so the marking has to exist before there is a report to mark.
+
+### The problem
+
+The `fake` provider is the default, produces a plausible results file, and the console renders
+*"Passed — p95 was 206ms against a ceiling of 750ms"* with **no marker at all**. The only disclosure
+is inside `runner-manifest.json`, which someone has to know exists, know to open, and know how to
+read. The loudest claim carries the quietest caveat, and the number travels while the caveat does not.
+
+It is worse than it looks: the synthetic samples were deliberately given a zero failure rate so the
+demo would not breach the 1% error objective for an unrelated reason. The result is a provider that
+*always* produces a green, plausible verdict. A fake that always passes is the most misleading kind.
+
+This also fails the standard the rest of this codebase holds to. Everywhere else a bad state is made
+unrepresentable — `RunTransition` makes an unrecorded transition impossible, artifact key prefixes
+make a cross-team read unconstructable, `JmxWriter` makes defect D1 structurally impossible. Here the
+protection is a sentence in a document, which is the weakest enforcement available, used for the one
+thing that fabricates evidence.
+
+### What to build
+
+1. **Carry it on the run, not only in an artifact.** Add `synthetic BOOLEAN NOT NULL DEFAULT false`
+   to `test_runs` (Flyway `V5`, alongside `run_metrics`). Set it from the provider that executed the
+   run — `ExecutionProvider` should declare whether it generates real load, so this is a property of
+   the provider rather than a string comparison on its name. Surface it on `TestRunResponse`, and on
+   the report.
+
+2. **Show it in the UI, permanently.** A banner on any run where it is true, and on the report:
+   *"No load was generated. These measurements are synthetic and describe nothing."* Not a tooltip,
+   not a footnote — it must survive a screenshot.
+
+3. **Show the active provider in the console header.** One line, always visible.
+
+4. **The strong version, and the recommended one: a synthetic run must not produce a green verdict.**
+   Report its objectives as `INDETERMINATE` with detail "no load was generated, so nothing could be
+   measured". The platform already has that concept and it already means exactly this. The cost is
+   that the local demo shows `INDETERMINATE` rather than `Passed`, which is the correct outcome for
+   a run that measured nothing — and the `PASS` path is already covered thoroughly by
+   `RunAnalysisTest`, so nothing is lost in coverage.
+
+   If (4) is taken, `RunLifecycleEndToEndTest` needs updating: it currently asserts `COMPLETED`, and
+   should assert the run reached a terminal state with indeterminate objectives. Its job is wiring,
+   not verdict logic.
+
+Be suspicious of the argument that (4) makes the platform less impressive to demonstrate. That is the
+argument to distrust most, given what this platform is for.
+
+---
+
+## 3. Then: reports
 
 **None of this exists today.** Confirmed by grep: no report endpoint, no report UI, no artifact
 download. `GET /api/v2/test-runs/{runId}/artifacts` returns *references only* — key, digest, size —
@@ -55,7 +107,7 @@ and deliberately no URL.
 
 The data is all there and already stored. Nothing new needs measuring.
 
-### 2a. Artifact download (build first — the report links to it)
+### 3a. Artifact download (build first — the report links to it)
 
 `GET /api/v2/test-runs/{runId}/artifacts/{artifactId}/content`
 
@@ -67,7 +119,7 @@ The data is all there and already stored. Nothing new needs measuring.
 - 404 for an artifact belonging to another team — same as one that does not exist, so the endpoint
   is not an oracle for which run ids are real.
 
-### 2b. Report endpoint
+### 3b. Report endpoint
 
 `GET /api/v2/test-runs/{runId}/report`
 
@@ -118,7 +170,7 @@ numbers is worse than no report.
 Recomputing from `results.jtl` via `engine.parse` + `RunResultReducer` stays available as a
 *verification* path, and is worth one test asserting the stored numbers match a recomputation.
 
-### 2c. Report UI
+### 3c. Report UI
 
 Add to `platform-ui/src/v2/`:
 
@@ -131,16 +183,20 @@ Add to `platform-ui/src/v2/`:
   An advanced read-only "generated plan" view is permitted and is where the JMX may be shown.
 - **If any chart is added, load the `dataviz` skill first.** Do not hand-roll chart colours.
 
-### 2d. Tests to add with it
+### 3d. Tests to add with it
 
 - Report assembles correctly for a passed run, a breached run, and an `INDETERMINATE` run.
 - A report for a run with no analysis yet returns something honest, not a fabricated zero.
+- **A report for a synthetic run is marked as such** — the flag from section 2 reaches the report
+  payload, not just the run.
 - Artifact download refuses another team's artifact with 404.
 - Digest verification rejects tampered content.
+- Stored `run_metrics` match a recomputation from `results.jtl` via `engine.parse` +
+  `RunResultReducer`.
 
 ---
 
-## 3. After reports — Increment 1E
+## 4. After reports — Increment 1E
 
 In order:
 
@@ -162,7 +218,7 @@ that is honest rather than a defect to hide.
 
 ---
 
-## 4. Rules that do not bend
+## 5. Rules that do not bend
 
 - **Stop after the increment you were asked for.** Produce the CLAUDE.md §30 completion report.
 - Do not push, tag, merge or publish without explicit authorization.
