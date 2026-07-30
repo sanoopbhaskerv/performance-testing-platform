@@ -3,6 +3,7 @@ package com.perfplatform.domain.port;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.results.NormalizedRunResult;
 import com.perfplatform.domain.results.ObjectiveOutcome;
+import com.perfplatform.domain.results.ObjectiveOutcome.Verdict;
 import com.perfplatform.domain.results.SampleSet;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 
@@ -41,6 +42,38 @@ public interface RunAnalyzer {
          */
         public boolean isSuccessful() {
             return outcomes.stream().noneMatch(ObjectiveOutcome::blocksSuccess);
+        }
+
+        /**
+         * The same analysis with every verdict restated as {@link Verdict#INDETERMINATE}.
+         *
+         * <p>For a run whose measurements cannot support a verdict at all — today, one executed by a
+         * provider that generates no load. The arithmetic is left intact and still stored, because
+         * the numbers are genuinely what the artifacts contain and a report that hid them would be
+         * harder to debug; what is removed is any claim about whether they were met.
+         *
+         * <p>{@code INDETERMINATE} rather than {@code BREACH}: nothing failed. The system under test
+         * may be perfectly healthy, and nobody looked. It is also not a pass, which is the whole
+         * point — a provider that always produced a green verdict would be the most misleading thing
+         * this platform could contain.
+         *
+         * <p>The threshold is preserved on each outcome so a reader can still see what was being
+         * asked; the observed value is zeroed, because there is no observation.
+         *
+         * @param reason short explanation, shown to the consumer in place of the comparison
+         */
+        public Analysis asIndeterminate(String reason) {
+            List<ObjectiveOutcome> restated = outcomes.stream()
+                    .map(outcome -> new ObjectiveOutcome(
+                            outcome.objectiveId(),
+                            outcome.metric(),
+                            outcome.scope(),
+                            ObjectiveOutcome.Verdict.INDETERMINATE,
+                            0,
+                            outcome.threshold(),
+                            reason))
+                    .toList();
+            return new Analysis(result, restated);
         }
     }
 

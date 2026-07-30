@@ -39,6 +39,7 @@ final class TestRunMapper {
                 cancellationOf(entity),
                 failureOf(entity),
                 claimOf(entity),
+                entity.isSynthetic(),
                 entity.getLockVersion());
     }
 
@@ -81,6 +82,12 @@ final class TestRunMapper {
         entity.setClaim(
                 run.claim().map(TestRun.Claim::owner).orElse(null),
                 run.claim().map(TestRun.Claim::expiresAt).orElse(null));
+
+        // Set, never cleared. The entity offers no way to clear it, so a run read back with the flag
+        // already true keeps it even if a caller somehow passed an unmarked aggregate.
+        if (run.synthetic()) {
+            entity.markSynthetic();
+        }
     }
 
     private static Optional<TestRun.Cancellation> cancellationOf(TestRunEntity entity) {

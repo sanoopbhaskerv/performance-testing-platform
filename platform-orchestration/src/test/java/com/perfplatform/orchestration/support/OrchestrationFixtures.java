@@ -1,5 +1,7 @@
 package com.perfplatform.orchestration.support;
 
+import com.perfplatform.domain.execution.ExecutionProvider;
+import com.perfplatform.domain.execution.ProvisionRequest;
 import com.perfplatform.domain.identity.ArtifactId;
 import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
@@ -189,6 +191,7 @@ public final class OrchestrationFixtures {
         private final Map<String, byte[]> content = new HashMap<>();
         private final List<ArtifactReference> references = new ArrayList<>();
         private final Map<TestRunId, List<ObjectiveOutcome>> outcomes = new HashMap<>();
+        private final Map<TestRunId, NormalizedRunResult> metrics = new HashMap<>();
 
         @Override
         public ArtifactReference store(ArtifactDescriptor descriptor, byte[] body) {
@@ -228,14 +231,22 @@ public final class OrchestrationFixtures {
             return listForRun(runId);
         }
 
+        /** Replaces both, as the store does, so re-analysis in a test behaves as it does in production. */
         @Override
-        public void recordObjectiveOutcomes(TestRunId runId, List<ObjectiveOutcome> recorded) {
+        public void recordAnalysis(TestRunId runId, NormalizedRunResult result,
+                List<ObjectiveOutcome> recorded) {
+            metrics.put(runId, result);
             outcomes.put(runId, List.copyOf(recorded));
         }
 
         @Override
         public List<ObjectiveOutcome> objectiveOutcomesFor(TestRunId runId) {
             return outcomes.getOrDefault(runId, List.of());
+        }
+
+        @Override
+        public Optional<NormalizedRunResult> runMetricsFor(TestRunId runId) {
+            return Optional.ofNullable(metrics.get(runId));
         }
     }
 
@@ -320,6 +331,48 @@ public final class OrchestrationFixtures {
             }
             return new SampleSet(samples, unparsed);
         }
+    }
+
+    /**
+     * A provider that behaves exactly like its delegate but declares that it generates real load.
+     *
+     * <p>Needed because {@link com.perfplatform.orchestration.execution.FakeExecutionProvider}
+     * correctly and permanently declares that it generates none, which makes every run it executes
+     * reach {@code FAILED}. That is the right production behaviour and the wrong fixture for a test
+     * asking "does the control loop drive a run to a successful terminal state" — without this,
+     * nothing would exercise the {@code COMPLETED} path at all.
+     *
+     * <p>Deliberately a test decorator rather than a flag on the fake provider. A switch that lets
+     * the fake claim to generate load is a switch that eventually gets set in a configuration file,
+     * and the whole point of §2 is that this particular lie must be impossible to tell.
+     */
+    public static ExecutionProvider declaringRealLoad(ExecutionProvider delegate) {
+        return new ExecutionProvider() {
+            @Override
+            public String providerId() {
+                return delegate.providerId();
+            }
+
+            @Override
+            public boolean generatesRealLoad() {
+                return true;
+            }
+
+            @Override
+            public ProvisioningResult provision(ProvisionRequest request) {
+                return delegate.provision(request);
+            }
+
+            @Override
+            public ExecutionStatus inspect(RunnerShard.ExecutionHandle handle) {
+                return delegate.inspect(handle);
+            }
+
+            @Override
+            public CancellationResult cancel(RunnerShard.ExecutionHandle handle) {
+                return delegate.cancel(handle);
+            }
+        };
     }
 
     /** An analyzer that summarizes nothing and passes everything, for control-flow tests. */

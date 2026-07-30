@@ -1,28 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Clock,
-  FileText,
   HelpCircle,
   Loader2,
   Play,
   Plus,
   RefreshCw,
+  ServerCog,
   Square,
   XCircle,
 } from 'lucide-react';
 import type {
-  Artifact,
+  ExecutionCapability,
   ObjectiveOutcome,
   RunEvent,
+  RunReport as Report,
   RunStatus,
   TestDefinition,
   TestRun,
   VersionSummary,
 } from './api';
 import { V2Client, describeError, isTerminal } from './api';
+import RunReport from './RunReport';
+import { objectiveLabel } from './labels';
 import './console.css';
 
 /**
@@ -144,7 +148,10 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [objectives, setObjectives] = useState<ObjectiveOutcome[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [report, setReport] = useState<Report | null>(null);
+
+  /** What this deployment does when a run is triggered. Read once; it cannot change while running. */
+  const [capability, setCapability] = useState<ExecutionCapability | null>(null);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [document, setDocument] = useState(STARTER_SPECIFICATION);
@@ -183,19 +190,34 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
     refresh();
   }, [refresh]);
 
+  /**
+   * Reads the active execution provider once.
+   *
+   * Failing to read it is not treated as a warning-free state: the header says the provider is
+   * unknown rather than silently showing nothing, because "no banner" and "no load generated" would
+   * otherwise look identical.
+   */
+  useEffect(() => {
+    if (!apiKey) return;
+    client
+      .getExecutionCapability()
+      .then(setCapability)
+      .catch(() => setCapability(null));
+  }, [apiKey, client]);
+
   const loadRunDetail = useCallback(
     async (runId: string) => {
       try {
-        const [run, eventList, objectiveList, artifactList] = await Promise.all([
+        const [run, eventList, objectiveList, runReport] = await Promise.all([
           client.getRun(runId),
           client.listEvents(runId),
           client.listObjectives(runId),
-          client.listArtifacts(runId),
+          client.getReport(runId),
         ]);
         setRuns((previous) => previous.map((r) => (r.id === runId ? run : r)));
         setEvents(eventList);
         setObjectives(objectiveList);
-        setArtifacts(artifactList);
+        setReport(runReport);
       } catch (err) {
         setError(describeError(err));
       }
@@ -306,6 +328,34 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
 
   return (
     <div className="v2">
+      {/*
+        Always visible, above everything. A deployment running a provider that generates no load
+        produces runs that look real in every respect except that the numbers are invented, and a
+        consumer has no way to know that from the outside.
+      */}
+      <div
+        className={
+          capability && !capability.generatesRealLoad
+            ? 'provider-line provider-line-synthetic'
+            : 'provider-line'
+        }
+        role={capability && !capability.generatesRealLoad ? 'alert' : undefined}
+      >
+        {capability && !capability.generatesRealLoad ? (
+          <AlertTriangle size={15} aria-hidden />
+        ) : (
+          <ServerCog size={15} aria-hidden />
+        )}
+        {capability ? (
+          <span>
+            Execution provider <code>{capability.providerId}</code> — {capability.summary}
+          </span>
+        ) : (
+          // Not silence. "No banner" and "no load generated" must never look the same.
+          <span>Execution provider could not be read. Treat any results here as unverified.</span>
+        )}
+      </div>
+
       {error && (
         <div className="banner banner-bad" role="alert">
           <AlertCircle size={16} /> {error}
@@ -430,6 +480,16 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
                     {run.cancellationRequested && !isTerminal(run.status) && (
                       <span className="muted"> stopping…</span>
                     )}
+                    {/* In the list too, not only on the report. Someone scanning this table for a
+                        result must not have to open a run to learn its numbers are invented. */}
+                    {run.synthetic && (
+                      <span
+                        className="pill pill-wait"
+                        title="No load was generated. This run's measurements are synthetic."
+                      >
+                        synthetic
+                      </span>
+                    )}
                   </td>
                   <td>{run.environment}</td>
                   <td className="muted">{run.requestedBy}</td>
@@ -462,6 +522,23 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
 
           <p className="muted">{STATUS_COPY[selectedRun.status].hint}</p>
 
+          {/* On the run as well as on its report. The report is what gets screenshotted, but this
+              panel is where someone first looks at a result. */}
+          {selectedRun.synthetic && (
+            <div className="synthetic-banner" role="alert">
+              <AlertTriangle size={18} aria-hidden />
+              <div>
+                <strong>
+                  No load was generated. These measurements are synthetic and describe nothing.
+                </strong>
+                <p>
+                  This deployment runs an execution provider that sends no traffic. Nothing was
+                  measured, so every objective below is reported as not determined.
+                </p>
+              </div>
+            </div>
+          )}
+
           {selectedRun.failureReason && (
             <div className="banner banner-bad">
               <AlertCircle size={16} />
@@ -483,7 +560,9 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
               {objectives.map((objective) => (
                 <li key={objective.objectiveId}>
                   <VerdictIcon verdict={objective.verdict} />
-                  <span className="objective-scope">{objective.scope}</span>
+                  <span className="objective-scope">
+                    {objectiveLabel(objective.metric, objective.scope)}
+                  </span>
                   <span className="muted">{objective.detail}</span>
                 </li>
               ))}
@@ -506,21 +585,16 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
             ))}
           </ol>
 
-          {artifacts.length > 0 && (
-            <>
-              <h3>Evidence</h3>
-              <ul className="artifacts">
-                {artifacts.map((artifact) => (
-                  <li key={artifact.id}>
-                    <FileText size={13} className="muted" />
-                    <span>{artifact.type.replace(/_/g, ' ').toLowerCase()}</span>
-                    <span className="muted">{(artifact.sizeBytes / 1024).toFixed(1)} KB</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
         </section>
+      )}
+
+      {/*
+        The report is its own panel rather than a section of the detail card: it is the thing people
+        link to and screenshot, and it carries its own copy of the synthetic warning so that a
+        screenshot of it alone is still honest.
+      */}
+      {selectedRun && report && report.run.id === selectedRun.id && (
+        <RunReport client={client} report={report} onError={setError} />
       )}
     </div>
   );

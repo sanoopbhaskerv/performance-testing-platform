@@ -94,6 +94,15 @@ public class TestRunEntity {
     private Instant claimExpiresAt;
 
     /**
+     * Whether the provider that executed this run generates no load.
+     *
+     * <p>Primitive rather than {@code Boolean}, so it can never be null and a read never has to
+     * decide what an absent value means. The column defaults to false for rows that predate it.
+     */
+    @Column(name = "synthetic", nullable = false)
+    private boolean synthetic;
+
+    /**
      * Optimistic lock.
      *
      * <p>Concurrent state changes are the normal case here, not an edge: a reconciler advancing a
@@ -236,6 +245,22 @@ public class TestRunEntity {
     void setClaim(String owner, Instant expiresAt) {
         this.claimOwner = owner;
         this.claimExpiresAt = expiresAt;
+    }
+
+    public boolean isSynthetic() {
+        return synthetic;
+    }
+
+    /**
+     * Marks the run as having generated no load. One-way.
+     *
+     * <p>There is deliberately no setter that can clear it. A run whose traffic was invented cannot
+     * later become one whose traffic was real, and a mapper copying {@code false} over a stored
+     * {@code true} — an easy accident, since every save calls the mapper — would erase the most
+     * consequential caveat this platform records.
+     */
+    void markSynthetic() {
+        this.synthetic = true;
     }
 
     public long getLockVersion() {

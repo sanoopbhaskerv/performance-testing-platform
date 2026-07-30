@@ -2,10 +2,14 @@ package com.perfplatform.api.v2;
 
 import com.perfplatform.api.v2.error.V2ProblemHandler;
 import com.perfplatform.api.v2.security.CallerContextProvider;
+import com.perfplatform.domain.identity.ArtifactId;
 import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.port.ArtifactStore;
+import com.perfplatform.domain.port.ArtifactStore.ArtifactReference;
 import com.perfplatform.domain.port.TestRunRepository;
+import com.perfplatform.domain.report.RunReport;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunState;
@@ -13,6 +17,7 @@ import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +28,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +64,7 @@ class TestRunControllerTest {
     private final TriggerTestRunUseCase triggerRun = mock(TriggerTestRunUseCase.class);
     private final CancelTestRunUseCase cancelRun = mock(CancelTestRunUseCase.class);
     private final ReadTestRunUseCase readRun = mock(ReadTestRunUseCase.class);
+    private final ReadRunReportUseCase readReport = mock(ReadRunReportUseCase.class);
     private final CallerContextProvider callers = mock(CallerContextProvider.class);
 
     private MockMvc mockMvc;
@@ -66,7 +73,8 @@ class TestRunControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new TestRunController(triggerRun, cancelRun, readRun, callers))
+                .standaloneSetup(
+                        new TestRunController(triggerRun, cancelRun, readRun, readReport, callers))
                 .setControllerAdvice(new V2ProblemHandler())
                 .build();
 
@@ -345,6 +353,142 @@ class TestRunControllerTest {
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("run.notCancellable"))
                     .andExpect(jsonPath("$.state").value("COMPLETED"));
+        }
+    }
+
+    @Nested
+    @DisplayName("downloading an artifact")
+    class ArtifactDownload {
+
+        private final ArtifactId artifactId = ArtifactId.generate();
+
+        private ArtifactReference reference(String fileName, String contentType, byte[] content) {
+            return new ArtifactReference(artifactId, run.id(), Optional.empty(),
+                    ArtifactStore.ArtifactType.RESULTS,
+                    "teams/" + TEAM.value() + "/runs/" + run.id().value() + "/analysis/" + fileName,
+                    digestOf(content), contentType, content.length, NOW);
+        }
+
+        @Test
+        @DisplayName("content is served as an attachment, with its digest, and never sniffed")
+        void contentIsServedSafely() throws Exception {
+            byte[] content = "timeStamp,elapsed,label\n1,2,browse\n".getBytes(StandardCharsets.UTF_8);
+            ArtifactReference stored = reference("results.jtl", "text/csv", content);
+
+            when(readReport.artifactContent(any(), any(), any()))
+                    .thenReturn(new ReadRunReportUseCase.ArtifactContent(stored, content));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/artifacts/"
+                            + artifactId + "/content"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Content-Type", "text/csv"))
+                    // Attachment, not inline. A runner's own output rendered in the browser through
+                    // content sniffing would execute in the platform's own origin.
+                    .andExpect(header().string("Content-Disposition",
+                            "attachment; filename=\"results.jtl\""))
+                    .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                    .andExpect(header().string("X-Artifact-Digest", stored.digest()))
+                    .andExpect(header().string("Cache-Control", "private, no-store"))
+                    .andExpect(content().bytes(content));
+        }
+
+        /**
+         * No URL is ever minted or stored (CLAUDE.md §17), so there is nothing to leak. Asserted
+         * because the temptation to add a convenience {@code downloadUrl} field is permanent.
+         */
+        @Test
+        @DisplayName("the artifact listing offers no URL, only a reference")
+        void listingCarriesNoUrl() throws Exception {
+            byte[] content = "x".getBytes(StandardCharsets.UTF_8);
+            when(readRun.artifacts(any(), any()))
+                    .thenReturn(List.of(reference("results.jtl", "text/csv", content)));
+
+            String body = mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/artifacts"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            org.assertj.core.api.Assertions.assertThat(body)
+                    .doesNotContain("http://")
+                    .doesNotContain("https://")
+                    .doesNotContain("X-Amz-Signature")
+                    .contains("objectKey");
+        }
+
+        @Test
+        @DisplayName("an artifact this caller may not read is a 404, the same as one that is absent")
+        void unknownArtifactIsNotFound() throws Exception {
+            when(readReport.artifactContent(any(), any(), any())).thenThrow(
+                    new ReadRunReportUseCase.UnknownArtifactException(run.id(), artifactId));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/artifacts/"
+                            + artifactId + "/content"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("artifact.notFound"));
+        }
+
+        /**
+         * 500, not 404: the artifact exists and the caller is entitled to it. Storage is what is
+         * wrong, and the bytes are withheld rather than served with a caveat.
+         */
+        @Test
+        @DisplayName("content that fails digest verification is refused, not served")
+        void corruptedArtifactIsRefused() throws Exception {
+            when(readReport.artifactContent(any(), any(), any())).thenThrow(
+                    new ReadRunReportUseCase.ArtifactCorruptedException(artifactId));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/artifacts/"
+                            + artifactId + "/content"))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath("$.code").value("artifact.digestMismatch"));
+        }
+
+        private static String digestOf(byte[] content) {
+            try {
+                return "sha256:" + java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest(content));
+            } catch (java.security.NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("the report")
+    class Report {
+
+        @Test
+        @DisplayName("a run with no analysis reports null measurements, never zeros")
+        void unanalysedRunReportsNothingMeasured() throws Exception {
+            when(readReport.report(any(), any())).thenReturn(new RunReport(
+                    run, Optional.empty(), Optional.empty(), List.of(), Optional.empty(),
+                    List.of(), List.of()));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/report"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.run.id").value(run.id().toString()))
+                    // Absent, not an object of zeros. A zero would describe a finished test.
+                    .andExpect(jsonPath("$.measurements").doesNotExist())
+                    .andExpect(jsonPath("$.execution").doesNotExist())
+                    .andExpect(jsonPath("$.synthetic").value(false))
+                    .andExpect(jsonPath("$.syntheticNotice").doesNotExist())
+                    .andExpect(jsonPath("$.summary.demonstrated").value(false));
+        }
+
+        @Test
+        @DisplayName("a synthetic run's report is marked at the top level, not only inside the run")
+        void syntheticReportIsMarked() throws Exception {
+            when(readReport.report(any(), any())).thenReturn(new RunReport(
+                    run.markedSynthetic(), Optional.empty(), Optional.empty(), List.of(),
+                    Optional.empty(), List.of(), List.of()));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/report"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.synthetic").value(true))
+                    .andExpect(jsonPath("$.run.synthetic").value(true))
+                    .andExpect(jsonPath("$.syntheticNotice")
+                            .value("No load was generated. These measurements are synthetic "
+                                    + "and describe nothing."))
+                    .andExpect(jsonPath("$.summary.demonstrated").value(false));
         }
     }
 

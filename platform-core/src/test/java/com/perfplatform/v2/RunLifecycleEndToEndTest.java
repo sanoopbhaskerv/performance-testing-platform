@@ -9,12 +9,24 @@ import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.identity.TestDefinitionId;
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.port.ArtifactStore;
+import com.perfplatform.domain.port.DefinitionVersionCatalog;
+import com.perfplatform.domain.port.ExecutionPlanRepository;
+import com.perfplatform.domain.port.ResultCatalog;
+import com.perfplatform.domain.port.RunnerShardRepository;
 import com.perfplatform.domain.port.TestRunRepository;
+import com.perfplatform.domain.results.NormalizedRunResult;
+import com.perfplatform.domain.results.SampleSet;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunState;
+import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.spec.SpecificationDigest;
+import com.perfplatform.engine.spi.RunnerOutput;
+import com.perfplatform.orchestration.plan.EngineRegistry;
 import com.perfplatform.orchestration.run.RunReconciler;
+import com.perfplatform.orchestration.run.RunWorkloadService;
+import com.perfplatform.results.metrics.RunResultReducer;
 import com.perfplatform.persistence.definition.ApplicationEntity;
 import com.perfplatform.persistence.definition.ApplicationJpaRepository;
 import com.perfplatform.persistence.definition.TeamEntity;
@@ -41,15 +53,23 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -98,8 +118,20 @@ class RunLifecycleEndToEndTest {
     /** The key from the test team fixture. Not a real credential. */
     private static final String API_KEY = "test-key-alpha";
 
+    /**
+     * A second team's key from the fixture, for cross-team authorization checks. Not a real credential.
+     *
+     * <p>Its team is registered too, so this caller is genuinely authenticated and genuinely a member
+     * of a team — just not of the team that owns the run. A caller belonging to no team at all would
+     * be refused for a different reason and would prove nothing about team isolation.
+     */
+    private static final String OTHER_TEAM_API_KEY = "test-key-beta";
+
     /** Matches {@code team:} in the alpha test fixture, which is what the key resolves to. */
     private static final String TEAM_NAME = "alpha";
+
+    /** Matches {@code team:} in the beta test fixture. */
+    private static final String OTHER_TEAM_NAME = "beta";
 
     /**
      * Matches a {@code targets[].name} in the alpha fixture.
@@ -133,14 +165,42 @@ class RunLifecycleEndToEndTest {
     @Autowired
     private DataSource dataSource;
 
+    /** For re-driving analysis directly, which is what re-analysing stored artifacts does. */
+    @Autowired
+    private RunWorkloadService analysis;
+
+    @Autowired
+    private ExecutionPlanRepository plans;
+
+    @Autowired
+    private RunnerShardRepository shards;
+
+    @Autowired
+    private DefinitionVersionCatalog versions;
+
+    /** For locating the artifact root, so a test can corrupt stored content the way a fault would. */
+    @Autowired
+    private OrchestrationProperties orchestrationProperties;
+
+    /** For recomputing a run's measurements from its stored results and comparing. */
+    @Autowired
+    private ResultCatalog catalog;
+
+    @Autowired
+    private ArtifactStore artifactStore;
+
+    @Autowired
+    private EngineRegistry engines;
+
     private TestDefinitionVersionId versionId;
 
     @BeforeEach
     void seedRegistry() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         jdbc.execute("""
-                TRUNCATE TABLE run_events, runner_shards, test_runs, execution_plans,
-                    test_definition_versions, test_definitions, applications, teams
+                TRUNCATE TABLE run_metrics, objective_results, artifacts, run_events, runner_shards,
+                    test_runs, execution_plans, test_definition_versions, test_definitions,
+                    applications, teams
                 RESTART IDENTITY CASCADE
                 """);
 
@@ -153,6 +213,10 @@ class RunLifecycleEndToEndTest {
         ApplicationId applicationId = ApplicationId.generate();
         applications.saveAndFlush(new ApplicationEntity(applicationId.value(), teamId.value(),
                 APPLICATION_NAME, ApplicationEntity.TargetClass.NON_PRODUCTION, NOW));
+
+        // The second team owns nothing here. It exists so a cross-team request comes from a caller
+        // who is properly authenticated and properly scoped — to a different team.
+        teams.saveAndFlush(new TeamEntity(TeamId.generate().value(), OTHER_TEAM_NAME, NOW));
 
         TestDefinitionEntity definition = registry.createDefinition(TestDefinitionId.generate(),
                 teamId, applicationId, "proposal-baseline-" + shortId(), "alice@example.com");
@@ -225,29 +289,54 @@ class RunLifecycleEndToEndTest {
         return new ObjectMapper().readTree(responseBody).get("id").asText();
     }
 
+    /**
+     * The wiring, end to end.
+     *
+     * <p>Asserts a terminal state rather than {@code COMPLETED}. This deployment runs the fake
+     * execution provider, which generates no load, so the correct outcome is a run marked synthetic
+     * whose objectives are indeterminate — never a pass. This test's job is the wiring: that the real
+     * controllers, security chain, stores, compiler, engine and reconciler drive a run from a trigger
+     * to a terminal state through every intermediate transition. Verdict logic is
+     * {@code RunAnalysisTest}'s job and is covered there for every outcome.
+     */
     @Test
-    @DisplayName("a run goes from trigger to COMPLETED through the real stack")
+    @DisplayName("a run goes from trigger to a terminal state through the real stack")
     void fullLifecycle() throws Exception {
         String runId = runIdOf(trigger("nightly-baseline"));
 
         mockMvc.perform(get("/api/v2/test-runs/" + runId).header("X-API-Key", API_KEY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("QUEUED"))
-                .andExpect(jsonPath("$.environment").value("performance"));
+                .andExpect(jsonPath("$.environment").value("performance"))
+                .andExpect(jsonPath("$.synthetic").value(false));
 
-        // Admitted, compiled and provisioned.
+        // Admitted, compiled and provisioned. The synthetic marking lands here — at the moment the
+        // provider was asked to start, before any measurement exists for it to qualify.
         reconciler.reconcile();
         mockMvc.perform(get("/api/v2/test-runs/" + runId).header("X-API-Key", API_KEY))
                 .andExpect(jsonPath("$.status").value("RUNNING"))
-                .andExpect(jsonPath("$.executionPlanId").isNotEmpty());
+                .andExpect(jsonPath("$.executionPlanId").isNotEmpty())
+                .andExpect(jsonPath("$.synthetic").value(true));
 
         reconciler.reconcile();
         reconciler.reconcile();
 
         mockMvc.perform(get("/api/v2/test-runs/" + runId).header("X-API-Key", API_KEY))
-                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.status").value("FAILED"))
                 .andExpect(jsonPath("$.completedAt").isNotEmpty())
-                .andExpect(jsonPath("$.failureCode").doesNotExist());
+                .andExpect(jsonPath("$.synthetic").value(true))
+                .andExpect(jsonPath("$.failureCode").value("NO_LOAD_GENERATED"));
+
+        // Every objective is indeterminate, with the reason. Not a breach — the system under test may
+        // be perfectly healthy — and emphatically not a pass.
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/objectives")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$[*].verdict",
+                        everyItem(equalTo("INDETERMINATE"))))
+                .andExpect(jsonPath("$[0].detail")
+                        .value(containsString("No load was generated")));
     }
 
     @Test
@@ -268,11 +357,17 @@ class RunLifecycleEndToEndTest {
                 .filteredOn(event -> event.type() == RunEventType.STATE_CHANGED)
                 .extracting(event -> event.newState().orElseThrow())
                 .containsExactly(RunState.QUEUED, RunState.PROVISIONING, RunState.RUNNING,
-                        RunState.ANALYZING, RunState.COMPLETED);
+                        RunState.ANALYZING, RunState.FAILED);
 
         assertThat(events)
                 .extracting(RunEvent::type)
                 .contains(RunEventType.CLAIMED, RunEventType.SHARD_PROVISIONED);
+
+        // The provider that executed the run is part of the run's own record, not only of the log.
+        assertThat(events)
+                .filteredOn(event -> event.type() == RunEventType.SHARD_PROVISIONED)
+                .allSatisfy(event ->
+                        assertThat(event.detail().get("provider")).isEqualTo("fake"));
     }
 
     @Test
@@ -315,11 +410,14 @@ class RunLifecycleEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.outcome").value("ALREADY_CANCELLED"));
 
-        // The first run is unaffected.
+        // The first run is unaffected and finishes on its own. FAILED rather than COMPLETED because
+        // this deployment generates no load; what matters here is that cancelling the second run did
+        // not disturb the first.
         reconciler.reconcile();
         reconciler.reconcile();
         mockMvc.perform(get("/api/v2/test-runs/" + firstRunId).header("X-API-Key", API_KEY))
-                .andExpect(jsonPath("$.status").value("COMPLETED"));
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureCode").value("NO_LOAD_GENERATED"));
     }
 
     @Test
@@ -360,5 +458,261 @@ class RunLifecycleEndToEndTest {
     void v1RemainsOperational() throws Exception {
         mockMvc.perform(get("/api/v1/config/teams").header("X-API-Key", API_KEY))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("the console can see which execution provider this deployment runs")
+    void executionCapabilityIsDiscoverable() throws Exception {
+        mockMvc.perform(get("/api/v2/platform/execution").header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.providerId").value("fake"))
+                .andExpect(jsonPath("$.generatesRealLoad").value(false))
+                .andExpect(jsonPath("$.summary").value(containsString("No load is generated")));
+    }
+
+    // ── Reports ──────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a report before analysis is honest about having measured nothing")
+    void reportBeforeAnalysisFabricatesNothing() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/report").header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.run.status").value("QUEUED"))
+                // Null, not an object full of zeros. A report showing 0ms for a run that has not
+                // started would describe a finished test that does not exist.
+                .andExpect(jsonPath("$.measurements").doesNotExist())
+                // Not admitted yet, so nothing has been compiled.
+                .andExpect(jsonPath("$.execution").doesNotExist())
+                .andExpect(jsonPath("$.objectives").isEmpty())
+                .andExpect(jsonPath("$.summary.demonstrated").value(false))
+                // The test itself is readable from the moment the run exists.
+                .andExpect(jsonPath("$.test.name").isNotEmpty())
+                .andExpect(jsonPath("$.test.workloads", hasSize(greaterThan(0))));
+    }
+
+    @Test
+    @DisplayName("a report for a synthetic run is marked as synthetic, not only the run")
+    void reportCarriesTheSyntheticMarking() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+        reconciler.reconcile();
+        reconciler.reconcile();
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/report").header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                // At the top level, not buried inside `run`. A client rendering a number from this
+                // payload must not have to know where to look for the caveat on it.
+                .andExpect(jsonPath("$.synthetic").value(true))
+                .andExpect(jsonPath("$.syntheticNotice")
+                        .value(containsString("describe nothing")))
+                .andExpect(jsonPath("$.run.synthetic").value(true))
+                .andExpect(jsonPath("$.summary.passed").value(0))
+                .andExpect(jsonPath("$.summary.demonstrated").value(false))
+                .andExpect(jsonPath("$.objectives[*].verdict",
+                        everyItem(equalTo("INDETERMINATE"))));
+    }
+
+    @Test
+    @DisplayName("an analyzed run's report carries the measurements and the plan's identity")
+    void reportCarriesMeasurements() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+        reconciler.reconcile();
+        reconciler.reconcile();
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/report").header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                // Read back from run_metrics, which analysis wrote. Before this increment these
+                // numbers were computed and discarded.
+                .andExpect(jsonPath("$.measurements.overall.sampleCount").value(greaterThan(0)))
+                .andExpect(jsonPath("$.measurements.overall.p95Millis").value(greaterThan(0)))
+                .andExpect(jsonPath("$.measurements.complete").value(true))
+                .andExpect(jsonPath("$.measurements.shardsReported").value(1))
+                .andExpect(jsonPath("$.measurements.operations", hasSize(greaterThan(0))))
+                // The plan digest answers "are these results from the test that was approved".
+                .andExpect(jsonPath("$.execution.planDigest").value(containsString("sha256:")))
+                .andExpect(jsonPath("$.execution.engine").value("jmeter"))
+                .andExpect(jsonPath("$.execution.shardCount").value(1))
+                // The workload profile, in consumer language, with weights preserved.
+                .andExpect(jsonPath("$.test.workloads[0].scenarios", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.test.workloads[0].stages", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.timeline", hasSize(greaterThan(0))))
+                .andExpect(jsonPath("$.artifacts", hasSize(greaterThan(0))));
+    }
+
+    @Test
+    @DisplayName("re-analysing a run replaces its measurements rather than duplicating them")
+    void reanalysisReplacesMeasurements() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+        reconciler.reconcile();
+        reconciler.reconcile();
+
+        String first = mockMvc.perform(get("/api/v2/test-runs/" + runId + "/report")
+                        .header("X-API-Key", API_KEY))
+                .andReturn().getResponse().getContentAsString();
+        int operationsFirst = new ObjectMapper().readTree(first)
+                .get("measurements").get("operations").size();
+
+        // A terminal run is not reconciled again, so analysis is re-driven directly — which is what
+        // a re-analysis of stored artifacts does, and the case the unique constraint exists for.
+        analysis.analyze(
+                runs.find(TestRunId.of(runId)).orElseThrow(),
+                plans.find(runs.find(TestRunId.of(runId)).orElseThrow()
+                        .executionPlanId().orElseThrow()).orElseThrow(),
+                versions.find(versionId).orElseThrow(),
+                shards.findByRun(TestRunId.of(runId)));
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/report").header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.measurements.operations", hasSize(operationsFirst)));
+    }
+
+    // ── Artifact download ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("an artifact's content is served, with its digest, after authorization")
+    void artifactContentIsServed() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+        reconciler.reconcile();
+        reconciler.reconcile();
+
+        String artifacts = mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode results = firstArtifactOfType(artifacts, "RESULTS");
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts/"
+                        + results.get("id").asText() + "/content")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                // Attachment, not inline: a runner's own output rendered in the browser by content
+                // sniffing would execute in the platform's origin.
+                .andExpect(header().string("Content-Disposition",
+                        containsString("attachment")))
+                .andExpect(header().string("X-Artifact-Digest", results.get("digest").asText()))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(content().string(containsString("timeStamp,elapsed,label")));
+    }
+
+    @Test
+    @DisplayName("downloading another team's artifact returns 404, not 403")
+    void artifactOfAnotherTeamIsNotFound() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+
+        String artifacts = mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts")
+                        .header("X-API-Key", API_KEY))
+                .andReturn().getResponse().getContentAsString();
+        String artifactId = firstArtifactOfType(artifacts, "EXECUTION_PLAN").get("id").asText();
+
+        // The other team's key is a different team in the same fixture. 404 rather than 403 so the
+        // endpoint cannot be used to discover which run and artifact identifiers are real.
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts/" + artifactId + "/content")
+                        .header("X-API-Key", OTHER_TEAM_API_KEY))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("an artifact identifier that belongs to no run returns 404")
+    void unknownArtifactIsNotFound() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts/"
+                        + UUID.randomUUID() + "/content")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("artifact.notFound"));
+    }
+
+    @Test
+    @DisplayName("content that no longer matches its recorded digest is refused, not served")
+    void tamperedArtifactIsRefused() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+
+        String artifacts = mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts")
+                        .header("X-API-Key", API_KEY))
+                .andReturn().getResponse().getContentAsString();
+        JsonNode plan = firstArtifactOfType(artifacts, "EXECUTION_PLAN");
+
+        // Rewritten underneath the platform, as a storage fault or a tamper would. The reference in
+        // the database still records the digest of what the run actually executed.
+        Path stored = artifactRoot().resolve(plan.get("objectKey").asText());
+        Files.writeString(stored, "<jmeterTestPlan>tampered</jmeterTestPlan>");
+
+        mockMvc.perform(get("/api/v2/test-runs/" + runId + "/artifacts/"
+                        + plan.get("id").asText() + "/content")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("artifact.digestMismatch"));
+    }
+
+    /**
+     * The check that makes persisting the measurements safe.
+     *
+     * <p>Storing a reduction rather than recomputing it on read is only defensible if the two agree.
+     * If they ever diverge — a reducer change, a column that silently narrows a value, a rounding
+     * difference — then a stored report and a recomputed one would answer the same question
+     * differently, and the whole basis for calling a verdict re-derivable would be gone.
+     *
+     * <p>This walks the same path a disputed number would: read the stored {@code results.jtl}, parse
+     * it with the engine, reduce it, and compare to what the database holds.
+     */
+    @Test
+    @DisplayName("stored measurements equal a fresh recomputation from results.jtl")
+    void storedMeasurementsMatchRecomputation() throws Exception {
+        String runId = runIdOf(trigger("nightly-baseline"));
+        reconciler.reconcile();
+        reconciler.reconcile();
+        reconciler.reconcile();
+
+        TestRunId id = TestRunId.of(runId);
+
+        List<RunnerOutput.ShardResult> shardResults = new ArrayList<>();
+        for (RunnerShard shard : shards.findByRun(id)) {
+            ArtifactStore.ArtifactReference results = catalog.artifactsFor(id).stream()
+                    .filter(reference -> reference.type() == ArtifactStore.ArtifactType.RESULTS)
+                    .filter(reference -> reference.shardId()
+                            .map(shardId -> shardId.equals(shard.id())).orElse(false))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("Shard produced no results artifact"));
+
+            shardResults.add(new RunnerOutput.ShardResult(shard.shardIndex(),
+                    new String(artifactStore.read(results).orElseThrow(), StandardCharsets.UTF_8)));
+        }
+
+        int shardsExpected = plans.find(runs.find(id).orElseThrow().executionPlanId().orElseThrow())
+                .orElseThrow().capacity().shardCount();
+
+        SampleSet reparsed = engines.require("jmeter")
+                .parse(new RunnerOutput(id, shardsExpected, shardResults));
+
+        NormalizedRunResult recomputed = RunResultReducer.reduce(
+                id, "jmeter", shardsExpected, shardResults.size(), reparsed);
+
+        assertThat(catalog.runMetricsFor(id))
+                .hasValueSatisfying(stored -> assertThat(stored).isEqualTo(recomputed));
+    }
+
+    private static JsonNode firstArtifactOfType(String artifactsJson, String type)
+            throws IOException {
+
+        for (JsonNode artifact : new ObjectMapper().readTree(artifactsJson)) {
+            if (type.equals(artifact.get("type").asText())) {
+                return artifact;
+            }
+        }
+        throw new AssertionError("No artifact of type " + type + " in " + artifactsJson);
+    }
+
+    private Path artifactRoot() {
+        return Path.of(orchestrationProperties.getWorkDirectory(), "artifacts");
     }
 }

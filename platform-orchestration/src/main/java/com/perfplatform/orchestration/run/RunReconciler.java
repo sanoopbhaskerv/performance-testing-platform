@@ -33,7 +33,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -223,9 +225,15 @@ public final class RunReconciler {
         DefinitionVersion version = found.get();
 
         ExecutionPlan plan = resolvePlan(run, version, now);
-        TestRun withPlan = run.executionPlanId().isPresent()
+        TestRun attached = run.executionPlanId().isPresent()
                 ? run
                 : runs.attachExecutionPlan(run.id(), plan.id());
+
+        // The provider about to generate this run's load may generate none. Recorded on the run here,
+        // at the moment it becomes true and before any measurement exists that could be read without
+        // the caveat. Taken from the provider's own declaration rather than from its identifier, so
+        // adding a provider cannot quietly bypass it.
+        TestRun withPlan = provider.generatesRealLoad() ? attached : attached.markedSynthetic();
 
         List<RunnerShard> existing = shards.findByRun(run.id());
         List<RunnerShard> planned = existing.isEmpty()
@@ -266,16 +274,26 @@ public final class RunReconciler {
             }
 
             shards.save(shard.provisioned(result.handle().orElseThrow(), now));
+
+            // The provider is named in the history, so the evidence of what executed a run is part
+            // of the run's own record rather than only of the log of whichever replica ran the pass.
+            Map<String, String> provisioned = new LinkedHashMap<>();
+            provisioned.put("shardIndex", String.valueOf(shard.shardIndex()));
+            provisioned.put("provider", provider.providerId());
             runs.appendEvent(RunEvent.of(withPlan.id(), RunEventType.SHARD_PROVISIONED,
-                    RunEvent.SYSTEM_ACTOR,
-                    RunEvent.detail("shardIndex", String.valueOf(shard.shardIndex())), now));
+                    RunEvent.SYSTEM_ACTOR, provisioned, now));
         }
 
         runs.apply(withPlan.transitionTo(RunState.RUNNING, RunEvent.SYSTEM_ACTOR,
-                "All shards provisioned", now));
+                withPlan.synthetic()
+                        ? "All shards provisioned. The provider generates no load, so this run "
+                                + "will measure nothing."
+                        : "All shards provisioned", now));
 
-        log.info("Run started runId={} teamId={} engine={} planDigest={} shards={}",
-                withPlan.id(), withPlan.teamId(), plan.engine(), plan.planDigest(), planned.size());
+        log.info("Run started runId={} teamId={} engine={} planDigest={} shards={} provider={} "
+                        + "synthetic={}",
+                withPlan.id(), withPlan.teamId(), plan.engine(), plan.planDigest(), planned.size(),
+                provider.providerId(), withPlan.synthetic());
         report.admitted();
     }
 
@@ -300,6 +318,19 @@ public final class RunReconciler {
 
         RunAnalyzer.Analysis analysis = workloads.analyze(
                 run, plan.get(), version.get(), shards.findByRun(run.id()));
+
+        // Checked before anything else about the result, and checked at all even though the objectives
+        // are already indeterminate. A run with no objectives has nothing to be indeterminate about
+        // and would otherwise reach COMPLETED — reported to a consumer as "Passed" — having measured
+        // nothing. There must be no path by which a provider that generates no load produces a run
+        // that reads as successful.
+        if (run.synthetic()) {
+            fail(run, RunFailureCode.NO_LOAD_GENERATED,
+                    "The configured execution provider generates no load. This run produced "
+                            + "synthetic measurements that describe nothing, so no objective could "
+                            + "be judged.", now, report);
+            return;
+        }
 
         if (analysis.result().shardsReported() == 0) {
             fail(run, RunFailureCode.RESULTS_INCOMPLETE,

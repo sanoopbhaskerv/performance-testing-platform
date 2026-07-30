@@ -84,6 +84,18 @@ class RunReconcilerTest {
     private final EngineRegistry engines = new EngineRegistry(List.of(new StubEngineProvider()));
 
     private FakeExecutionProvider provider;
+
+    /**
+     * The provider the reconciler under test is given.
+     *
+     * <p>Wraps the fake so that it <em>declares</em> real load. The fake itself declares none, which
+     * is correct and permanent — and which makes every run it executes reach {@code FAILED} with
+     * {@code NO_LOAD_GENERATED}. Almost every test here is about the control loop rather than about
+     * verdicts, and would otherwise assert the synthetic outcome over and over while leaving the
+     * successful path untested. {@link SyntheticExecution} uses the unwrapped fake.
+     */
+    private com.perfplatform.domain.execution.ExecutionProvider declaredProvider;
+
     private TriggerTestRunUseCase trigger;
     private CancelTestRunUseCase cancel;
     private TeamId team;
@@ -93,6 +105,7 @@ class RunReconcilerTest {
     void setUp() {
         provider = new FakeExecutionProvider(clock, Duration.ZERO, Duration.ZERO,
                 artifacts, artifacts);
+        declaredProvider = OrchestrationFixtures.declaringRealLoad(provider);
         trigger = new TriggerTestRunUseCase(runs, versions, clock);
         cancel = new CancelTestRunUseCase(runs, clock);
         team = TeamId.generate();
@@ -104,11 +117,17 @@ class RunReconcilerTest {
     }
 
     private RunReconciler reconciler(String owner, CapacityLimits limits) {
+        return reconciler(owner, limits, declaredProvider);
+    }
+
+    private RunReconciler reconciler(String owner, CapacityLimits limits,
+            com.perfplatform.domain.execution.ExecutionProvider executionProvider) {
+
         RunWorkloadService workloads = new RunWorkloadService(engines, artifacts, artifacts,
                 OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget());
 
         return new RunReconciler(runs, shards, plans, versions,
-                new EngineDispatchingPlanCompiler(engines), provider,
+                new EngineDispatchingPlanCompiler(engines), executionProvider,
                 new ConcurrencyAdmissionPolicy(), limits, OrchestrationSettings.DEFAULTS,
                 workloads, clock, owner);
     }
@@ -120,6 +139,74 @@ class RunReconcilerTest {
 
     private TestRun reload(TestRun run) {
         return runs.find(run.id()).orElseThrow();
+    }
+
+    /**
+     * A provider that generates no load must never produce a run that reads as passing.
+     *
+     * <p>Uses the unwrapped {@link FakeExecutionProvider}, which is what a local development
+     * deployment actually runs. Its measurements are invented, and the platform's job is to make that
+     * impossible to miss rather than to render them as a green verdict.
+     */
+    @Nested
+    @DisplayName("execution that generates no load")
+    class SyntheticExecution {
+
+        private RunReconciler syntheticReconciler() {
+            return reconciler("reconciler-1", CapacityLimits.DEFAULTS, provider);
+        }
+
+        @Test
+        @DisplayName("the run is permanently marked synthetic, from provisioning onward")
+        void runIsMarkedSynthetic() {
+            TestRun run = queueRun("baseline");
+            RunReconciler reconciler = syntheticReconciler();
+
+            reconciler.reconcile();
+
+            // Marked as soon as the provider was asked to start, not once results existed. The
+            // caveat has to be true before there is any number for it to qualify.
+            assertThat(reload(run).state()).isEqualTo(RunState.RUNNING);
+            assertThat(reload(run).synthetic()).isTrue();
+
+            reconciler.reconcile();
+            reconciler.reconcile();
+
+            assertThat(reload(run).synthetic())
+                    .as("the marking survives every later transition")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("the run reaches a terminal state that is not COMPLETED")
+        void runNeverCompletes() {
+            TestRun run = queueRun("baseline");
+            RunReconciler reconciler = syntheticReconciler();
+
+            reconciler.reconcile();
+            reconciler.reconcile();
+            reconciler.reconcile();
+
+            TestRun finished = reload(run);
+            assertThat(finished.state().isTerminal()).isTrue();
+            assertThat(finished.state()).isNotEqualTo(RunState.COMPLETED);
+            assertThat(finished.failure().orElseThrow().code())
+                    .isEqualTo(RunFailureCode.NO_LOAD_GENERATED);
+            assertThat(finished.failure().orElseThrow().sanitizedReason())
+                    .contains("generates no load");
+        }
+
+        @Test
+        @DisplayName("the provider that executed the run is named in its history")
+        void providerIsRecorded() {
+            TestRun run = queueRun("baseline");
+            syntheticReconciler().reconcile();
+
+            assertThat(runs.events(run.id(), 0, 100))
+                    .filteredOn(event -> event.type() == RunEventType.SHARD_PROVISIONED)
+                    .allSatisfy(event -> assertThat(event.detail().get("provider"))
+                            .isEqualTo(FakeExecutionProvider.PROVIDER_ID));
+        }
     }
 
     @Nested
@@ -477,6 +564,6 @@ class RunReconcilerTest {
     private static TestRun rewindToProvisioning(TestRun run) {
         return new TestRun(run.id(), run.teamId(), run.definitionVersionId(), run.executionPlanId(),
                 RunState.PROVISIONING, run.environment(), run.trigger(), run.timeline(),
-                run.cancellation(), run.failure(), run.claim(), run.lockVersion());
+                run.cancellation(), run.failure(), run.claim(), run.synthetic(), run.lockVersion());
     }
 }

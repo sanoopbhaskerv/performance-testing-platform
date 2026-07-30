@@ -3,7 +3,9 @@
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 1D complete. A performance test can now be authored, triggered, watched and judged from the UI. See §3a.
+**Last updated:** Synthetic-run marking and reporting complete. A run now carries whether any load was
+generated, a synthetic run can never read as a pass, and there is a report endpoint and report UI
+backed by persisted measurements. See §3b.
 
 ---
 
@@ -16,11 +18,12 @@
 | 1B — canonical specification | **Complete** `13fb724` | see §4 |
 | 1B follow-up — schema conformance | **Complete** `9826a92` | `SchemaConformanceTest` |
 | 1C — durable run orchestration | **Complete** `3290e75` | see §3 |
-| 1D — JMeter engine SPI and local provider | **Complete** `165232a` + this commit | see §3a |
-| 1F (partial) — V2 UI foundation | **Delivered with 1D** | `platform-ui/src/v2/` |
+| 1D — JMeter engine SPI and local provider | **Complete** `165232a`, `9640590` | see §3a |
+| Synthetic marking and reporting | **Complete** this commit | see §3b |
+| 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
 | 1E onward | **Not started** | — |
 
-**551 tests green, 0 skipped** (272 at 1B, 486 at 1C, 549 mid-1D).
+**580 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -31,8 +34,8 @@ Further commits on `feature/platform-v2-foundation` land in it automatically.
 
 `v1-poc` tag exists on the remote at the baseline commit `9233d96` (created by the user).
 
-**Immediate next action:** none outstanding. 1D is the next gated increment — do not start it without
-the user asking. Read §6 first: 1D has a hard prerequisite.
+**Immediate next action:** none outstanding. **Increment 1E** is next — do not start it without the
+user asking. Read §6 for its recommended order.
 
 ---
 
@@ -146,9 +149,77 @@ A tab in `App.tsx` switches between it and the untouched V1 screens.
 - **Stages are stepwise**, not a smooth concurrency profile: vanilla JMeter cannot express one, and
   `ConcurrencyThreadGroup` is a runner-image decision. **Increment 1E.**
 - **Artifacts are filesystem-local**, so multi-replica does not work. **Increment 1E.**
-- **No report endpoint** and no download grants. **1D/1E.**
 - **`BaselineExecutionPlanCompiler` is dead code**, superseded by `EngineDispatchingPlanCompiler`.
 - No tests for the definition endpoints, the team synchronizer or the local JMeter provider.
+
+---
+
+## 3b. Synthetic marking and reporting — delivered
+
+Two things that belong together: what a run measured, and whether the measurement means anything.
+
+### A synthetic run is now unmistakable, and can never read as a pass
+
+`ExecutionProvider.generatesRealLoad()` — a method every provider must answer, not a comparison on
+its identifier, because a name check silently stops working the moment a provider is added.
+`FakeExecutionProvider` returns false permanently; `LocalJmeterExecutionProvider` returns true.
+
+The flag reaches the run at **provisioning**, before any measurement exists to be read without it:
+`test_runs.synthetic` (Flyway `V5`), `TestRun.markedSynthetic()`, and `TestRunEntity.markSynthetic()`
+— which offers no way to clear it, so a mapper copying `false` over a stored `true` is impossible.
+
+Consequences, all of them deliberate:
+- Every objective becomes `INDETERMINATE` with "No load was generated, so nothing could be
+  measured." (`RunAnalyzer.Analysis.asIndeterminate`, applied in `RunWorkloadService` rather than in
+  the analyzer, which stays a pure function of the samples).
+- The run reaches `FAILED` with **`RunFailureCode.NO_LOAD_GENERATED`** — checked before anything else
+  about the result, and checked *even though* the objectives are already indeterminate, because a run
+  with no objectives would otherwise reach `COMPLETED` and read to a consumer as "Passed".
+- `GET /api/v2/platform/execution` reports the active provider; the console shows it permanently in
+  its header.
+- A banner on the run, on the report, and a pill in the run list.
+
+The local demo therefore ends in **Failed**, not **Passed**. That is the correct outcome for a run
+that measured nothing. `RunAnalysisTest` covers the `PASS`, `BREACH` and `INDETERMINATE` paths, and
+`OrchestrationFixtures.declaringRealLoad(...)` — a test-only decorator, deliberately not a flag on
+the fake provider — keeps the reconciler's `COMPLETED` path covered.
+
+### Measurements are persisted, not recomputed
+
+`run_metrics` (Flyway `V5`): one row per operation plus one for the `*` aggregate, all integers,
+unique on `(run_id, operation)`. Written by `ResultCatalog.recordAnalysis` — **one method, therefore
+one transaction** with the objective verdicts, so a report can never pair a p95 from one analysis
+with a verdict from another. `runMetricsFor` returns `Optional<NormalizedRunResult>`, so a stored
+report and a recomputation are directly comparable — and one test asserts they are equal.
+
+`engine` is duplicated on every row so a metrics row is self-describing without joining
+`execution_plans`.
+
+### Report and artifact download
+
+- `GET /api/v2/test-runs/{runId}/report` — **JSON**, assembled by `ReadRunReportUseCase` from
+  persisted state only. `measurements` and `execution` are **null, never zeroed**, when a run has not
+  reached them.
+- `GET /api/v2/test-runs/{runId}/artifacts/{artifactId}/content` — authorized per request, digest
+  verified before any byte is written, served as `attachment` with `nosniff`. **No pre-signed URL is
+  minted or stored** (CLAUDE.md §17); a test asserts the listing contains no URL at all.
+- `RunReport.tsx` + `console.css`: verdict summary, per-operation latency table, stage profile with
+  proportional bars, journey mix, download links, and a collapsed "How the platform ran this" for the
+  engine and plan digest (§24's permitted advanced view).
+
+### One behaviour change outside the increment's own surface
+
+`ReadTestRunUseCase.get` now raises `UnknownRunException` (**404**) for a run belonging to a team the
+caller is not in, where it previously raised `AuthorizationException` (**403**). Its own javadoc, the
+problem handler's and `TestRunControllerTest`'s display name all already claimed 404; only the
+implementation disagreed, and the artifact download would otherwise have been an oracle for which run
+and artifact identifiers are real. A caller who *is* in the owning team but lacks the scope still gets
+403 — they already know the run exists.
+
+### Also fixed
+`FileSystemArtifactStore.read` resolved keys through an in-memory index, so every artifact became
+unreadable after a restart — including the ones a report links to, which are exactly the artifacts
+someone opens days later. It now resolves the key against the root.
 
 ---
 
@@ -218,49 +289,41 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - `/actuator/health` returns **503** (mail health indicator cannot reach SMTP). Defect **D6**, owned by 1E.
 - Unauthenticated calls return **403**, not 401. Defect **D7**, owned by Increment 4. V2 inherits it from the shared filter chain; `RunLifecycleEndToEndTest.v2RequiresAuthentication` asserts it so the gap stays visible.
 - A V1 request that throws (e.g. `POST /api/v1/tests/run` with an unknown team) also returns **403**, because the `/error` forward is not in V1's permit-list. Same D7 family.
-- UI lint reports **3 errors, 3 warnings** — pre-existing at baseline, deliberately not fixed.
+- UI lint reports **3 errors, 3 warnings** — pre-existing at baseline, all in V1's `App.tsx`, deliberately not fixed.
+- The V1 tab logs `Error fetching teams: 403` in the browser console before its own API key is entered. Pre-existing V1 behavior, same D7 family.
 - `helm lint` advises `icon is recommended` — pre-existing.
 - Startup logs two loud warnings, by design: the **FAKE execution provider** generates no load, and the **DEVELOPMENT caller-identity provider** derives identity from V1 API keys. Both refuse to start under a production profile.
+- **A local run ends in `Failed` / `NO_LOAD_GENERATED`, not `Passed`.** This is correct and deliberate — see §3b. Do not "fix" it by making the fake provider claim to generate load.
+- The console's starter specification names team `alpha` / application `alpha-service`, which do **not** exist in the shipped `config/teams` (that has `local-dev` / `local-service`). Saving the starter unedited fails with `specification.team.unknown`. Worth aligning; not done here to keep this increment's diff to its subject.
 
 ---
 
 ## 6. Next: Increment 1E only
 
-Recommended order, and the gaps §3a leaves:
+Recommended order, and the gaps §3a and §3b leave:
 
 1. **Kubernetes execution provider** behind `ExecutionProvider` — Job manifest builder, resource and
    security policy, `backoffLimit: 0`, `activeDeadlineSeconds`, persisted Job UID, observe/cancel.
-   Never auto-replay a failed material run.
+   Never auto-replay a failed material run. It must return `true` from `generatesRealLoad()`, which is
+   also what makes its runs able to reach `COMPLETED`.
 2. **S3-compatible `ArtifactStore`.** The port and key layout already match; the filesystem
-   implementation cannot serve multiple replicas.
-3. **Download grants** — time-limited, authorized per request. Never store a pre-signed URL.
-4. **Report endpoint** (`GET /api/v2/test-runs/{runId}/report`).
-5. **Runner image** with `ConcurrencyThreadGroup`, so stages stop being stepwise. Write
+   implementation cannot serve multiple replicas. `read` resolves a key against a root, so an S3
+   implementation is a straight substitution — the download endpoint needs no change.
+3. **Runner image** with `ConcurrencyThreadGroup`, so stages stop being stepwise. Write
    `docs/operations/runner-calibration.md` while doing it — shard count is still hardcoded to 1
    pending calibration.
-6. **Housekeeping**: delete `BaselineExecutionPlanCompiler`; add the tests §3a lists as missing.
+4. **Housekeeping**: delete `BaselineExecutionPlanCompiler`; add the tests §3a lists as missing;
+   align the console's starter specification with the shipped `config/teams` (see §5).
+
+Already done, so **do not** repeat from earlier plans: the report endpoint, artifact download with
+per-request authorization and digest verification, and persisted run metrics. See §3b.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.
 
-JMeter engine SPI and local provider (CLAUDE.md §28).
-
-**Hard prerequisite, do this first.** `POST /api/v2/test-definitions` and
-`.../{id}/versions` still do not exist. `TestDefinitionRegistry` can create definitions and append
-versions, but no HTTP endpoint reaches it — so a definition version can only be created through the
-storage layer, and the run endpoints delivered in 1C are **not reachable end to end by a consumer**.
-1D's acceptance criterion ("a V2 API-only definition runs locally end to end") cannot be met without
-them. Fold them into the front of 1D.
-
-Open question they raise: teams and applications must exist in the V2 registry before a definition
-can be created, and nothing onboards them today. Decide whether that is an admin endpoint, a
-migration from team YAML, or auto-provisioning under an explicit non-production flag — and ask before
-picking auto-provisioning.
-
-Useful groundwork already in place: the `ExecutionPlanCompiler` port (swap
-`BaselineExecutionPlanCompiler` for the JMeter one and nothing else changes), the plan digest contract
-already verified end to end, `RunnerShard` carrying shard index/count for dataset partitioning, the
-`Clock` bean for deterministic tests, and PostgreSQL Testcontainers proven for concurrency.
+Useful groundwork already in place: the plan digest contract verified end to end, `RunnerShard`
+carrying shard index/count for dataset partitioning, the `Clock` bean for deterministic tests, and
+PostgreSQL Testcontainers proven for concurrency.
 
 ---
 
@@ -271,5 +334,5 @@ already verified end to end, `RunnerShard` carrying shard index/count for datase
 - Preserve V1 behavior. `/api/v1/**` must keep working; the 8 paths above are the check.
 - Tests named `KNOWN DEFECT` / `KNOWN GAP` / `KNOWN SECURITY GAP` assert behavior that is **wrong on purpose**. Invert them in place when the owning increment fixes them — never delete one to make a build pass.
 - If an integration test reports `Skipped`, treat it as a failure to verify, not a pass.
-- The **fake execution provider generates no load**. Never let a run reported as `COMPLETED` under it be presented as evidence a test ran.
+- The **fake execution provider generates no load**, and the platform now enforces that: its runs are marked `synthetic`, report `INDETERMINATE` objectives and fail with `NO_LOAD_GENERATED`. Never weaken any part of that to make a demo look better — §3b explains why each piece exists.
 - Pause and ask before: a new unapproved dependency, k6, a secret manager, an identity provider, a production S3 bucket, or real credentials/endpoints.

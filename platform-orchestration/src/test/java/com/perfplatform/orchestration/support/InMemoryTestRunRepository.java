@@ -236,6 +236,6 @@ public final class InMemoryTestRunRepository implements TestRunRepository {
     private static TestRun withLockVersion(TestRun run, long lockVersion) {
         return new TestRun(run.id(), run.teamId(), run.definitionVersionId(), run.executionPlanId(),
                 run.state(), run.environment(), run.trigger(), run.timeline(), run.cancellation(),
-                run.failure(), run.claim(), lockVersion);
+                run.failure(), run.claim(), run.synthetic(), lockVersion);
     }
 }

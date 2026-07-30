@@ -124,6 +124,20 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
         return PROVIDER_ID;
     }
 
+    /**
+     * Yes. JMeter runs and traffic reaches the target.
+     *
+     * <p>True despite this being a development-only adapter: the distinction this answers is whether
+     * the measurements mean anything, not whether the deployment is production-grade. Load generated
+     * by a child process of the control plane is real load, and its numbers describe a real
+     * interaction with a real system — subject to the caveat that the generator is sharing a JVM
+     * host with the platform, which is why this adapter is refused in production.
+     */
+    @Override
+    public boolean generatesRealLoad() {
+        return true;
+    }
+
     @Override
     public ProvisioningResult provision(ProvisionRequest request) {
         Instant now = clock.instant();

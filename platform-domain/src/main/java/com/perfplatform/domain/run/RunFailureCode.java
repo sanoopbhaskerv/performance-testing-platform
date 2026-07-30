@@ -50,6 +50,19 @@ public enum RunFailureCode {
     /** Analysis could not produce objective outcomes from the artifacts that were collected. */
     ANALYSIS_FAILED,
 
+    /**
+     * No load was generated, so the run measured nothing.
+     *
+     * <p>Produced by a development execution provider that invents its results. Its own code rather
+     * than {@link #RESULTS_INCOMPLETE} because the two lead somewhere completely different: results
+     * that arrived incomplete are an incident to investigate, while this is a deployment configured
+     * with a provider that generates no traffic — a fact about the platform, not about the run.
+     *
+     * <p>A run reaching this state is the correct outcome, not a defect to route around. A provider
+     * that fabricates measurements must never produce a run that reads as passing.
+     */
+    NO_LOAD_GENERATED,
+
     /** The control plane encountered an unexpected error it could not attribute. */
     INTERNAL_ERROR;
 

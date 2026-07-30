@@ -95,6 +95,19 @@ public final class FakeExecutionProvider implements ExecutionProvider {
         return PROVIDER_ID;
     }
 
+    /**
+     * Never. This provider invents its measurements.
+     *
+     * <p>Every run it executes is marked synthetic on the run row itself and reports its objectives
+     * as {@code INDETERMINATE}. The marking is deliberately not something a reader has to go looking
+     * for: the number in a report travels into tickets and status updates, and a caveat that lives
+     * only inside {@code runner-manifest.json} does not travel with it.
+     */
+    @Override
+    public boolean generatesRealLoad() {
+        return false;
+    }
+
     @Override
     public ProvisioningResult provision(ProvisionRequest request) {
         Instant now = clock.instant();

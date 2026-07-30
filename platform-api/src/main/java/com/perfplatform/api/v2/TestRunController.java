@@ -4,13 +4,17 @@ import com.perfplatform.api.v2.dto.ArtifactResponse;
 import com.perfplatform.api.v2.dto.CancellationResponse;
 import com.perfplatform.api.v2.dto.ObjectiveOutcomeResponse;
 import com.perfplatform.api.v2.dto.RunEventResponse;
+import com.perfplatform.api.v2.dto.RunReportResponse;
 import com.perfplatform.api.v2.dto.TestRunResponse;
 import com.perfplatform.api.v2.dto.TriggerTestRunRequest;
 import com.perfplatform.api.v2.security.CallerContextProvider;
+import com.perfplatform.domain.identity.ArtifactId;
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ReadRunReportUseCase;
+import com.perfplatform.orchestration.run.ReadRunReportUseCase.ArtifactContent;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase.TriggerCommand;
@@ -19,6 +23,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -57,18 +62,31 @@ public class TestRunController {
     /** Set when a trigger returned an existing run instead of creating one. */
     private static final String IDEMPOTENT_REPLAY = "Idempotent-Replay";
 
+    /** Carries a downloaded artifact's recorded digest, so a caller can repeat the verification. */
+    private static final String ARTIFACT_DIGEST = "X-Artifact-Digest";
+
+    /**
+     * Stops a browser from re-deciding an artifact's type by sniffing its content.
+     *
+     * <p>Named here rather than taken from {@code HttpHeaders}, which has no constant for it.
+     */
+    private static final String CONTENT_TYPE_OPTIONS = "X-Content-Type-Options";
+
     private final TriggerTestRunUseCase triggerRun;
     private final CancelTestRunUseCase cancelRun;
     private final ReadTestRunUseCase readRun;
+    private final ReadRunReportUseCase readReport;
     private final CallerContextProvider callers;
 
     public TestRunController(TriggerTestRunUseCase triggerRun,
             CancelTestRunUseCase cancelRun,
             ReadTestRunUseCase readRun,
+            ReadRunReportUseCase readReport,
             CallerContextProvider callers) {
         this.triggerRun = triggerRun;
         this.cancelRun = cancelRun;
         this.readRun = readRun;
+        this.readReport = readReport;
         this.callers = callers;
     }
 
@@ -141,6 +159,67 @@ public class TestRunController {
         return readRun.artifacts(TestRunId.of(runId), callers.current()).stream()
                 .map(ArtifactResponse::from)
                 .toList();
+    }
+
+    /**
+     * One artifact's content.
+     *
+     * <p>Authorized on every request, and the grant is the request — no URL is ever minted or stored
+     * (CLAUDE.md §17). A stored pre-signed URL is a reference that keeps working after the access that
+     * created it was revoked, and a reference that works until it silently does not.
+     *
+     * <p>The digest is verified before anything is written to the response, so the platform never
+     * serves as a run's evidence a file it can prove is not the file it measured.
+     */
+    @Operation(
+            summary = "Download one artifact's content",
+            description = "Authorized per request; no pre-signed URL is issued or stored. The content "
+                    + "is verified against the digest recorded when it was stored, and refused if it "
+                    + "does not match. Returns 404 for an artifact this caller may not read, which is "
+                    + "the same answer as one that does not exist.")
+    @GetMapping("/{runId}/artifacts/{artifactId}/content")
+    public ResponseEntity<byte[]> artifactContent(
+            @PathVariable String runId,
+            @PathVariable String artifactId) {
+
+        ArtifactContent content = readReport.artifactContent(
+                TestRunId.of(runId), ArtifactId.of(artifactId), callers.current());
+
+        byte[] body = content.content();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, content.reference().contentType())
+                // "attachment" rather than inline: these are runner outputs, and a results file or a
+                // log rendered in the browser by content sniffing is a way to get a run's own artifact
+                // executed in the platform's origin.
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\""
+                        + ReadRunReportUseCase.downloadFileName(content.reference()) + "\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(body.length))
+                // The digest travels with the bytes, so a caller can repeat the verification the
+                // platform just performed rather than taking it on trust.
+                .header(ARTIFACT_DIGEST, content.reference().digest())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header(CONTENT_TYPE_OPTIONS, "nosniff")
+                .body(body);
+    }
+
+    /**
+     * A run's report.
+     *
+     * <p>JSON rather than a rendered page. The console renders it, a pipeline can assert on it, and a
+     * later increment can compare two of them — none of which works with server-rendered markup, which
+     * is what V1 produced.
+     */
+    @Operation(
+            summary = "Get a run's report",
+            description = "Verdicts, measurements, workload profile, history and evidence, assembled "
+                    + "from durable state. Measurements are null until the run has been analyzed, "
+                    + "never zero. When synthetic is true, no load was generated and every "
+                    + "measurement is invented.")
+    @GetMapping(value = "/{runId}/report", produces = MediaType.APPLICATION_JSON_VALUE)
+    public RunReportResponse report(@PathVariable String runId) {
+        return RunReportResponse.from(
+                readReport.report(TestRunId.of(runId), callers.current()));
     }
 
     @Operation(summary = "Get a run's current state")

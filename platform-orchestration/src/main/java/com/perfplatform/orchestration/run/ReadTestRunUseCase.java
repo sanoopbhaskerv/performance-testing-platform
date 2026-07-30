@@ -81,10 +81,28 @@ public final class ReadTestRunUseCase {
         return results.artifactsFor(runId);
     }
 
+    /**
+     * A run the caller is entitled to see.
+     *
+     * <p>A run belonging to a team the caller is not in is reported as <em>not existing</em>, not as
+     * forbidden. Run identifiers travel in URLs, pipeline logs and chat messages, and an endpoint that
+     * answered 403 for a real run and 404 for a fictional one would confirm which identifiers are
+     * real — and, by extension, that another team is running a test right now.
+     *
+     * <p>A caller who <em>is</em> in the owning team but lacks the scope gets a plain refusal instead.
+     * They already know the run exists; hiding it from them would only be confusing, and the refusal
+     * discloses nothing they did not already have.
+     *
+     * @throws UnknownRunException              if no such run exists, or it belongs to another team
+     * @throws CallerContext.AuthorizationException if the caller's own team's run needs a scope they
+     *                                          do not hold
+     */
     public TestRun get(TestRunId runId, CallerContext caller) {
         TestRun run = runs.find(runId).orElseThrow(() -> new UnknownRunException(runId));
-        // Authorization failure and non-existence deliberately produce the same outcome at the API
-        // boundary, so a caller cannot probe which run identifiers are real.
+
+        if (!caller.belongsTo(run.teamId())) {
+            throw new UnknownRunException(runId);
+        }
         caller.requireAct(Scope.RUNS_READ, run.teamId());
         return run;
     }

@@ -31,6 +31,7 @@ import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
 import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.RunReconciler;
 import com.perfplatform.orchestration.run.RunWorkloadService;
@@ -334,6 +335,18 @@ public class OrchestrationConfiguration {
     public ReadTestRunUseCase readTestRunUseCase(TestRunRepository runs, ResultCatalog results,
             AdmissionPolicy policy, CapacityLimits limits) {
         return new ReadTestRunUseCase(runs, results, policy, limits);
+    }
+
+    /**
+     * Reporting, including serving artifact content.
+     *
+     * <p>Built on the run reader rather than beside it, so a report and a status read cannot disagree
+     * about who may see a run — there is one team check, in one place.
+     */
+    @Bean
+    public ReadRunReportUseCase readRunReportUseCase(ReadTestRunUseCase runs, ResultCatalog results,
+            ExecutionPlanRepository plans, DefinitionVersionCatalog versions, ArtifactStore artifacts) {
+        return new ReadRunReportUseCase(runs, results, plans, versions, artifacts);
     }
 
     /**

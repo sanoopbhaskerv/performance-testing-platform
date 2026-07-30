@@ -8,6 +8,7 @@ import com.perfplatform.domain.run.InvalidRunTransitionException;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -199,6 +200,38 @@ public class V2ProblemHandler {
             HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "run.notFound",
                 "No such test run.",
+                request, e);
+    }
+
+    /**
+     * An artifact identifier that names nothing this caller may download.
+     *
+     * <p>404 for all three cases: no such artifact, an artifact belonging to another team's run, and
+     * an artifact whose content has been reclaimed. Same reasoning as an unknown run — distinguishing
+     * them would let a caller enumerate which artifact identifiers are real.
+     */
+    @ExceptionHandler(ReadRunReportUseCase.UnknownArtifactException.class)
+    public ProblemDetail handleUnknownArtifact(ReadRunReportUseCase.UnknownArtifactException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "artifact.notFound",
+                "No such artifact for this run.",
+                request, e);
+    }
+
+    /**
+     * Stored content that no longer matches its recorded digest.
+     *
+     * <p>500, not 404: the artifact exists and the caller is entitled to it. Something in storage is
+     * wrong, and that is the platform's fault rather than the request's. The bytes are withheld —
+     * serving a run's evidence while being able to prove it is not the file that was measured would
+     * be worse than failing.
+     */
+    @ExceptionHandler(ReadRunReportUseCase.ArtifactCorruptedException.class)
+    public ProblemDetail handleCorruptedArtifact(ReadRunReportUseCase.ArtifactCorruptedException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "artifact.digestMismatch",
+                "This artifact's stored content does not match the digest recorded when the run "
+                        + "produced it, so it will not be served. Quote the correlation id.",
                 request, e);
     }
 

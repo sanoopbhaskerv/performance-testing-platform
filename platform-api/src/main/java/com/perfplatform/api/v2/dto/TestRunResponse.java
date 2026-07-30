@@ -29,6 +29,9 @@ import java.time.Instant;
  *                            most wants to see rather than a stop button that appears to do nothing
  * @param failureCode         stable failure code, null unless the run failed
  * @param failureReason       sanitized explanation, null unless the run failed
+ * @param synthetic           true when no load was generated and every measurement is invented.
+ *                            Present on the run itself, not only in an artifact, so no consumer of
+ *                            this API can display a number from this run without having been told
  */
 @Schema(description = "State of a performance test run")
 public record TestRunResponse(
@@ -45,7 +48,10 @@ public record TestRunResponse(
         Instant completedAt,
         boolean cancellationRequested,
         String failureCode,
-        String failureReason) {
+        String failureReason,
+        @Schema(description = "True when no load was generated, making every measurement invented. "
+                + "Such a run reports INDETERMINATE objectives and can never pass.")
+        boolean synthetic) {
 
     public static TestRunResponse from(TestRun run) {
         return new TestRunResponse(
@@ -62,6 +68,7 @@ public record TestRunResponse(
                 run.timeline().completedAt().orElse(null),
                 run.isCancellationRequested(),
                 run.failure().map(failure -> failure.code().name()).orElse(null),
-                run.failure().map(TestRun.Failure::sanitizedReason).orElse(null));
+                run.failure().map(TestRun.Failure::sanitizedReason).orElse(null),
+                run.synthetic());
     }
 }

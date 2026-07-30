@@ -46,6 +46,15 @@ public final class RunWorkloadService {
 
     private static final Logger log = LoggerFactory.getLogger(RunWorkloadService.class);
 
+    /**
+     * What every objective on a synthetic run says instead of a comparison.
+     *
+     * <p>Shared with the reconciler's failure reason so the run's status and its objectives give the
+     * same explanation. Two wordings for one fact is how one of them ends up being the reassuring one.
+     */
+    public static final String SYNTHETIC_OBJECTIVE_DETAIL =
+            "No load was generated, so nothing could be measured.";
+
     private final EngineRegistry engines;
     private final ArtifactStore artifacts;
     private final ResultCatalog results;
@@ -129,6 +138,10 @@ public final class RunWorkloadService {
      *
      * <p>A shard whose results are missing is <em>not</em> skipped: it lowers the reported shard
      * count, which is what makes every objective indeterminate rather than passing on partial data.
+     *
+     * <p>A run marked {@linkplain TestRun#synthetic() synthetic} has its verdicts restated as
+     * indeterminate before they are stored. The measurements are still recorded — they are what the
+     * artifacts contain — but no objective on a run that generated no load may report a pass.
      */
     public RunAnalyzer.Analysis analyze(TestRun run, ExecutionPlan plan, DefinitionVersion version,
             List<RunnerShard> shards) {
@@ -145,15 +158,26 @@ public final class RunWorkloadService {
         SampleSet samples = engine.parse(
                 new RunnerOutput(run.id(), expected, shardResults));
 
-        RunAnalyzer.Analysis analysis = analyzer.analyze(run.id(), plan.engine(), expected,
+        RunAnalyzer.Analysis measured = analyzer.analyze(run.id(), plan.engine(), expected,
                 shardResults.size(), samples, objectives(version.specification()));
 
-        results.recordObjectiveOutcomes(run.id(), analysis.outcomes());
+        // Applied here rather than inside the analyzer so the analyzer stays a pure function of the
+        // samples: what it computes must be re-derivable from stored artifacts alone, and whether a
+        // provider generated load is a fact about the run, not about the samples.
+        RunAnalyzer.Analysis analysis = run.synthetic()
+                ? measured.asIndeterminate(SYNTHETIC_OBJECTIVE_DETAIL)
+                : measured;
+
+        // Metrics and verdicts in one call, therefore one transaction. Stored measurements without
+        // the verdicts derived from them, or the reverse, would be a report assembled from two
+        // different analyses.
+        results.recordAnalysis(run.id(), analysis.result(), analysis.outcomes());
 
         log.info("Run analyzed runId={} shardsReported={}/{} samples={} unreadable={} objectives={} "
-                        + "successful={}",
+                        + "successful={} synthetic={}",
                 run.id(), shardResults.size(), expected, samples.samples().size(),
-                samples.unparsedRows(), analysis.outcomes().size(), analysis.isSuccessful());
+                samples.unparsedRows(), analysis.outcomes().size(), analysis.isSuccessful(),
+                run.synthetic());
 
         return analysis;
     }

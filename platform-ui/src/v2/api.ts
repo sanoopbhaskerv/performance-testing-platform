@@ -54,6 +54,26 @@ export interface TestRun {
   cancellationRequested: boolean;
   failureCode: string | null;
   failureReason: string | null;
+  /**
+   * True when no load was generated and every measurement this run produced is invented.
+   *
+   * Never render a number from such a run without the banner. The whole reason this field is on the
+   * run rather than buried in an artifact is that the caveat has to travel with the number.
+   */
+  synthetic: boolean;
+}
+
+/**
+ * What this deployment actually does when a run is triggered.
+ *
+ * Read once at startup and shown permanently in the header. A deployment running a development
+ * provider produces runs indistinguishable from real ones apart from the numbers being invented, so
+ * a consumer cannot be expected to work it out for themselves.
+ */
+export interface ExecutionCapability {
+  providerId: string;
+  generatesRealLoad: boolean;
+  summary: string;
 }
 
 export type RunStatus =
@@ -98,6 +118,100 @@ export interface Artifact {
   contentType: string;
   sizeBytes: number;
   storedAt: string;
+}
+
+/**
+ * A run's report.
+ *
+ * `measurements` and `execution` are `null` rather than zeroed when a run has not reached them. Show
+ * "not measured yet", never a zero — a zero reads as a finished test that found nothing wrong.
+ */
+export interface RunReport {
+  run: TestRun;
+  /** Repeated at the top level on purpose: the caveat on every number below it. */
+  synthetic: boolean;
+  syntheticNotice: string | null;
+  test: TestedDefinition | null;
+  execution: ExecutionDetail | null;
+  objectives: ObjectiveOutcome[];
+  summary: ObjectiveSummary;
+  measurements: Measurements | null;
+  timeline: RunEvent[];
+  artifacts: Artifact[];
+}
+
+export interface TestedDefinition {
+  name: string;
+  application: string;
+  versionNumber: number;
+  digest: string;
+  workloads: WorkloadProfile[];
+}
+
+export interface WorkloadProfile {
+  name: string;
+  type: string | null;
+  peakUsers: number;
+  totalDurationSeconds: number;
+  stages: Stage[];
+  scenarios: Scenario[];
+}
+
+export interface Stage {
+  durationSeconds: number;
+  targetUsers: number;
+}
+
+export interface Scenario {
+  name: string;
+  weightPercent: number;
+  operationId: string;
+}
+
+/** The platform's own view of the run. Shown only in the advanced section (CLAUDE.md §24). */
+export interface ExecutionDetail {
+  engine: string;
+  planDigest: string;
+  shardCount: number;
+  peakVirtualUsers: number;
+  estimatedDurationSeconds: number;
+}
+
+export interface ObjectiveSummary {
+  passed: number;
+  breached: number;
+  indeterminate: number;
+  /** True only when the run generated real load, asked at least one question, and all passed. */
+  demonstrated: boolean;
+}
+
+export interface Measurements {
+  engine: string;
+  measuredFrom: string | null;
+  measuredTo: string | null;
+  shardsExpected: number;
+  shardsReported: number;
+  /** False when some load generators never reported — the numbers describe a smaller test. */
+  complete: boolean;
+  overall: OperationMetrics;
+  operations: OperationMetrics[];
+}
+
+export interface OperationMetrics {
+  name: string;
+  sampleCount: number;
+  errorCount: number;
+  /** Results that could not be read at all. Counted in the error rate, shown so it is visible. */
+  unparsedCount: number;
+  errorRatePercent: number;
+  minMillis: number;
+  maxMillis: number;
+  meanMillis: number;
+  p50Millis: number;
+  p90Millis: number;
+  p95Millis: number;
+  p99Millis: number;
+  throughputPerSecond: number;
 }
 
 /** RFC 7807 problem detail, which every V2 error uses. */
@@ -219,6 +333,48 @@ export class V2Client {
         { headers: this.headers },
       )
       .then((r) => r.data);
+  }
+
+  getReport(runId: string) {
+    return axios
+      .get<RunReport>(`/api/v2/test-runs/${runId}/report`, { headers: this.headers })
+      .then((r) => r.data);
+  }
+
+  /** What this deployment does when a run is triggered. Shown permanently in the header. */
+  getExecutionCapability() {
+    return axios
+      .get<ExecutionCapability>('/api/v2/platform/execution', { headers: this.headers })
+      .then((r) => r.data);
+  }
+
+  /**
+   * Downloads one artifact.
+   *
+   * Fetched through this client rather than linked with an `<a href>`, because the request needs the
+   * API key header and the server issues no pre-signed URL to link to (CLAUDE.md §17). The blob URL
+   * is created and revoked around the click, so nothing durable is minted here either.
+   */
+  async downloadArtifact(runId: string, artifact: Artifact, fileName: string) {
+    const response = await axios.get<Blob>(
+      `/api/v2/test-runs/${runId}/artifacts/${artifact.id}/content`,
+      { headers: this.headers, responseType: 'blob' },
+    );
+
+    const url = URL.createObjectURL(response.data);
+    try {
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.rel = 'noopener';
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      // Revoked immediately: a blob URL left alive keeps the whole file in memory, and a results
+      // file from a real run is not small.
+      URL.revokeObjectURL(url);
+    }
   }
 }
 

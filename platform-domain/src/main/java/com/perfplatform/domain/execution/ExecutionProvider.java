@@ -32,6 +32,21 @@ public interface ExecutionProvider {
     String providerId();
 
     /**
+     * Whether workloads this provider starts actually generate traffic against the target.
+     *
+     * <p>Declared by the provider rather than inferred from {@link #providerId()}, because the
+     * consequence of getting it wrong is a report of measurements that describe nothing. A string
+     * comparison on a provider name is a check that silently stops working the moment a provider is
+     * added or renamed; a method every implementation must answer is a check that cannot be skipped.
+     *
+     * <p>Returning {@code false} makes every run this provider executes permanently marked as
+     * synthetic, and every objective on it {@code INDETERMINATE}. That is the honest outcome: a run
+     * that generated no load measured nothing, and nothing measured cannot pass. Implementations must
+     * not return {@code true} because a run looks better that way.
+     */
+    boolean generatesRealLoad();
+
+    /**
      * Starts one shard.
      *
      * <p>Must not throw for an ordinary failure to provision — a quota rejection or an unschedulable

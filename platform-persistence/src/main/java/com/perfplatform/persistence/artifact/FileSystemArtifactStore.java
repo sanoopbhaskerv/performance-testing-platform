@@ -101,13 +101,18 @@ public class FileSystemArtifactStore implements ArtifactStore {
         return reference;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Resolves the key against the root rather than consulting the in-memory index. The index only
+     * knows what this process wrote, so an index lookup would make every artifact unreadable after a
+     * restart — including the ones a report links to, which are exactly the artifacts someone opens
+     * days later. The durable reference lives in the database; the key is all that is needed to find
+     * the content.
+     */
     @Override
     public synchronized Optional<byte[]> read(ArtifactReference reference) {
-        return index.stream()
-                .filter(stored -> stored.reference().objectKey().equals(reference.objectKey()))
-                .findFirst()
-                .map(StoredArtifact::file)
-                .flatMap(FileSystemArtifactStore::readFile);
+        return readFile(resolveWithinRoot(reference.objectKey()));
     }
 
     @Override
@@ -120,11 +125,7 @@ public class FileSystemArtifactStore implements ArtifactStore {
 
     /** Content by key, for callers holding a key rather than a reference. */
     public synchronized Optional<byte[]> readByKey(String objectKey) {
-        return index.stream()
-                .filter(stored -> stored.reference().objectKey().equals(objectKey))
-                .findFirst()
-                .map(StoredArtifact::file)
-                .flatMap(FileSystemArtifactStore::readFile);
+        return readFile(resolveWithinRoot(objectKey));
     }
 
     /**
