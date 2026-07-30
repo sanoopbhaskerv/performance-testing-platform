@@ -19,11 +19,13 @@ backed by persisted measurements. See §3b.
 | 1B follow-up — schema conformance | **Complete** `9826a92` | `SchemaConformanceTest` |
 | 1C — durable run orchestration | **Complete** `3290e75` | see §3 |
 | 1D — JMeter engine SPI and local provider | **Complete** `165232a`, `9640590` | see §3a |
-| Synthetic marking and reporting | **Complete** this commit | see §3b |
+| Synthetic marking and reporting | **Complete** `7438f29` | see §3b |
+| Manual requests + demo-service path | **Complete** `e57b38a` | see §3c |
+| 1E — Kubernetes provider and object storage | **Complete** this commit | see §3d |
 | 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
-| 1E onward | **Not started** | — |
+| 2 onward | **Not started** | — |
 
-**580 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D).
+**626 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -34,8 +36,8 @@ Further commits on `feature/platform-v2-foundation` land in it automatically.
 
 `v1-poc` tag exists on the remote at the baseline commit `9233d96` (created by the user).
 
-**Immediate next action:** none outstanding. **Increment 1E** is next — do not start it without the
-user asking. Read §6 for its recommended order.
+**Immediate next action:** none outstanding. **Increment 2** (importers) is next — do not start it
+without the user asking. Read §6.
 
 ---
 
@@ -223,6 +225,75 @@ someone opens days later. It now resolves the key against the root.
 
 ---
 
+## 3c. Manual requests and the demo-service path — delivered
+
+The renderer emitted `GET /{operationId}` for every scenario, so nothing could be load-tested from
+the V2 console: against a real service every request 404s.
+
+- **Optional `method` and `path` on a scenario.** The simplest case of CLAUDE.md §23's manual entry,
+  additive so every earlier document stays valid. Both are in the canonical form and therefore in the
+  digest — two versions differing only in the path they call are different tests.
+- **Only the path comes from the document.** Scheme, host and port still come from the resolved
+  target, and a path that is a full URL is refused at validation. A specification cannot name its own
+  host; that is the whole point of the target policy.
+- **A validator that disagreed with its evaluator, fixed.** `ObjectiveEvaluator` resolves a
+  `workload/scenario` scope — samplers are labelled that way precisely so it can (defect D4's fix) —
+  while `SemanticValidator` rejected exactly that scope as unresolved.
+- **`demo-service` is a first-class local target**: a target on `local-dev`, a validated shipped
+  example, and one of two named starting points in the console. Its objectives breach on purpose.
+
+## 3d. Increment 1E — delivered
+
+### Kubernetes execution provider (`runners/runner-kubernetes`)
+
+A new module, engine-neutral: it starts, observes and stops a runner and knows nothing about JMeter,
+so a second engine reuses it unchanged. Fabric8 client, chosen for its Job builder and its
+`KubernetesMockServer` — the whole Job contract is tested without a cluster (CLAUDE.md §25).
+
+`RunnerJobManifest` encodes the safety posture, each line pinned by a test that names the failure it
+prevents: `backoffLimit: 0` and `restartPolicy: Never` (a retried performance test is duplicate load
+on a real system), `activeDeadlineSeconds`, TTL, non-root, read-only root filesystem, no privilege
+escalation, all capabilities dropped, `RuntimeDefault` seccomp, explicit requests and limits, a
+size-limited `emptyDir`, and no secret value in any label, annotation, environment entry or argument.
+
+`KubernetesExecutionProvider` **adopts an existing Job rather than recreating it** — the second
+defence against duplicate load, for when a pass dies between creating the Job and recording the
+handle. It compares **Job UIDs**, not names, so a recreated Job is never mistaken for the original,
+and cancellation uses a **foreground cascade** so Pods die with the Job rather than being orphaned
+while the platform reports the run stopped.
+
+### S3-compatible artifact store
+
+`S3ArtifactStore` beside the filesystem one, same key layout, so the two are interchangeable and
+authorization stays a property of the key. Tested against **MinIO** rather than a fake: the
+properties worth testing are exactly the ones a fake would be written to satisfy. Still no
+pre-signed URL anywhere.
+
+### Startup refusals, all tested
+
+Production now has a real path rather than a blanket refusal, and the guards moved to the things that
+actually matter: a runner cell with no namespace, no service account or no image allowlist will not
+start; **a floating image tag is refused** (a moving tag means two runs of one immutable version
+execute on different builds while the plan digest still matches); and a **pod-local filesystem is
+refused in production**, because a file one replica writes is invisible to the others and unreachable
+by a runner.
+
+### Also
+Helm runner-cell namespace with `pod-security: restricted`, a runner ServiceAccount, and a namespaced
+`Role` granting the control plane `create/get/list/watch/delete` on Jobs — deliberately **no
+`update`/`patch`**, since an edited Job is a test whose plan digest no longer describes what ran.
+`docs/operations/runner-calibration.md` covers why a throttled generator reports its own latency, and
+why shard count stays at 1 until it is measured. `BaselineExecutionPlanCompiler` deleted.
+
+### Not done, and owned by later increments
+- **No runner image is built here.** The allowlist expects `perfplatform/jmeter-runner:<tag>`; the
+  image itself, including `ConcurrencyThreadGroup` for smooth ramping, is still to be built.
+- **Never run against a real cluster.** Everything is verified against the fabric8 mock server and
+  MinIO. A kind/minikube end-to-end run is the honest next verification step.
+- Sharding is still hardcoded to 1, pending the calibration the doc describes.
+
+---
+
 ## 4. Design decisions made in 1B and 1C (do not relitigate)
 
 ### From 1B
@@ -294,36 +365,35 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - `helm lint` advises `icon is recommended` — pre-existing.
 - Startup logs two loud warnings, by design: the **FAKE execution provider** generates no load, and the **DEVELOPMENT caller-identity provider** derives identity from V1 API keys. Both refuse to start under a production profile.
 - **A local run ends in `Failed` / `NO_LOAD_GENERATED`, not `Passed`.** This is correct and deliberate — see §3b. Do not "fix" it by making the fake provider claim to generate load.
-- The console's starter specification names team `alpha` / application `alpha-service`, which do **not** exist in the shipped `config/teams` (that has `local-dev` / `local-service`). Saving the starter unedited fails with `specification.team.unknown`. Worth aligning; not done here to keep this increment's diff to its subject.
+- UI lint reports **10 errors, 3 warnings**, all pre-existing and none in files added since 1D. The count rose from the previously recorded 3 without any code changing: eslint's React rules began analysing `PerformanceConsole.tsx`, which has always had them. Verified by linting the committed file at HEAD.
+- **A background `java -jar` survives `TaskStop`/`preview_stop`.** The shell dies, the JVM does not, and the next start fails with `Port 8080 was already in use` — while `curl` happily answers from the *stale* jar. `lsof -ti:8080 | xargs kill -9` before restarting, or you will verify the wrong build.
 
 ---
 
-## 6. Next: Increment 1E only
+## 6. Next
 
-Recommended order, and the gaps §3a and §3b leave:
+**Finish 1E's physical half first.** The control plane can create runner Jobs, but nothing has ever
+run in one:
 
-1. **Kubernetes execution provider** behind `ExecutionProvider` — Job manifest builder, resource and
-   security policy, `backoffLimit: 0`, `activeDeadlineSeconds`, persisted Job UID, observe/cancel.
-   Never auto-replay a failed material run. It must return `true` from `generatesRealLoad()`, which is
-   also what makes its runs able to reach `COMPLETED`.
-2. **S3-compatible `ArtifactStore`.** The port and key layout already match; the filesystem
-   implementation cannot serve multiple replicas. `read` resolves a key against a root, so an S3
-   implementation is a straight substitution — the download endpoint needs no change.
-3. **Runner image** with `ConcurrencyThreadGroup`, so stages stop being stepwise. Write
-   `docs/operations/runner-calibration.md` while doing it — shard count is still hardcoded to 1
-   pending calibration.
-4. **Housekeeping**: delete `BaselineExecutionPlanCompiler`; add the tests §3a lists as missing;
-   align the console's starter specification with the shipped `config/teams` (see §5).
+1. **Build the JMeter runner image.** `perfplatform/jmeter-runner:<tag>` — reads `PERF_*` from its
+   environment, fetches the plan by `PERF_WORKLOAD_KEY`, runs JMeter, uploads `results.jtl`,
+   `jmeter.log` and a `runner-manifest.json` echoing `PERF_PLAN_DIGEST`. Non-root, read-only root
+   filesystem, everything written under `PERF_WORKSPACE`. Include `ConcurrencyThreadGroup` so load
+   stages stop being stepwise.
+2. **Run it once on kind or minikube.** Everything in 1E is verified against a mock API server and
+   MinIO. That is the right way to test the contract and it is not the same as having run.
+3. **Calibrate**, then raise shard count above 1. See `docs/operations/runner-calibration.md`.
+
+**Then Increment 2 — importers.** OpenAPI, Postman, HAR, cURL and a manual builder. The manual case
+now has its simplest form already (a scenario's `method` and `path`), so an importer's job is to
+produce those plus headers, query parameters and bodies, which the specification still cannot express.
 
 Already done, so **do not** repeat from earlier plans: the report endpoint, artifact download with
-per-request authorization and digest verification, and persisted run metrics. See §3b.
+per-request authorization and digest verification, persisted run metrics, the Kubernetes provider,
+the S3 artifact store, and `BaselineExecutionPlanCompiler`'s deletion.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.
-
-Useful groundwork already in place: the plan digest contract verified end to end, `RunnerShard`
-carrying shard index/count for dataset partitioning, the `Clock` bean for deterministic tests, and
-PostgreSQL Testcontainers proven for concurrency.
 
 ---
 

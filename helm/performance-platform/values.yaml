@@ -31,6 +31,82 @@ teamConfigs:
         baseUrl: "http://example-service:8080"
         jvmEnabled: false
 
+# ─────────────────────────────────────────────────────────
+#  Runner cell — where production load is actually generated.
+#
+#  CLAUDE.md §4 forbids the control plane from generating material load, so a
+#  production deployment runs workloads as isolated, ephemeral Jobs here.
+# ─────────────────────────────────────────────────────────
+runnerCell:
+  enabled: true
+
+  # A namespace of its own. A runner executes a plan compiled from a user's
+  # document and is the least trusted thing in the platform; it must not share a
+  # namespace with the control plane's Secrets and ServiceAccounts.
+  namespace: perf-runners
+
+  # The identity a runner Pod runs as. Scoped to uploading its own artifacts.
+  # Never the control plane's account, which can create Jobs.
+  serviceAccount: perf-runner
+
+  # For IRSA, so a runner uploads with short-lived credentials rather than a
+  # static key mounted into the Pod:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+  serviceAccountAnnotations: {}
+
+  # An allowlist of engine to pinned image, not a template. An engine with no
+  # entry here cannot be provisioned at all — a fallback image would mean a
+  # misconfiguration produces a run on the wrong engine whose results look valid.
+  #
+  # Tags must be pinned. Startup refuses `latest`, `main`, `master`, `edge` or an
+  # untagged image: a moving tag means two runs of the same immutable definition
+  # version can execute on different runner builds, so the plan digest still
+  # matches while the thing executing it has changed.
+  images:
+    jmeter: "perfplatform/jmeter-runner:5.6.3-1"
+
+  # Sized so the generator is not the bottleneck. A throttled load generator
+  # reports latencies of itself rather than of the system under test — calibrate
+  # before trusting a number. See docs/operations/runner-calibration.md.
+  resources:
+    cpuRequest: "2"
+    cpuLimit: "4"
+    memoryRequest: "2Gi"
+    memoryLimit: "4Gi"
+
+  # Bound on the runner's temporary workspace, so a runaway results file fills an
+  # emptyDir rather than the node.
+  workspaceSizeLimit: "8Gi"
+
+  # Long enough that reconciliation can still see how a Job ended after a
+  # control-plane restart. Artifacts are already durable by then.
+  finishedJobTtl: 6h
+
+  # Added to the plan's own duration to form activeDeadlineSeconds, covering
+  # image pull, startup and artifact upload.
+  deadlineGrace: 5m
+
+# ─────────────────────────────────────────────────────────
+#  Artifact storage.
+#
+#  Pod-local files are working files, never the system of record (CLAUDE.md §6).
+#  A production deployment must use object storage: a file written by one replica
+#  is invisible to the others, and a runner cannot reach it at all. Startup
+#  refuses `filesystem` under a production profile.
+# ─────────────────────────────────────────────────────────
+artifacts:
+  store: s3
+  bucket: "" # Required. Choosing one is an operator decision, not a default.
+  region: ""
+
+  # Set only for an S3-compatible appliance or MinIO. Empty means real AWS S3.
+  endpoint: ""
+  pathStyleAccess: false
+
+# Credentials are never configured here. The SDK's default provider chain reads
+# them from the environment, an instance profile, or an IRSA-projected token — a
+# key in a values file is a key in source control eventually.
+
 database:
   username: "perf"
   password: "perf" # Use a K8s Secret in production

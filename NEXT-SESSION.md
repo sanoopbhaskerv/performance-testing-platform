@@ -16,7 +16,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **580 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
+Expect **626 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
 `An error occurred while setting up the SSL connection`, that is a known flaky Testcontainers
 start — retry once before investigating. If any integration test reports `Skipped`, that is a
 false green: investigate, do not accept it.
@@ -53,32 +53,25 @@ Other traps, all real, all hit at least once:
 
 ---
 
-## 2. Next: Increment 1E
+## 2. Next: finish 1E's physical half, then Increment 2
 
-In order — `HANDOFF.md` §6 has the detail:
+The control plane can create runner Jobs, but **nothing has ever run in one**. `HANDOFF.md` §6 has
+the detail:
 
-1. **Kubernetes execution provider** behind `ExecutionProvider`. Job manifest builder, resource and
-   security policy, `backoffLimit: 0`, `activeDeadlineSeconds`, persisted Job UID, observe/cancel.
-   **Never auto-replay a failed material run** — that is duplicate load on a real system. It returns
-   `true` from `generatesRealLoad()`, which is also what lets its runs reach `COMPLETED`.
-2. **S3-compatible `ArtifactStore`.** The port and key layout already match, and
-   `FileSystemArtifactStore.read` now resolves a key against a root rather than an in-memory index,
-   so the substitution is straight and the download endpoint needs no change.
-3. **Runner image with `ConcurrencyThreadGroup`**, so load stages stop being stepwise. Write
-   `docs/operations/runner-calibration.md` alongside — shard count is still hardcoded to 1 pending
-   calibration.
-4. **Housekeeping:** delete `BaselineExecutionPlanCompiler` (dead since `EngineDispatchingPlanCompiler`
-   replaced it); add the missing tests listed in `HANDOFF.md` §3a; align the console's starter
-   specification with the shipped team config.
+1. **Build the JMeter runner image.** It reads `PERF_*` from its environment, fetches the plan by
+   `PERF_WORKLOAD_KEY`, runs JMeter, and uploads `results.jtl`, `jmeter.log` and a
+   `runner-manifest.json` echoing `PERF_PLAN_DIGEST`. Non-root, read-only root filesystem, writes
+   only under `PERF_WORKSPACE`. Include `ConcurrencyThreadGroup` so stages stop being stepwise.
+2. **Run it once on kind or minikube.** Increment 1E is verified against a fabric8 mock API server
+   and MinIO — that is the right way to test the contract, and it is not the same as having run.
+3. **Calibrate, then raise shard count above 1.** See `docs/operations/runner-calibration.md`.
 
-**Already delivered — do not rebuild these:** the report endpoint, the report UI, artifact download
-with per-request authorization and digest verification, persisted `run_metrics`, and the synthetic-run
-marking. `HANDOFF.md` §3b is the record.
+Then **Increment 2 — importers**: OpenAPI, Postman, HAR, cURL, manual. A scenario can already carry
+its own `method` and `path`; what it still cannot express is headers, query parameters and bodies.
 
-Not 1E, but worth knowing the shape of: a scenario's `operationId` has no real path, method, headers
-or body until importers land in **Increment 2**. The renderer emits `GET /{operationId}` —
-deliberately obvious rather than plausible. Reports look thin for that reason, and that is honest
-rather than a defect to hide.
+**Already delivered — do not rebuild these:** the report endpoint and UI, artifact download with
+per-request authorization and digest verification, persisted `run_metrics`, the synthetic-run
+marking, the Kubernetes execution provider, and the S3 artifact store. `HANDOFF.md` §3b–§3d.
 
 ---
 

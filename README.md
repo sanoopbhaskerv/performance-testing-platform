@@ -226,17 +226,47 @@ unchanged. They are removed only once V2 reaches functional parity and removal i
 ## ☁️ Deploy to Kubernetes (EKS + Karpenter)
 
 ```bash
-# Add your team config to helm/performance-platform/values.yaml under teamConfigs:
-# Then install:
 helm install perf-platform ./helm/performance-platform \
   --namespace perf-testing --create-namespace \
-  --set image.tag=1.0.0
-
-# Access the UI via the configured ingress host
-open https://perf-platform.internal.your-company.com
+  --set image.tag=1.0.0 \
+  --set artifacts.bucket=my-perf-artifacts \
+  --set artifacts.region=us-east-1
 ```
 
-Karpenter will automatically provision and de-provision nodes for each JMeter test run — you only pay for EC2 during active tests.
+Karpenter provisions and de-provisions nodes for each runner Job, so you pay for EC2 only during
+active tests. The UI is at the configured ingress host.
+
+### How a production deployment differs
+
+The control plane **never generates load itself** (CLAUDE.md §4). Two things follow, and the
+platform refuses to start without either:
+
+| | Local | Production |
+|---|---|---|
+| Execution | `fake` (no traffic) or `local-jmeter` (child process) | **`kubernetes`** — one isolated, ephemeral Job per shard |
+| Artifacts | pod-local filesystem | **S3-compatible object storage** |
+
+Runner Jobs get their own namespace (`runnerCell.namespace`) with `pod-security: restricted`, their
+own service account, and Jobs that are `backoffLimit: 0`, non-root, read-only-root, all capabilities
+dropped, with explicit CPU/memory limits and a hard `activeDeadlineSeconds`.
+
+**A failed run is never automatically retried.** A retried performance test is a second load test
+against a real system and two overlapping sets of results.
+
+Runner images are an **allowlist of pinned tags**, and startup refuses `latest`. A moving tag means
+two runs of the same immutable definition version can execute on different runner builds, so the
+plan digest still matches while the thing executing it has changed.
+
+Object-storage credentials are never configured in Helm values — the AWS SDK's default provider
+chain reads them from an IRSA-projected service account token or an instance profile.
+
+Before trusting any capacity number, read
+[`docs/operations/runner-calibration.md`](docs/operations/runner-calibration.md): a throttled load
+generator reports its own latency rather than the system's, and that failure is silent.
+
+> **The runner image is not built by this repository yet.** `runnerCell.images` expects a
+> `jmeter-runner` image that reads its `PERF_*` environment, executes the plan and uploads its
+> artifacts. Until it exists, the Kubernetes provider will create Jobs that cannot start.
 
 ---
 
@@ -358,6 +388,9 @@ performance-testing-platform/
 ├── platform-api/                   # /api/v2/** REST surface
 ├── engines/
 │   └── engine-jmeter/              # JMeter provider for the engine SPI
+├── runners/
+│   └── runner-kubernetes/          # Production execution: one ephemeral Job per shard
+├── demo-service/                   # A real target to load-test locally (port 8081)
 ├── platform-core/                  # Spring Boot composition root — owns bootstrapping
 │   ├── pom.xml
 │   ├── Dockerfile

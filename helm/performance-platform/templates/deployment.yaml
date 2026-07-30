@@ -46,6 +46,51 @@ spec:
                 secretKeyRef:
                   name: {{ include "performance-platform.fullname" . }}-db-credentials
                   key: password
+            # ── V2 execution and storage ──────────────────────────────────
+            # Production runs workloads as isolated, ephemeral Kubernetes Jobs.
+            # The control plane never generates material load itself.
+            - name: PLATFORM_ORCHESTRATION_EXECUTIONPROVIDER
+              value: "kubernetes"
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_NAMESPACE
+              value: {{ .Values.runnerCell.namespace | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_SERVICEACCOUNT
+              value: {{ .Values.runnerCell.serviceAccount | quote }}
+            {{- range $engine, $image := .Values.runnerCell.images }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_IMAGES_{{ $engine | upper }}
+              value: {{ $image | quote }}
+            {{- end }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_CPUREQUEST
+              value: {{ .Values.runnerCell.resources.cpuRequest | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_CPULIMIT
+              value: {{ .Values.runnerCell.resources.cpuLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_MEMORYREQUEST
+              value: {{ .Values.runnerCell.resources.memoryRequest | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_MEMORYLIMIT
+              value: {{ .Values.runnerCell.resources.memoryLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_WORKSPACESIZELIMIT
+              value: {{ .Values.runnerCell.workspaceSizeLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_FINISHEDJOBTTL
+              value: {{ .Values.runnerCell.finishedJobTtl | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_DEADLINEGRACE
+              value: {{ .Values.runnerCell.deadlineGrace | quote }}
+
+            # Artifacts must be durable and reachable from every replica and
+            # every runner. Startup refuses a pod-local filesystem in production.
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_STORE
+              value: {{ .Values.artifacts.store | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_BUCKET
+              value: {{ .Values.artifacts.bucket | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_REGION
+              value: {{ .Values.artifacts.region | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_ENDPOINT
+              value: {{ .Values.artifacts.endpoint | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_PATHSTYLEACCESS
+              value: {{ .Values.artifacts.pathStyleAccess | quote }}
+            # No object-storage credentials here, by design. The SDK's default
+            # provider chain reads them from an IRSA-projected service account
+            # token or an instance profile; a key in a values file is a key in
+            # source control eventually.
+
             - name: JMETER_HOME
               value: {{ .Values.jmeter.home | quote }}
             - name: MAT_HOME

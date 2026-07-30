@@ -57,8 +57,9 @@ public class FileSystemArtifactStore implements ArtifactStore {
         } catch (IOException e) {
             throw new ArtifactStoreException("Could not create the artifact root " + this.root, e);
         }
-        log.info("Artifacts are stored on the local filesystem at {}. Not durable across replicas; "
-                + "object storage arrives in Increment 1E.", this.root);
+        log.info("Artifacts are stored on the local filesystem at {}. Not durable across replicas "
+                + "and unreachable from a runner Pod; set platform.orchestration.artifacts.store=s3 "
+                + "for anything beyond local development.", this.root);
     }
 
     private record StoredArtifact(ArtifactReference reference, Path file) {

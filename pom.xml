@@ -29,6 +29,19 @@
     -->
     <testcontainers.version>1.20.6</testcontainers.version>
     <!--
+      Kubernetes client for the production execution provider (Increment 1E, CLAUDE.md §16).
+      Fabric8 rather than the upstream io.kubernetes client: its fluent Job builder keeps the
+      manifest readable, and its KubernetesMockServer lets the Job contract be tested without a
+      cluster — which is what CLAUDE.md §25 asks for before requiring a real one. Apache 2.0.
+    -->
+    <fabric8.kubernetes.version>6.13.4</fabric8.kubernetes.version>
+    <!--
+      S3-compatible object storage for durable artifacts. The filesystem store cannot serve a
+      multi-replica control plane: a file written by one replica is invisible to the others.
+      No bucket, account or region is chosen here — all are configuration.
+    -->
+    <awssdk.version>2.29.52</awssdk.version>
+    <!--
       Docker Engine 29 rejects API versions below 1.44 with HTTP 400, and the docker-java client
       inside Testcontainers negotiates lower unless told otherwise. Without this, Testcontainers
       reports "could not find a valid Docker environment" and every integration test is silently
@@ -67,6 +80,7 @@
     <module>platform-orchestration</module>
     <module>platform-api</module>
     <module>engines/engine-jmeter</module>
+    <module>runners/runner-kubernetes</module>
     <module>platform-core</module>
   </modules>
 
@@ -114,6 +128,35 @@
         <groupId>com.perfplatform</groupId>
         <artifactId>engine-jmeter</artifactId>
         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>runner-kubernetes</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- External clients, pinned here so no module can drift onto its own version. -->
+      <dependency>
+        <groupId>io.fabric8</groupId>
+        <artifactId>kubernetes-client</artifactId>
+        <version>${fabric8.kubernetes.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.fabric8</groupId>
+        <artifactId>kubernetes-server-mock</artifactId>
+        <version>${fabric8.kubernetes.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>s3</artifactId>
+        <version>${awssdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>minio</artifactId>
+        <version>${testcontainers.version}</version>
+        <scope>test</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>

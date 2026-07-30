@@ -64,9 +64,14 @@ class ProductionSafetyGuardTest {
     }
 
     private static OrchestrationConfiguration configurationFor(String... activeProfiles) {
+        return configurationFor(new OrchestrationProperties(), activeProfiles);
+    }
+
+    private static OrchestrationConfiguration configurationFor(OrchestrationProperties properties,
+            String... activeProfiles) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(activeProfiles);
-        return new OrchestrationConfiguration(new OrchestrationProperties(), environment);
+        return new OrchestrationConfiguration(properties, environment);
     }
 
     @Nested
@@ -90,7 +95,8 @@ class ProductionSafetyGuardTest {
                     configurationFor("production").executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("must never run under a production profile")
-                    .hasMessageContaining("Increment 1E");
+                    // The message names the way out, so an operator is not left guessing.
+                    .hasMessageContaining("execution-provider=kubernetes");
         }
 
         @Test
@@ -101,24 +107,135 @@ class ProductionSafetyGuardTest {
                     .isInstanceOf(IllegalStateException.class);
         }
 
-        /**
-         * The Kubernetes provider is Increment 1E. Until it exists, asking for it must fail with a
-         * message that says so rather than silently falling back to the fake.
-         */
+        /** A provider name nobody implements must fail loudly, never fall back to the fake. */
         @Test
-        @DisplayName("an unimplemented provider fails loudly rather than falling back")
+        @DisplayName("an unknown provider fails loudly rather than falling back")
         void unknownProviderFails() {
-            MockEnvironment environment = new MockEnvironment();
-            environment.setActiveProfiles("local");
-
             OrchestrationProperties properties = new OrchestrationProperties();
-            properties.setExecutionProvider("kubernetes");
+            properties.setExecutionProvider("k6");
 
-            assertThatThrownBy(() -> new OrchestrationConfiguration(properties, environment)
+            assertThatThrownBy(() -> configurationFor(properties, "local")
                     .executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("Unsupported execution provider")
-                    .hasMessageContaining("Increment 1E");
+                    .hasMessageContaining("Unsupported execution provider");
+        }
+    }
+
+    /**
+     * The production provider (Increment 1E).
+     *
+     * <p>Its configuration is validated at startup rather than at the first run. A cell missing its
+     * namespace or image allowlist would otherwise fail minutes after someone triggered a test,
+     * having already consumed a queue slot, and would read as a platform fault rather than the
+     * deployment mistake it is.
+     */
+    @Nested
+    @DisplayName("the Kubernetes execution provider")
+    class KubernetesProvider {
+
+        private OrchestrationProperties kubernetesProperties() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.setExecutionProvider("kubernetes");
+            return properties;
+        }
+
+        @Test
+        @DisplayName("refuses to start without a runner namespace")
+        void requiresNamespace() {
+            assertThatThrownBy(() -> configurationFor(kubernetesProperties(), "production")
+                    .executionProvider(Clock.systemUTC(), null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("runner-cell.namespace");
+        }
+
+        @Test
+        @DisplayName("refuses to start without a runner service account")
+        void requiresServiceAccount() {
+            OrchestrationProperties properties = kubernetesProperties();
+            properties.getRunnerCell().setNamespace("perf-runners");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .executionProvider(Clock.systemUTC(), null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("runner-cell.service-account");
+        }
+
+        /**
+         * A fallback image would mean a misconfiguration produces a run against the wrong engine,
+         * whose results would look perfectly valid.
+         */
+        @Test
+        @DisplayName("refuses to start with no approved runner images")
+        void requiresAnImageAllowlist() {
+            OrchestrationProperties properties = kubernetesProperties();
+            properties.getRunnerCell().setNamespace("perf-runners");
+            properties.getRunnerCell().setServiceAccount("perf-runner");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .executionProvider(Clock.systemUTC(), null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("No runner images are configured");
+        }
+
+        /**
+         * A moving tag means two runs of the same immutable definition version can execute on
+         * different runner builds: the plan digest still matches while the thing executing it has
+         * changed, which quietly breaks the promise that a run is reproducible (CLAUDE.md §8).
+         */
+        @Test
+        @DisplayName("refuses a runner image on a floating tag")
+        void refusesFloatingImageTags() {
+            OrchestrationProperties properties = kubernetesProperties();
+            properties.getRunnerCell().setNamespace("perf-runners");
+            properties.getRunnerCell().setServiceAccount("perf-runner");
+            properties.getRunnerCell().setImages(
+                    java.util.Map.of("jmeter", "registry.internal/jmeter-runner:latest"));
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .executionProvider(Clock.systemUTC(), null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("must be pinned");
+        }
+    }
+
+    /**
+     * Artifacts.
+     *
+     * <p>A pod-local file is invisible to another replica and unreachable by a runner on another
+     * node. V1 persisted local paths as durable references and accumulated links nobody could open;
+     * production must not be able to repeat that.
+     */
+    @Nested
+    @DisplayName("artifact storage")
+    class Artifacts {
+
+        @Test
+        @DisplayName("a pod-local filesystem is refused in production")
+        void filesystemIsRefusedInProduction() {
+            assertThatThrownBy(() -> configurationFor(new OrchestrationProperties(), "production")
+                    .artifactStore(Clock.systemUTC()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("artifacts.store=s3");
+        }
+
+        @Test
+        @DisplayName("object storage refuses to start without a bucket")
+        void s3RequiresABucket() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getArtifacts().setStore("s3");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .artifactStore(Clock.systemUTC()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("artifacts.bucket");
+        }
+
+        @Test
+        @DisplayName("a pod-local filesystem is fine for local development")
+        void filesystemIsFineLocally() {
+            assertThatCode(() -> configurationFor(new OrchestrationProperties(), "local")
+                    .artifactStore(Clock.systemUTC()))
+                    .doesNotThrowAnyException();
         }
     }
 

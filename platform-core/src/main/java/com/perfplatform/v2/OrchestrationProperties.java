@@ -69,6 +69,179 @@ public class OrchestrationProperties {
 
     private final Capacity capacity = new Capacity();
     private final Fake fake = new Fake();
+    private final RunnerCell runnerCell = new RunnerCell();
+    private final Artifacts artifacts = new Artifacts();
+
+    /**
+     * Where and how production runner Jobs are created (CLAUDE.md §16).
+     *
+     * <p>Every value is an operational decision that differs per cluster, and none of it can be set
+     * by a specification. A test describes the load it wants; the platform decides what a runner is
+     * permitted to be. There are no defaults for namespace, service account or images: a runner cell
+     * that was misconfigured but started anyway would create Jobs somewhere nobody chose.
+     */
+    public static class RunnerCell {
+        private String namespace = "";
+        private String serviceAccount = "";
+
+        /** Engine to pinned image. An allowlist — an engine with no entry cannot be provisioned. */
+        private Map<String, String> images = new LinkedHashMap<>();
+
+        private String cpuRequest = "2";
+        private String cpuLimit = "4";
+        private String memoryRequest = "2Gi";
+        private String memoryLimit = "4Gi";
+        private String workspaceSizeLimit = "8Gi";
+        private Duration finishedJobTtl = Duration.ofHours(6);
+        private Duration deadlineGrace = Duration.ofMinutes(5);
+
+        public String getNamespace() {
+            return namespace;
+        }
+
+        public void setNamespace(String namespace) {
+            this.namespace = namespace;
+        }
+
+        public String getServiceAccount() {
+            return serviceAccount;
+        }
+
+        public void setServiceAccount(String serviceAccount) {
+            this.serviceAccount = serviceAccount;
+        }
+
+        public Map<String, String> getImages() {
+            return images;
+        }
+
+        public void setImages(Map<String, String> images) {
+            this.images = images;
+        }
+
+        public String getCpuRequest() {
+            return cpuRequest;
+        }
+
+        public void setCpuRequest(String cpuRequest) {
+            this.cpuRequest = cpuRequest;
+        }
+
+        public String getCpuLimit() {
+            return cpuLimit;
+        }
+
+        public void setCpuLimit(String cpuLimit) {
+            this.cpuLimit = cpuLimit;
+        }
+
+        public String getMemoryRequest() {
+            return memoryRequest;
+        }
+
+        public void setMemoryRequest(String memoryRequest) {
+            this.memoryRequest = memoryRequest;
+        }
+
+        public String getMemoryLimit() {
+            return memoryLimit;
+        }
+
+        public void setMemoryLimit(String memoryLimit) {
+            this.memoryLimit = memoryLimit;
+        }
+
+        public String getWorkspaceSizeLimit() {
+            return workspaceSizeLimit;
+        }
+
+        public void setWorkspaceSizeLimit(String workspaceSizeLimit) {
+            this.workspaceSizeLimit = workspaceSizeLimit;
+        }
+
+        public Duration getFinishedJobTtl() {
+            return finishedJobTtl;
+        }
+
+        public void setFinishedJobTtl(Duration finishedJobTtl) {
+            this.finishedJobTtl = finishedJobTtl;
+        }
+
+        public Duration getDeadlineGrace() {
+            return deadlineGrace;
+        }
+
+        public void setDeadlineGrace(Duration deadlineGrace) {
+            this.deadlineGrace = deadlineGrace;
+        }
+    }
+
+    /**
+     * Where artifacts are stored.
+     *
+     * <p>{@code filesystem} for local development, {@code s3} for anything with more than one
+     * replica. No bucket, region or endpoint has a default — choosing a production bucket is a
+     * decision for whoever operates the platform (CLAUDE.md §31), not something this code assumes.
+     */
+    public static class Artifacts {
+        private String store = "filesystem";
+        private String bucket = "";
+        private String region = "";
+
+        /** Set only for an S3-compatible appliance or MinIO. Empty means real AWS S3. */
+        private String endpoint = "";
+
+        /** Path-style addressing, which most S3-compatible servers require and AWS does not. */
+        private boolean pathStyleAccess = false;
+
+        public String getStore() {
+            return store;
+        }
+
+        public void setStore(String store) {
+            this.store = store;
+        }
+
+        public String getBucket() {
+            return bucket;
+        }
+
+        public void setBucket(String bucket) {
+            this.bucket = bucket;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region;
+        }
+
+        public String getEndpoint() {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        public boolean isPathStyleAccess() {
+            return pathStyleAccess;
+        }
+
+        public void setPathStyleAccess(boolean pathStyleAccess) {
+            this.pathStyleAccess = pathStyleAccess;
+        }
+    }
+
+    public RunnerCell getRunnerCell() {
+        return runnerCell;
+    }
+
+    public Artifacts getArtifacts() {
+        return artifacts;
+    }
 
     /**
      * Concurrency ceilings (CLAUDE.md §13).

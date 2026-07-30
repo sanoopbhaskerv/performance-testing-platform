@@ -47,6 +47,14 @@
       <groupId>com.perfplatform</groupId>
       <artifactId>engine-jmeter</artifactId>
     </dependency>
+    <!--
+      The production execution provider. Only the composition root knows about it; orchestration
+      reaches every provider through the ExecutionProvider port and has no Kubernetes types at all.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>runner-kubernetes</artifactId>
+    </dependency>
 
     <!-- Spring Boot starters -->
     <dependency>

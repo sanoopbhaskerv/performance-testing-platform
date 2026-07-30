@@ -38,6 +38,20 @@
     </dependency>
 
     <!--
+      S3-compatible object storage for durable artifacts (Increment 1E). It lives beside the
+      filesystem store because both implement the same storage port and share one key layout; only
+      the medium differs. The filesystem store cannot serve multiple replicas, and a runner Pod on
+      another node cannot reach it at all.
+
+      No bucket, region, endpoint or credential appears in code — all are configuration, and
+      choosing a production bucket is a decision for whoever operates the platform (CLAUDE.md §31).
+    -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+    </dependency>
+
+    <!--
       PostgreSQL via Testcontainers is the authoritative integration-test database (CLAUDE.md §25):
       H2 does not have JSONB, plpgsql triggers, or PostgreSQL's locking semantics, so a green H2
       test would prove a weaker claim than the one being made. All of these are already used
@@ -63,6 +77,17 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      MinIO speaks the S3 API, so the S3 adapter is exercised against a real server rather than a
+      mock. An in-memory fake would prove the code compiles against the SDK and nothing else — and
+      the properties that matter here (key layout, metadata round-trip, a missing key) are exactly
+      the ones a fake would be written to satisfy.
+    -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>minio</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

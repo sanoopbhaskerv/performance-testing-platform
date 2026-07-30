@@ -175,4 +175,19 @@ class ModuleDependencyRulesTest {
         assertNoImports("platform-persistence",
                 allOf(KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
     }
+
+    /**
+     * The one module permitted a Kubernetes client, and permitted nothing else.
+     *
+     * <p>It knows how to start, observe and stop a runner; it must not know what the runner does. No
+     * engine types, so a second engine reuses it unchanged. No Spring, so it is testable without a
+     * context. No persistence, because a provider reports and the control plane decides — a provider
+     * that could write run state could mark its own failures as successes.
+     */
+    @Test
+    @DisplayName("runner-kubernetes may hold a Kubernetes client, but no engine, Spring or storage")
+    void kubernetesRunnerIsIsolated() {
+        assertNoImports("runners/runner-kubernetes",
+                allOf(SPRING, PERSISTENCE, WEB, ENGINE_SPECIFIC, SERIALIZATION, PLATFORM_CORE_V1));
+    }
 }
