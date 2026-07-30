@@ -28,6 +28,21 @@ targets:
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 
+  # The bundled demo service (demo-service/, port 8081). A real target with
+  # deliberately uneven behaviour — /api/users answers in 5-25ms, POST
+  # /api/payments in 150-600ms and fails about 5% of the time — so a run against
+  # it produces a report worth reading rather than a flat line.
+  #
+  # Start it with:
+  #   java -jar demo-service/target/demo-service-1.0.0.jar
+  #
+  # Generating real load against it also needs the local-jmeter provider; the
+  # default fake provider sends no traffic anywhere. See the README.
+  - name: demo-service
+    baseUrl: "http://localhost:8081"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
 # V1 needs this block to consider the team runnable. V2 takes its load model from
 # the PerformanceTest specification instead, so these values are only used by the
 # legacy surface.

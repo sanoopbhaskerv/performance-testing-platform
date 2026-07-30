@@ -30,7 +30,8 @@ class SpecificationValidationServiceTest {
     class ValidExamples {
 
         @ParameterizedTest(name = "{0} parses and validates")
-        @ValueSource(strings = {"api-only.yaml", "browser-only.yaml", "hybrid.yaml"})
+        @ValueSource(strings = {
+                "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml"})
         @DisplayName("every shipped valid example is valid")
         void validExamplesValidate(String name) {
             var outcome = service.validate(ExampleFixtures.valid(name));
@@ -76,6 +77,99 @@ class SpecificationValidationServiceTest {
 
             assertThat(workload.scenarios()).hasSize(3);
             assertThat(workload.scenarios().stream().mapToInt(s -> s.weight()).sum()).isEqualTo(100);
+        }
+
+        /**
+         * The manual form, end to end through the parser.
+         *
+         * <p>This is what makes a specification able to address a real endpoint before importers
+         * exist. Asserted against the shipped demo example rather than an inline stub, so the file a
+         * consumer copies from is the file that is proven to work.
+         */
+        @Test
+        @DisplayName("a scenario's own method and path survive parsing")
+        void preservesManualRequests() {
+            var spec = service.validate(ExampleFixtures.valid("demo-service.yaml"))
+                    .specification().orElseThrow();
+            var scenarios = spec.spec().workloads().get(0).scenarios();
+
+            assertThat(scenarios).extracting(s -> s.methodOrDefault() + " " + s.path())
+                    .containsExactly("GET /api/users", "POST /api/payments");
+            assertThat(scenarios).allMatch(s -> s.hasExplicitRequest());
+        }
+
+        /** A scenario that names neither a path nor an operation has nothing to call. */
+        @Test
+        @DisplayName("a scenario with no path and no operationId is rejected")
+        void scenarioMustSayWhatToCall() {
+            var outcome = service.validate(scenarioDocument("weight: 100"));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.request.missing");
+        }
+
+        /**
+         * A specification cannot name its own host.
+         *
+         * <p>Where a run's traffic goes is resolved from the team's registered targets. Accepting a
+         * full URL in a scenario path would be a way around the entire target policy, so it is
+         * refused at validation where the author sees it, not at render time where it would surface
+         * as a failed run.
+         */
+        @Test
+        @DisplayName("a scenario path that is a full URL is refused")
+        void scenarioPathCannotChooseItsOwnHost() {
+            var outcome = service.validate(
+                    scenarioDocument("weight: 100\n          path: http://evil.example.com/api"));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .containsAnyOf("spec.scenario.path.invalid", "spec.scenario.path.absolute");
+        }
+
+        @Test
+        @DisplayName("an unsupported HTTP method is refused rather than passed to the engine")
+        void unsupportedMethodIsRefused() {
+            var outcome = service.validate(
+                    scenarioDocument("weight: 100\n          method: TRACE\n          path: /api"));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.method.unsupported");
+        }
+
+        /** A minimal document whose single scenario is built from the given YAML lines. */
+        private static String scenarioDocument(String scenarioBody) {
+            return """
+                    apiVersion: performance.ameriprise.com/v1alpha1
+                    kind: PerformanceTest
+                    metadata:
+                      name: scenario-check
+                      team: local-dev
+                      application: demo-service
+                    spec:
+                      environment:
+                        name: performance
+                        runnerCell: local
+                        targetClass: non-production
+                      workloads:
+                        - name: check-load
+                          type: protocol
+                          engine: jmeter
+                          model:
+                            type: stages
+                            stages:
+                              - duration: 1m
+                                targetUsers: 5
+                          scenarios:
+                            - name: only
+                              %s
+                      objectives:
+                        - metric: http.error.rate
+                          scope: check-load
+                          threshold: 1%%
+                    """.formatted(scenarioBody);
         }
 
         @Test

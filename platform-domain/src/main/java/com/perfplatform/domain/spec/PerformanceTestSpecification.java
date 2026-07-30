@@ -2,6 +2,7 @@ package com.perfplatform.domain.spec;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -215,9 +216,54 @@ public record PerformanceTestSpecification(
      * Preserving them is what allows a realistic traffic mix rather than an even spread across
      * every endpoint.
      *
-     * @param weight relative share of iterations; weights across a workload should sum to 100
+     * <h2>How a scenario says what to call</h2>
+     * Two ways, and the platform prefers the first that is present:
+     * <ol>
+     *   <li><b>{@code method} and {@code path} directly.</b> The manual form: the consumer states
+     *       the request. This is the simplest case CLAUDE.md §23 lists under manual entry, and it is
+     *       what makes a specification able to address a real endpoint today.</li>
+     *   <li><b>{@code operationId} alone.</b> A reference into an imported source — OpenAPI, Postman,
+     *       HAR. No importer exists until Increment 2, so until then an operation identifier resolves
+     *       to nothing and the engine addresses {@code /{operationId}}: deliberately obvious rather
+     *       than plausible, so nobody mistakes an unresolved reference for a real request.</li>
+     * </ol>
+     * Both are optional so that a specification written against a future importer stays valid, and
+     * so that adding these fields does not invalidate any document written before them.
+     *
+     * @param weight      relative share of iterations; weights across a workload should sum to 100
+     * @param operationId reference into an imported source, resolved from Increment 2 onward
+     * @param method      HTTP method, e.g. {@code GET}. Null when the scenario defers to its source
+     * @param path        request path beginning with {@code /}, relative to the resolved target's
+     *                    base URL. Never a full URL: a specification cannot choose its own host, and
+     *                    accepting one here would be a way around that (CLAUDE.md §20)
      */
-    public record ScenarioSpec(String name, int weight, String operationId) {
+    public record ScenarioSpec(
+            String name,
+            int weight,
+            String operationId,
+            String method,
+            String path) {
+
+        /**
+         * A scenario that refers to an operation in an imported source.
+         *
+         * <p>The other form — {@code method} and {@code path} stated directly — uses the canonical
+         * constructor. Both are first-class; this one exists because it is the shorter of the two and
+         * predates the manual form.
+         */
+        public ScenarioSpec(String name, int weight, String operationId) {
+            this(name, weight, operationId, null, null);
+        }
+
+        /** Whether this scenario states its own request rather than referring to an imported one. */
+        public boolean hasExplicitRequest() {
+            return path != null && !path.isBlank();
+        }
+
+        /** The method to use, defaulting to {@code GET} when the scenario does not state one. */
+        public String methodOrDefault() {
+            return method == null || method.isBlank() ? "GET" : method.trim().toUpperCase(Locale.ROOT);
+        }
     }
 
     /** Starts a workload when another workload reaches a named stage. */

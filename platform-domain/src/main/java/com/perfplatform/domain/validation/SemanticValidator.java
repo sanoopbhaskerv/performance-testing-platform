@@ -383,6 +383,7 @@ public final class SemanticValidator {
                         "A scenario weight must be greater than zero.",
                         "A zero weight means the scenario never runs; remove it instead."));
             }
+            validateScenarioRequest(scenario, scenarioPath, findings);
             total += scenario.weight();
         }
 
@@ -394,6 +395,65 @@ public final class SemanticValidator {
                     "Scenario weights sum to " + total + ", not 100.",
                     "Weights are treated as relative shares. Adjust them to sum to 100 to make "
                             + "the intended traffic mix explicit."));
+        }
+    }
+
+    /** HTTP methods a scenario may declare. Anything else is refused rather than passed through. */
+    private static final Set<String> SUPPORTED_METHODS =
+            Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
+
+    /**
+     * Checks how a scenario says what to call.
+     *
+     * <p>A scenario states its request directly ({@code method} and {@code path}) or refers to one in
+     * an imported source ({@code operationId}). Saying neither is an error: there is nothing to call.
+     *
+     * <p>A path must be a path. Accepting a full URL here would let a specification choose its own
+     * host, which is precisely what the target policy exists to prevent (CLAUDE.md §20) — the address
+     * a run may reach is resolved by the platform from the team's registered targets, never stated by
+     * the document. Rejected at validation so it is reported to the author, rather than at render
+     * time where it would surface as a failed run.
+     */
+    private static void validateScenarioRequest(ScenarioSpec scenario, String scenarioPath,
+            List<ValidationFinding> findings) {
+
+        boolean hasPath = scenario.path() != null && !scenario.path().isBlank();
+        boolean hasOperation = scenario.operationId() != null && !scenario.operationId().isBlank();
+
+        if (!hasPath && !hasOperation) {
+            findings.add(ValidationFinding.error("spec.scenario.request.missing",
+                    scenarioPath,
+                    "A scenario must declare either a path, or an operationId from an imported "
+                            + "source.",
+                    "Add 'path: /api/example' and optionally 'method: POST', or reference an "
+                            + "imported operation with 'operationId'."));
+            return;
+        }
+
+        if (hasPath) {
+            String requestPath = scenario.path().trim();
+            if (!requestPath.startsWith("/")) {
+                findings.add(ValidationFinding.error("spec.scenario.path.invalid",
+                        scenarioPath + "/path",
+                        "A scenario path must begin with '/'.",
+                        "Paths are relative to the base URL the platform resolves for this "
+                                + "application. Write '/api/users', not a full URL."));
+            } else if (requestPath.contains("://")) {
+                findings.add(ValidationFinding.error("spec.scenario.path.absolute",
+                        scenarioPath + "/path",
+                        "A scenario path must not be a full URL.",
+                        "Where a run's traffic goes is resolved from the team's registered targets "
+                                + "for this application. A specification cannot name its own host."));
+            }
+        }
+
+        String method = scenario.method();
+        if (method != null && !method.isBlank()
+                && !SUPPORTED_METHODS.contains(method.trim().toUpperCase(java.util.Locale.ROOT))) {
+            findings.add(ValidationFinding.error("spec.scenario.method.unsupported",
+                    scenarioPath + "/method",
+                    "HTTP method '" + method + "' is not supported.",
+                    "Supported methods are " + SUPPORTED_METHODS.stream().sorted().toList() + "."));
         }
     }
 
@@ -462,10 +522,22 @@ public final class SemanticValidator {
             return;
         }
 
-        Set<String> workloadNames = spec.spec().workloads().stream()
-                .map(WorkloadSpec::name)
-                .filter(name -> name != null)
-                .collect(java.util.stream.Collectors.toSet());
+        // Both scopes the platform can actually evaluate: a workload, and one scenario within a
+        // workload as 'workload/scenario'. That second form is not a nicety — samplers are labelled
+        // 'workload/scenario' precisely so a scenario-scoped objective resolves (defect D4's fix),
+        // and a validator that refused the label the results carry would reject an objective the
+        // evaluator handles perfectly well.
+        Set<String> resolvableScopes = new HashSet<>();
+        for (WorkloadSpec workload : spec.spec().workloads()) {
+            if (workload.name() == null) {
+                continue;
+            }
+            resolvableScopes.add(workload.name());
+            workload.scenarios().stream()
+                    .map(ScenarioSpec::name)
+                    .filter(name -> name != null)
+                    .forEach(name -> resolvableScopes.add(workload.name() + "/" + name));
+        }
 
         for (int i = 0; i < objectives.size(); i++) {
             ObjectiveSpec objective = objectives.get(i);
@@ -481,12 +553,13 @@ public final class SemanticValidator {
                         "An objective requires a threshold.",
                         "For example 750ms for a latency objective, or 1% for an error rate."));
             }
-            if (!isBlank(objective.scope()) && !workloadNames.contains(objective.scope())) {
+            if (!isBlank(objective.scope()) && !resolvableScopes.contains(objective.scope())) {
                 findings.add(ValidationFinding.error("spec.objective.scope.unresolved",
                         path + "/scope",
-                        "Objective scope '" + objective.scope() + "' does not match any workload.",
-                        "Scope an objective to a declared workload, or omit scope to apply it "
-                                + "to the whole test."));
+                        "Objective scope '" + objective.scope() + "' does not match any workload "
+                                + "or scenario.",
+                        "Scope an objective to a declared workload, to one scenario within it as "
+                                + "'workload/scenario', or omit scope to apply it to the whole test."));
             }
             if (objective.percentile() != null
                     && (objective.percentile() < 1 || objective.percentile() > 100)) {

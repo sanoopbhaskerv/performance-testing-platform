@@ -344,13 +344,16 @@ public final class SpecificationParser {
     }
 
     private ScenarioSpec scenario(JsonNode node, String path, List<ValidationFinding> findings) {
-        rejectUnknownFields(node, path, Set.of("name", "weight", "operationId"), findings);
+        rejectUnknownFields(node, path,
+                Set.of("name", "weight", "operationId", "method", "path"), findings);
 
         Integer weight = integer(node, "weight", path + "/weight", findings);
         return new ScenarioSpec(
                 text(node, "name", path + "/name", findings),
                 weight == null ? 0 : weight,
-                text(node, "operationId", path + "/operationId", findings));
+                text(node, "operationId", path + "/operationId", findings),
+                text(node, "method", path + "/method", findings),
+                text(node, "path", path + "/path", findings));
     }
 
     private ObjectiveSpec objective(JsonNode node, String path, List<ValidationFinding> findings) {

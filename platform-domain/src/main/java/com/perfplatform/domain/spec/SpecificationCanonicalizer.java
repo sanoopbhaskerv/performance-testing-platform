@@ -194,6 +194,11 @@ public final class SpecificationCanonicalizer {
                 field(out, prefix + ".scenarios[" + s + "].name", scenario.name());
                 field(out, prefix + ".scenarios[" + s + "].weight", String.valueOf(scenario.weight()));
                 field(out, prefix + ".scenarios[" + s + "].operationId", scenario.operationId());
+                // Part of the digest, because they are part of what executes. Two versions that
+                // differ only in the path they call are different tests, and a digest that could not
+                // tell them apart would let results from one be accepted for the other.
+                field(out, prefix + ".scenarios[" + s + "].method", scenario.method());
+                field(out, prefix + ".scenarios[" + s + "].path", scenario.path());
             }
 
             var startWhen = workload.startWhen();

@@ -340,6 +340,35 @@ class SemanticValidatorTest {
                     .contains("spec.objective.scope.unresolved");
         }
 
+        /**
+         * Samplers are labelled {@code workload/scenario} precisely so a scenario-scoped objective
+         * resolves — that was defect D4's fix. A validator that refused the label the results
+         * actually carry would reject an objective the evaluator handles perfectly well, and the
+         * author would have no way to tell that the platform disagreed with itself.
+         */
+        @Test
+        @DisplayName("an objective scoped to one scenario within a workload resolves")
+        void acceptsScenarioScope() {
+            var workloads = SpecificationFixtures.apiOnly().spec().workloads();
+            String scope = workloads.get(0).name() + "/" + workloads.get(0).scenarios().get(0).name();
+
+            var objective = new ObjectiveSpec("http.response.time", scope, 95,
+                    Threshold.parse("750ms"));
+
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .doesNotContain("spec.objective.scope.unresolved");
+        }
+
+        @Test
+        @DisplayName("a scenario name from a different workload is still rejected")
+        void rejectsScenarioScopeFromAnotherWorkload() {
+            var objective = new ObjectiveSpec("http.response.time", "no-such-workload/browse", 95,
+                    Threshold.parse("750ms"));
+
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .contains("spec.objective.scope.unresolved");
+        }
+
         @Test
         @DisplayName("a percentile outside 1-100 is rejected")
         void rejectsInvalidPercentile() {

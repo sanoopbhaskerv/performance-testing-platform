@@ -167,6 +167,82 @@ class JmeterWorkloadRendererTest {
         }
     }
 
+    /**
+     * How a scenario becomes an actual HTTP request.
+     *
+     * <p>This is what lets a specification address a real endpoint before importers exist. A test
+     * declaring {@code POST /api/payments} that rendered as {@code GET /submitPayment} would measure
+     * something other than the thing it names, and the report would describe a system nobody tested.
+     */
+    @Nested
+    @DisplayName("a scenario's request")
+    class Requests {
+
+        private static PerformanceTestSpecification withScenarios(
+                java.util.List<PerformanceTestSpecification.ScenarioSpec> scenarios) {
+            return JmeterFixtures.specification(java.util.List.of(
+                    JmeterFixtures.workload("api-load",
+                            java.util.List.of(new PerformanceTestSpecification.LoadStage(
+                                    java.time.Duration.ofMinutes(1), 10)),
+                            scenarios)));
+        }
+
+        @Test
+        @DisplayName("a scenario's own method and path are what the sampler calls")
+        void explicitMethodAndPathAreRendered() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "browse-users", 80, null, "GET", "/api/users"),
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "submit-payment", 20, null, "POST", "/api/payments"))));
+
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.path\">/api/users</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.method\">GET</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.path\">/api/payments</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.method\">POST</stringProp>");
+        }
+
+        @Test
+        @DisplayName("a method is normalized to upper case rather than passed through as written")
+        void methodIsNormalized() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "pay", 100, null, "post", "/api/payments"))));
+
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.method\">POST</stringProp>");
+        }
+
+        /**
+         * Only the path comes from the specification. Scheme, host and port come from the target the
+         * platform resolved, which is what makes the target policy a control rather than a suggestion.
+         */
+        @Test
+        @DisplayName("the host still comes from the resolved target, never from the specification")
+        void hostComesFromTheResolvedTarget() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "browse", 100, null, "GET", "/api/users"))));
+
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.domain\">"
+                    + JmeterFixtures.TARGET.host() + "</stringProp>");
+        }
+
+        /**
+         * The unimported case. Deliberately obvious rather than plausible: a plan that looked like it
+         * was hitting a real endpoint when no importer had resolved one would be worse than a plan
+         * that plainly is not.
+         */
+        @Test
+        @DisplayName("a scenario with only an operationId still addresses /{operationId} as GET")
+        void operationIdFallbackIsUnchanged() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec("search", 100, "searchClient"))));
+
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.path\">/searchClient</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"HTTPSampler.method\">GET</stringProp>");
+        }
+    }
+
     @Nested
     @DisplayName("run correlation")
     class Correlation {

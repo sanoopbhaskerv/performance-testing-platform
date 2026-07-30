@@ -222,9 +222,54 @@
   margin-bottom: 1rem;
 }
 
-.v2 .editor label {
+.v2 .editor > label {
   font-size: 0.82rem;
   opacity: 0.8;
+}
+
+/* ── Template picker ────────────────────────────────────────────────────*/
+
+.v2 .templates {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem 0.7rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.v2 .templates legend {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  padding: 0 0.3rem;
+}
+
+.v2 .template {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.v2 .template input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+/* Label and hint stack, so the hint reads as explanation rather than as a second option. */
+.v2 .template > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.v2 .template .muted {
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .v2 .editor textarea {

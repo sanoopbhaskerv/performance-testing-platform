@@ -31,11 +31,18 @@ import java.util.List;
  * profile needs the {@code ConcurrencyThreadGroup} plugin in the runner image, which is a runner
  * packaging decision that belongs with the Kubernetes provider in Increment 1E.
  *
+ * <h2>How a scenario becomes a request</h2>
+ * A scenario that states its own {@code method} and {@code path} is rendered as written — the manual
+ * form, and what lets a specification address a real endpoint today. Only the path comes from the
+ * document; scheme, host and port come from the target the platform resolved, so a specification
+ * still cannot choose where its traffic goes.
+ *
  * <h2>What this cannot do yet</h2>
- * A scenario names an {@code operationId} from an imported source, and no importer exists until
- * Increment 2. Until then the rendered samplers address {@code /{operationId}} on the resolved
- * target, which exercises the whole pipeline but does not reproduce a real request's method,
- * headers or body. That limitation is visible in the generated plan rather than papered over.
+ * A scenario that instead names an {@code operationId} refers to an imported source, and no importer
+ * exists until Increment 2. Until then such samplers address {@code /{operationId}}, which exercises
+ * the whole pipeline but does not reproduce a real request. Headers, query parameters and request
+ * bodies are not yet expressible at all — also Increment 2. Both limits are visible in the generated
+ * plan rather than papered over.
  */
 final class JmeterWorkloadRenderer {
 
@@ -190,7 +197,9 @@ final class JmeterWorkloadRenderer {
                 .stringProp("HTTPSampler.protocol", target.scheme())
                 .longProp("HTTPSampler.port", target.port())
                 .stringProp("HTTPSampler.path", operationPath(scenario))
-                .stringProp("HTTPSampler.method", "GET")
+                // The scenario's own method where it states one, GET otherwise. A POST rendered as a
+                // GET would measure a different endpoint than the one the test names.
+                .stringProp("HTTPSampler.method", scenario.methodOrDefault())
                 .boolProp("HTTPSampler.follow_redirects", true)
                 .boolProp("HTTPSampler.use_keepalive", true)
                 .endLeaf();
@@ -256,12 +265,24 @@ final class JmeterWorkloadRenderer {
     /**
      * The path a scenario addresses.
      *
-     * <p>Derived from the operation identifier because no importer exists yet to supply the real
-     * path, method, headers or body (Increment 2). Deliberately obvious rather than plausible: a
-     * generated plan that looked like it was hitting real endpoints when it was not would be worse
-     * than one that plainly is not.
+     * <p>A scenario that states its own {@code path} is executed as written — that is the manual
+     * form, and it is what lets a specification address a real endpoint.
+     *
+     * <p>Otherwise the path is derived from the operation identifier, because no importer exists yet
+     * to resolve one into a real path, method, headers or body (Increment 2). Deliberately obvious
+     * rather than plausible: a generated plan that looked like it was hitting real endpoints when it
+     * was not would be worse than one that plainly is not.
+     *
+     * <p>Only the path is taken from the specification. The scheme, host and port come from the
+     * target the platform resolved, never from the document — which is what makes the target policy
+     * an actual control rather than a suggestion.
      */
     private static String operationPath(ScenarioSpec scenario) {
+        if (scenario.hasExplicitRequest()) {
+            String path = scenario.path().trim();
+            return path.startsWith("/") ? path : "/" + path;
+        }
+
         String operationId = scenario.operationId();
         if (operationId == null || operationId.isBlank()) {
             return "/";

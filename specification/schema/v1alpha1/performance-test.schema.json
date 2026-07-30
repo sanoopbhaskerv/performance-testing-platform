@@ -262,7 +262,7 @@
       "type": "object",
       "required": ["name", "weight"],
       "additionalProperties": false,
-      "description": "A weighted journey. Weights are what produce a realistic traffic mix instead of an even spread across every endpoint.",
+      "description": "A weighted journey. Weights are what produce a realistic traffic mix instead of an even spread across every endpoint. A scenario says what to call either directly, with method and path, or by referring to an imported operation with operationId.",
       "properties": {
         "name": { "$ref": "#/$defs/name" },
         "weight": {
@@ -271,8 +271,25 @@
           "maximum": 100,
           "description": "Relative share of iterations. Weights across a workload should sum to 100."
         },
-        "operationId": { "type": "string" }
-      }
+        "operationId": {
+          "type": "string",
+          "description": "Reference to an operation in an imported source. Resolved from Increment 2 onward; until then such a scenario addresses /{operationId}, which is deliberately obvious rather than plausible."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+          "description": "HTTP method. Defaults to GET when omitted."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Request path, relative to the base URL the platform resolves for this application. Never a full URL: where a run's traffic goes is decided by the team's registered targets, not by the specification."
+        }
+      },
+      "anyOf": [
+        { "required": ["path"] },
+        { "required": ["operationId"] }
+      ]
     },
 
     "objective": {

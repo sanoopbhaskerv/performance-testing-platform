@@ -41,6 +41,90 @@ import './console.css';
  * information that would tell them whether to wait or investigate.
  */
 
+/**
+ * A test against the bundled demo service, ready to run.
+ *
+ * Mirrors `specification/examples/valid/demo-service.yaml`, which the build validates. This is the
+ * one starting point that generates real, interesting load on a laptop: the demo service answers
+ * `/api/users` in 5-25ms and `POST /api/payments` in 150-600ms while failing about 5% of them, so
+ * the report shows a breach and a pass side by side rather than a flat line.
+ *
+ * Its scenarios state their own method and path. That is the manual form — no importer needed — and
+ * only the path comes from here; the host and port are resolved by the platform from the team's
+ * registered target.
+ */
+const DEMO_SERVICE_SPECIFICATION = `apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: demo-service-baseline
+  team: local-dev
+  application: demo-service
+
+spec:
+  environment:
+    name: performance
+    runnerCell: local
+    targetClass: non-production
+
+  workloads:
+    - name: demo-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          # Short on purpose: a laptop generating load against a service on the same
+          # laptop measures the laptop as much as the service.
+          - duration: 30s
+            targetUsers: 5
+          - duration: 1m
+            targetUsers: 10
+          - duration: 15s
+            targetUsers: 0
+
+      scenarios:
+        # The fast read path: 5-25ms, almost never fails.
+        - name: browse-users
+          weight: 80
+          method: GET
+          path: /api/users
+
+        # The slow write path: 150-600ms, and fails about 5% of the time by design.
+        - name: submit-payment
+          weight: 20
+          method: POST
+          path: /api/payments
+
+  objectives:
+    # Expected to breach — the payment path alone runs to ~600ms. A demo that always
+    # passes never shows anyone what a breach looks like.
+    - metric: http.response.time
+      scope: demo-load
+      percentile: 95
+      threshold: 400ms
+
+    # Expected to breach too: the demo service fails ~5% of payments deliberately.
+    - metric: http.error.rate
+      scope: demo-load
+      threshold: 1%
+
+    # Scoped to the fast journey alone, and expected to pass.
+    - metric: http.response.time
+      scope: demo-load/browse-users
+      percentile: 95
+      threshold: 250ms
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+
+  governance:
+    maxDuration: 10m
+    approvalPolicy: non-production-standard
+    retention: 7d
+`;
+
 const STARTER_SPECIFICATION = `apiVersion: performance.ameriprise.com/v1alpha1
 kind: PerformanceTest
 
@@ -104,6 +188,31 @@ spec:
     retention: 30d
 `;
 
+/**
+ * The starting points offered in the editor.
+ *
+ * Two, because they answer different questions. The demo one is the only one that generates real,
+ * interesting load without any setup beyond starting the bundled service — which is what someone
+ * trying the platform for the first time actually wants. The blank-ish one is the shape to copy when
+ * describing a real system.
+ */
+const TEMPLATES: { id: string; label: string; hint: string; document: string }[] = [
+  {
+    id: 'demo',
+    label: 'Demo service',
+    hint:
+      'Runs against the bundled demo service on port 8081. Start it first, and use the ' +
+      'local-jmeter provider to generate real traffic.',
+    document: DEMO_SERVICE_SPECIFICATION,
+  },
+  {
+    id: 'starter',
+    label: 'Blank starter',
+    hint: 'The shape of a test. Edit the team, application and journeys to describe your own system.',
+    document: STARTER_SPECIFICATION,
+  },
+];
+
 /** How a run's state reads to someone waiting on it, and how urgent it is. */
 const STATUS_COPY: Record<RunStatus, { label: string; hint: string; tone: string }> = {
   VALIDATING: { label: 'Validating', hint: 'Checking the test before anything runs.', tone: 'wait' },
@@ -159,7 +268,10 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [capability, setCapability] = useState<ExecutionCapability | null>(null);
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [document, setDocument] = useState(STARTER_SPECIFICATION);
+  // Defaults to the demo template: it is the one that runs without editing, and someone opening the
+  // editor for the first time is far more likely to want a working test than an empty shape.
+  const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
+  const [document, setDocument] = useState(TEMPLATES[0].document);
   const [validation, setValidation] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -390,6 +502,29 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
 
         {editorOpen && (
           <div className="editor">
+            <fieldset className="templates">
+              <legend>Start from</legend>
+              {TEMPLATES.map((template) => (
+                <label key={template.id} className="template">
+                  <input
+                    type="radio"
+                    name="template"
+                    value={template.id}
+                    checked={templateId === template.id}
+                    onChange={() => {
+                      setTemplateId(template.id);
+                      setDocument(template.document);
+                      setValidation(null);
+                    }}
+                  />
+                  <span>
+                    <strong>{template.label}</strong>
+                    <span className="muted">{template.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
             <label htmlFor="spec">
               Describe the test. The same document works here, through the API and in Git.
             </label>
