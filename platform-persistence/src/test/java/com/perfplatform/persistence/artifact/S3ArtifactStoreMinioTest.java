@@ -182,6 +182,79 @@ class S3ArtifactStoreMinioTest {
                 .containsExactlyInAnyOrder(ArtifactType.EXECUTION_PLAN, ArtifactType.RESULTS);
     }
 
+    /**
+     * The case a real cluster run exposed and no earlier test did.
+     *
+     * <p>A runner uploads with an ordinary S3 client and sets none of this platform's object
+     * metadata — it shares no process, filesystem or database with the control plane. An
+     * implementation that identified artifacts by metadata silently ignored everything a real runner
+     * produced, and the run reported "0 of 1 shards reported" rather than any error at all.
+     *
+     * <p>The key layout is the contract, so identity comes from the key.
+     */
+    @Test
+    @DisplayName("an object uploaded without platform metadata is still recognised")
+    void adoptsUploadsThatCarryNoMetadata() {
+        TeamId teamId = TeamId.generate();
+        TestRunId runId = TestRunId.generate();
+        RunnerShardId shardId = RunnerShardId.generate();
+        String prefix = "teams/%s/runs/%s/shards/%s/"
+                .formatted(teamId.value(), runId.value(), shardId.value());
+
+        // Exactly what the runner image writes, by the same route: a plain PutObject with no
+        // x-amz-meta-perf-* headers at all.
+        putRaw(prefix + "results.jtl", "timeStamp,elapsed,label\n1,2,browse\n");
+        putRaw(prefix + "jmeter.log", "started\n");
+        putRaw(prefix + "runner-manifest.json", "{\"planDigest\":\"sha256:abc\"}");
+
+        assertThat(store.listForRun(runId))
+                .extracting(ArtifactReference::type)
+                .containsExactlyInAnyOrder(ArtifactType.RESULTS, ArtifactType.RUNNER_LOG,
+                        ArtifactType.RUNNER_MANIFEST);
+    }
+
+    /**
+     * Analysis matches a shard's results to the shard that produced them. A reference that lost the
+     * shard would never match, which is the second half of the same failure: results present in
+     * storage, adopted into the catalog, and still invisible to analysis.
+     */
+    @Test
+    @DisplayName("the shard that produced an artifact is recovered from its key")
+    void recoversTheShardFromTheKey() {
+        TeamId teamId = TeamId.generate();
+        TestRunId runId = TestRunId.generate();
+        RunnerShardId shardId = RunnerShardId.generate();
+
+        putRaw("teams/%s/runs/%s/shards/%s/results.jtl"
+                .formatted(teamId.value(), runId.value(), shardId.value()), "timeStamp\n");
+
+        assertThat(store.listForRun(runId))
+                .singleElement()
+                .satisfies(reference -> assertThat(reference.shardId()).contains(shardId));
+    }
+
+    /**
+     * Defaulting would be worse than ignoring: an unknown object adopted as {@code RESULTS} would be
+     * parsed as measurements and could quietly change a verdict.
+     */
+    @Test
+    @DisplayName("an object with an unrecognised name is ignored rather than guessed at")
+    void ignoresUnrecognisedObjects() {
+        TestRunId runId = TestRunId.generate();
+        putRaw("teams/%s/runs/%s/shards/%s/notes.txt"
+                .formatted(TeamId.generate().value(), runId.value(), RunnerShardId.generate().value()),
+                "not an artifact");
+
+        assertThat(store.listForRun(runId)).isEmpty();
+    }
+
+    /** Uploads the way a runner does — no platform metadata, no digest header. */
+    private static void putRaw(String key, String body) {
+        s3.putObject(software.amazon.awssdk.services.s3.model.PutObjectRequest.builder()
+                        .bucket(BUCKET).key(key).build(),
+                software.amazon.awssdk.core.sync.RequestBody.fromString(body));
+    }
+
     /** One run's listing must never reach into another's, even within the same team. */
     @Test
     @DisplayName("listing one run does not return another run's artifacts")

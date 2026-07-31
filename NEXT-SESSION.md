@@ -16,7 +16,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **643 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
+Expect **648 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
 `An error occurred while setting up the SSL connection`, that is a known flaky Testcontainers
 start — retry once before investigating. If any integration test reports `Skipped`, that is a
 false green: investigate, do not accept it.
@@ -54,28 +54,32 @@ Other traps, all real, all hit at least once:
 
 ---
 
-## 2. Next: prove it on a cluster, then Increment 2
+## 2. Next: Increment 2 — importers
 
-The runner image exists and **has run** — 7,969 requests against the demo service, plan fetched from
-MinIO, evidence uploaded (`HANDOFF.md` §3e). What it has not done is run *in Kubernetes*.
+**Increment 1E is finished and proven.** A real Kubernetes Job has run a performance test end to end
+on kind: 7,932 requests, two objectives passed and one breached, results in a report. The procedure
+is [`docs/operations/local-kubernetes-run.md`](docs/operations/local-kubernetes-run.md) — repeat it
+after changing the runner image, the Job manifest or the artifact store. It found three real defects
+the first time (`HANDOFF.md` §3f), all presenting as *a run that measured nothing*.
 
-1. **Run it once on kind or minikube.** Everything so far is Docker against MinIO plus the fabric8
-   mock API server. That is the right way to test the contract and it is not the same as having run:
-   `fsGroup` on an `emptyDir`, image pull, RBAC and the projected service-account token are all
-   untested. Expect the first real Job to find something.
-2. **Calibrate, then raise shard count above 1.** `docs/operations/runner-calibration.md` has the
-   procedure. Dataset partitioning does not exist yet either, so multiple shards would replay
-   identical work — that has to come first.
-3. **Use `ConcurrencyThreadGroup`.** It is installed in the image but unused; the plan generator
-   still emits stepwise thread groups. This is a change to `JmeterWorkloadRenderer`.
+**Increment 2 — importers**: OpenAPI, Postman, HAR, cURL, manual. A scenario can already carry its
+own `method` and `path`, so an importer's job is to produce those plus **headers, query parameters
+and request bodies**, which the specification still cannot express at all. That is the gap between
+this platform and a genuinely useful test of a real API.
 
-Then **Increment 2 — importers**: OpenAPI, Postman, HAR, cURL, manual. A scenario can already carry
-its own `method` and `path`; what it still cannot express is headers, query parameters and bodies.
+Smaller things still open, none blocking:
+
+- **Sharding is untested and unpartitioned.** Everything so far is one shard; multiple shards would
+  replay identical work. Dataset partitioning has to come before shard count rises above 1, and
+  calibration before that (`docs/operations/runner-calibration.md`).
+- **`ConcurrencyThreadGroup` is in the runner image but unused** — the plan generator still emits
+  stepwise thread groups. A change to `JmeterWorkloadRenderer`.
+- **Not run on EKS**, so IRSA specifically is unexercised; kind used a Secret instead.
 
 **Already delivered — do not rebuild these:** the report endpoint and UI, artifact download with
 per-request authorization and digest verification, persisted `run_metrics`, the synthetic-run
 marking, the Kubernetes execution provider, the S3 artifact store, artifact adoption with plan-digest
-verification, and the JMeter runner image. `HANDOFF.md` §3b–§3e.
+verification, and the JMeter runner image. `HANDOFF.md` §3b–§3f.
 
 ---
 

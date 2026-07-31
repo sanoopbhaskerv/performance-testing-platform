@@ -86,6 +86,12 @@ spec:
               value: {{ .Values.artifacts.endpoint | quote }}
             - name: PLATFORM_ORCHESTRATION_ARTIFACTS_PATHSTYLEACCESS
               value: {{ .Values.artifacts.pathStyleAccess | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_RUNNERENDPOINT
+              value: {{ .Values.artifacts.runnerEndpoint | quote }}
+            # A Secret name, never its contents. Empty where the runner's own
+            # projected service-account token is enough, which is the EKS case.
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_RUNNERCREDENTIALSSECRET
+              value: {{ .Values.artifacts.runnerCredentialsSecret | quote }}
             # No object-storage credentials here, by design. The SDK's default
             # provider chain reads them from an IRSA-projected service account
             # token or an instance profile; a key in a values file is a key in

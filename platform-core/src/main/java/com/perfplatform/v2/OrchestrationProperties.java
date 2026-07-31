@@ -191,8 +191,29 @@ public class OrchestrationProperties {
         /** Set only for an S3-compatible appliance or MinIO. Empty means real AWS S3. */
         private String endpoint = "";
 
+        /**
+         * The endpoint <em>runners</em> use, when it differs from the control plane's.
+         *
+         * <p>Empty means they are the same, which is the normal case and true for real S3. They
+         * differ when object storage is reached by different routes from inside and outside the
+         * cluster — in-cluster service DNS versus an external address, or a VPC endpoint versus a
+         * public one. Getting this wrong is not subtle: the runner cannot fetch its plan and the run
+         * fails immediately.
+         */
+        private String runnerEndpoint = "";
+
         /** Path-style addressing, which most S3-compatible servers require and AWS does not. */
         private boolean pathStyleAccess = false;
+
+        /**
+         * Name of a Kubernetes Secret in the runner namespace holding storage credentials.
+         *
+         * <p>Empty on EKS with real S3, where a runner's projected service-account token is enough
+         * and no credential exists to leak. Needed for an S3-compatible store that only understands
+         * access keys. <b>A name, never a value</b>: the platform holds a reference and kubelet
+         * injects the contents, so nothing sensitive passes through the control plane or a manifest.
+         */
+        private String runnerCredentialsSecret = "";
 
         public String getStore() {
             return store;
@@ -226,12 +247,33 @@ public class OrchestrationProperties {
             this.endpoint = endpoint;
         }
 
+        public String getRunnerEndpoint() {
+            return runnerEndpoint;
+        }
+
+        public void setRunnerEndpoint(String runnerEndpoint) {
+            this.runnerEndpoint = runnerEndpoint;
+        }
+
+        /** What a runner should be told, falling back to the control plane's own endpoint. */
+        public String effectiveRunnerEndpoint() {
+            return runnerEndpoint == null || runnerEndpoint.isBlank() ? endpoint : runnerEndpoint;
+        }
+
         public boolean isPathStyleAccess() {
             return pathStyleAccess;
         }
 
         public void setPathStyleAccess(boolean pathStyleAccess) {
             this.pathStyleAccess = pathStyleAccess;
+        }
+
+        public String getRunnerCredentialsSecret() {
+            return runnerCredentialsSecret;
+        }
+
+        public void setRunnerCredentialsSecret(String runnerCredentialsSecret) {
+            this.runnerCredentialsSecret = runnerCredentialsSecret;
         }
     }
 

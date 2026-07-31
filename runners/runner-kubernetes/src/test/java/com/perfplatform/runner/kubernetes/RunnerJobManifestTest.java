@@ -290,11 +290,50 @@ class RunnerJobManifestTest {
          * service-account token; a key passed through a manifest would reach every audit log.
          */
         @Test
-        @DisplayName("no storage credential is passed to the runner")
+        @DisplayName("no storage credential value is passed to the runner")
         void noStorageCredentialIsPassed() {
             assertThat(env(build(RunnerFixtures.request())))
                     .doesNotContainKeys("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
                             "AWS_SESSION_TOKEN", "PERF_ARTIFACT_ACCESS_KEY");
+        }
+
+        /**
+         * On EKS with real S3 the runner's projected service-account token is enough, and there is
+         * no credential to leak. Nothing is mounted in that case.
+         */
+        @Test
+        @DisplayName("no Secret is mounted when the runner's own identity suffices")
+        void noSecretWhenPodIdentityIsEnough() {
+            assertThat(container(build(RunnerFixtures.request())).getEnvFrom()).isNullOrEmpty();
+        }
+
+        /**
+         * An S3-compatible store that only understands access keys needs one. It is referenced
+         * <b>by name</b>: kubelet injects the values at start, so nothing sensitive passes through
+         * the control plane, the manifest, or any log — the same reason a specification carries a
+         * {@code secretRef} and never a secret (CLAUDE.md §20).
+         */
+        @Test
+        @DisplayName("a credentials Secret is referenced by name, and its values never appear")
+        void credentialsSecretIsReferencedByName() {
+            RunnerCellSettings withSecret = RunnerFixtures.settingsWithStorage(
+                    new RunnerCellSettings.ArtifactStorage("perf-artifacts", "us-east-1",
+                            "http://minio:9000", true, "runner-storage-credentials"));
+
+            Job job = RunnerJobManifest.build(RunnerFixtures.request(), withSecret);
+            var envFrom = container(job).getEnvFrom();
+
+            assertThat(envFrom).hasSize(1);
+            assertThat(envFrom.get(0).getSecretRef().getName())
+                    .isEqualTo("runner-storage-credentials");
+
+            // Not optional: a missing Secret must stop the Pod starting. A runner that started
+            // without credentials would fail while uploading, having already generated its load.
+            assertThat(envFrom.get(0).getSecretRef().getOptional()).isFalse();
+
+            assertThat(job.toString())
+                    .as("the manifest names the Secret and never carries its contents")
+                    .doesNotContain("AWS_SECRET_ACCESS_KEY");
         }
     }
 

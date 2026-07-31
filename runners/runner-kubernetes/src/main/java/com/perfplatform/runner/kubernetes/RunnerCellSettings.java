@@ -59,17 +59,40 @@ public record RunnerCellSettings(
      * @param region          storage region, or empty to let the runner's own default apply
      * @param endpoint        set only for an S3-compatible appliance or MinIO; empty means AWS S3
      * @param pathStyleAccess path-style addressing, which most S3-compatible servers require
+     * @param credentialsSecret name of a Kubernetes Secret in the runner namespace holding the
+     *                        storage credentials, or empty when the runner's own service identity
+     *                        suffices. <b>A name, never a value</b> — see the record's javadoc
      */
     public record ArtifactStorage(
             String bucket,
             String region,
             String endpoint,
-            boolean pathStyleAccess) {
+            boolean pathStyleAccess,
+            String credentialsSecret) {
 
         public ArtifactStorage {
             requireText(bucket, "bucket");
             region = region == null ? "" : region;
             endpoint = endpoint == null ? "" : endpoint;
+            credentialsSecret = credentialsSecret == null ? "" : credentialsSecret;
+        }
+
+        /** Storage the runner can reach with its own identity — IRSA, or an instance profile. */
+        public static ArtifactStorage usingPodIdentity(String bucket, String region,
+                String endpoint, boolean pathStyleAccess) {
+            return new ArtifactStorage(bucket, region, endpoint, pathStyleAccess, "");
+        }
+
+        /**
+         * Whether a Secret must be mounted for the runner to authenticate.
+         *
+         * <p>On EKS with real S3 this is false: a projected service-account token is enough, and no
+         * credential exists to leak. It becomes true for an S3-compatible store that only understands
+         * access keys — MinIO, most on-premises appliances — where a Secret is the least-bad option
+         * and is still a <em>reference</em> the platform holds rather than a value (CLAUDE.md §20).
+         */
+        public boolean requiresCredentialsSecret() {
+            return !credentialsSecret.isBlank();
         }
     }
 

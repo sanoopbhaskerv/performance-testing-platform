@@ -103,9 +103,31 @@ artifacts:
   endpoint: ""
   pathStyleAccess: false
 
-# Credentials are never configured here. The SDK's default provider chain reads
-# them from the environment, an instance profile, or an IRSA-projected token — a
-# key in a values file is a key in source control eventually.
+  # The endpoint *runners* use, when it differs from the control plane's. Empty
+  # means they are the same, which is the normal case and true for real S3. They
+  # differ when storage is reached by another route from inside the cluster —
+  # in-cluster service DNS versus an external address, or a VPC versus a public
+  # endpoint. Getting it wrong is not subtle: the runner cannot fetch its plan.
+  runnerEndpoint: ""
+
+  # Name of a Secret in the runner namespace holding storage credentials.
+  #
+  # Leave empty on EKS with real S3: the runner's IRSA-projected service account
+  # token is enough and there is no credential to leak. Set it for a store that
+  # only understands access keys (MinIO, most on-premises appliances).
+  #
+  # A NAME, never a value. kubelet injects the contents into the runner Pod, so
+  # nothing sensitive passes through the control plane, the Job manifest, or any
+  # log — the same reason a specification carries a secretRef and never a secret.
+  # Create it out of band:
+  #   kubectl -n perf-runners create secret generic runner-storage-credentials \
+  #     --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+  runnerCredentialsSecret: ""
+
+# The control plane's own credentials are never configured here either. The SDK's
+# default provider chain reads them from the environment, an instance profile, or
+# an IRSA-projected token — a key in a values file is a key in source control
+# eventually.
 
 database:
   username: "perf"

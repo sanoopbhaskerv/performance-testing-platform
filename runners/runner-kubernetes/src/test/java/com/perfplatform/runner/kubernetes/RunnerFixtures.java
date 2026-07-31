@@ -27,9 +27,18 @@ final class RunnerFixtures {
             "8Gi",
             Duration.ofHours(6),
             Duration.ofMinutes(5),
-            new RunnerCellSettings.ArtifactStorage("perf-artifacts", "us-east-1", "", false));
+            RunnerCellSettings.ArtifactStorage.usingPodIdentity("perf-artifacts", "us-east-1", "", false));
 
     private RunnerFixtures() {
+    }
+
+    static RunnerCellSettings settingsWithStorage(RunnerCellSettings.ArtifactStorage storage) {
+        return new RunnerCellSettings(
+                SETTINGS.namespace(), SETTINGS.serviceAccount(), SETTINGS.runnerImages(),
+                SETTINGS.cpuRequest(), SETTINGS.cpuLimit(),
+                SETTINGS.memoryRequest(), SETTINGS.memoryLimit(),
+                SETTINGS.workspaceSizeLimit(), SETTINGS.finishedJobTtl(), SETTINGS.deadlineGrace(),
+                storage);
     }
 
     static RunnerCellSettings settingsWithImages(Map<String, String> images) {

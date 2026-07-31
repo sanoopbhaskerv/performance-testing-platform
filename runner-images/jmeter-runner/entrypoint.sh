@@ -71,18 +71,29 @@ JSON
     # Uploaded individually rather than by syncing the directory: only these are
     # the run's evidence, and a sync would also ship the plan back and whatever
     # else JMeter happened to leave behind.
+    local uploaded=0 failed=0
     for file in "${RESULTS}" "${JMETER_LOG}" "${MANIFEST}"; do
         [[ -f "${file}" ]] || continue
-        if ! s3 cp "${file}" "s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}$(basename "${file}")" \
+        if s3 cp "${file}" "s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}$(basename "${file}")" \
                 --only-show-errors; then
+            uploaded=$((uploaded + 1))
+        else
+            failed=$((failed + 1))
             log "WARNING: could not upload $(basename "${file}")"
         fi
     done
 
-    # The manifest is uploaded last and its digest is checked by the control
-    # plane before results are accepted, so a mismatch means the results describe
-    # a different test and are refused rather than merged.
-    log "uploaded evidence to s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}"
+    # Reported honestly. Saying "uploaded evidence" after every upload failed is
+    # how a run with nothing behind it looks like a run with evidence.
+    if [[ ${failed} -gt 0 ]]; then
+        log "ERROR: ${failed} of $((uploaded + failed)) artifacts could not be uploaded to " \
+            "s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX} — this run has incomplete evidence"
+    else
+        # The manifest carries the plan digest, which the control plane checks
+        # before accepting results: a mismatch means they describe a different
+        # test and are refused rather than merged.
+        log "uploaded ${uploaded} artifacts to s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}"
+    fi
 }
 
 on_exit() {

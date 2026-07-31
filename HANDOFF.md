@@ -3,9 +3,8 @@
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 1E complete, including the runner image — which has actually executed a
-plan and uploaded its evidence. Production load runs in isolated Kubernetes Jobs, artifacts live in
-object storage, and results are refused unless their plan digest matches. See §3d and §3e.
+**Last updated:** Increment 1E complete and **proven on a real Kubernetes cluster** — a Job has run a
+performance test end to end and its results reached a report. See §3d, §3e and §3f.
 
 ---
 
@@ -21,11 +20,12 @@ object storage, and results are refused unless their plan digest matches. See §
 | 1D — JMeter engine SPI and local provider | **Complete** `165232a`, `9640590` | see §3a |
 | Synthetic marking and reporting | **Complete** `7438f29` | see §3b |
 | Manual requests + demo-service path | **Complete** `e57b38a` | see §3c |
-| 1E — Kubernetes provider and object storage | **Complete** this commit | see §3d |
+| 1E — Kubernetes provider and object storage | **Complete** `1556f43` | see §3d |
+| 1E — runner image, proven on kind | **Complete** this commit | see §3e, §3f |
 | 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
 | 2 onward | **Not started** | — |
 
-**643 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
+**648 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -316,13 +316,51 @@ an older runner has said nothing rather than said something wrong.
 separately from the Java code, so nothing else keeps its output readable; if that test fails after an
 image change, the image is wrong until proven otherwise.
 
+## 3f. Proven on a real cluster
+
+**A real Kubernetes Job has run a performance test.** kind, control plane in-cluster, runner Job in a
+`pod-security: restricted` namespace: `Complete`, 7,932 requests against the demo service, two
+objectives passed and one breached. Procedure in
+[`docs/operations/local-kubernetes-run.md`](docs/operations/local-kubernetes-run.md) — repeat it after
+changing the runner image, the Job manifest or the artifact store.
+
+Verified as the API server *admitted* it, not merely as built: `backoffLimit: 0`,
+`restartPolicy: Never`, `activeDeadlineSeconds`, TTL, non-root uid 10001, `fsGroup`, read-only root,
+`allowPrivilegeEscalation: false`, all capabilities dropped, `RuntimeDefault` seccomp, and no
+credential value anywhere in the manifest. RBAC checked with `kubectl auth can-i`, including the two
+refusals that matter: the control plane cannot `patch` a Job, and **a runner cannot create one**.
+
+### It found three defects nothing else had
+
+Each presented as *a run that measured nothing*, never as an error — the failure mode this platform
+has to be most suspicious of.
+
+1. **The runner could not authenticate to object storage.** "The Pod's projected service-account
+   token authorises it" is true on EKS with IRSA and false for any S3-compatible store that only
+   understands access keys. The Job ran and failed on `Unable to locate credentials`. Fixed by
+   referencing a Kubernetes Secret **by name** from the Job manifest — kubelet injects the values, so
+   nothing sensitive passes through the control plane, the manifest or a log (CLAUDE.md §20).
+
+2. **The control plane could not see what a runner uploaded.** `S3ArtifactStore.listForRun`
+   identified artifacts by object metadata that only its own uploads set; a runner using an ordinary
+   S3 client sets none, so every runner-produced file was silently skipped and the run reported
+   *"0 of 1 runner shards reported"*. Fixed by deriving identity from the **object key**, which is the
+   contract both sides actually share.
+
+3. **The shard was lost even once artifacts were found.** References rebuilt from storage carried no
+   shard id, and analysis matches results to the shard that produced them — so results would have been
+   adopted and still been invisible.
+
+Also added, because a local cluster needs it and a VPC endpoint will too:
+`artifacts.runnerEndpoint`, for when runners reach storage by a different route than the control
+plane.
+
 ### Not done, and owned by later increments
-- **Never run on a real cluster.** Verified with Docker against MinIO and the demo service, and via
-  the fabric8 mock API server. A kind/minikube run is the honest next verification step.
 - **Sharding is untested.** Everything so far is `PERF_SHARD_COUNT=1`, and dataset partitioning does
   not exist — multiple shards would replay identical work. Shard count stays at 1 until calibration.
 - **`ConcurrencyThreadGroup` is installed in the image but unused.** Using it is a change to
   `JmeterWorkloadRenderer`, which still emits stepwise thread groups.
+- **Not run on EKS**, so IRSA specifically is still unexercised; kind used a Secret instead.
 
 ---
 

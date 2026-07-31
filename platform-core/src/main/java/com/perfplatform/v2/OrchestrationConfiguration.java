@@ -283,8 +283,11 @@ public class OrchestrationConfiguration {
                 new RunnerCellSettings.ArtifactStorage(
                         artifactSettings.getBucket(),
                         artifactSettings.getRegion(),
-                        artifactSettings.getEndpoint(),
-                        artifactSettings.isPathStyleAccess()));
+                        // Usually identical to the control plane's, and different when storage is
+                        // reached by another route from inside the cluster.
+                        artifactSettings.effectiveRunnerEndpoint(),
+                        artifactSettings.isPathStyleAccess(),
+                        artifactSettings.getRunnerCredentialsSecret()));
 
         if (!settings.hasOnlyPinnedImages()) {
             throw new IllegalStateException("Runner images must be pinned, but these are not: "

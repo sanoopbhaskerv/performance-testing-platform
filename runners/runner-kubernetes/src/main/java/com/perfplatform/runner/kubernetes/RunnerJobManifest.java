@@ -142,6 +142,13 @@ public final class RunnerJobManifest {
                                 .withImage(settings.imageFor(request.engine()))
                                 .withImagePullPolicy("IfNotPresent")
                                 .withEnv(environment(request, settings))
+                                // A Secret referenced by name, whose values kubelet injects at
+                                // start. The credential never passes through the control plane, the
+                                // manifest, or any log — the platform holds a reference, exactly as
+                                // a specification holds a secretRef and never a secret
+                                // (CLAUDE.md §20). Absent entirely when the runner's own identity
+                                // suffices, which is the case on EKS with real S3.
+                                .withEnvFrom(credentialsFrom(settings))
                                 .withNewResources()
                                     .withRequests(Map.of(
                                             "cpu", new Quantity(settings.cpuRequest()),
@@ -167,6 +174,27 @@ public final class RunnerJobManifest {
                     .endTemplate()
                 .endSpec()
                 .build();
+    }
+
+    /**
+     * The Secret holding storage credentials, if this cell needs one.
+     *
+     * <p>{@code optional} is deliberately left false: a missing Secret must stop the Pod from
+     * starting. A runner that started without credentials would fail minutes later while trying to
+     * upload, having already generated its load — the worst possible moment to discover it.
+     */
+    private static java.util.List<io.fabric8.kubernetes.api.model.EnvFromSource> credentialsFrom(
+            RunnerCellSettings settings) {
+
+        if (!settings.artifacts().requiresCredentialsSecret()) {
+            return java.util.List.of();
+        }
+        return java.util.List.of(new io.fabric8.kubernetes.api.model.EnvFromSourceBuilder()
+                .withNewSecretRef()
+                    .withName(settings.artifacts().credentialsSecret())
+                    .withOptional(Boolean.FALSE)
+                .endSecretRef()
+                .build());
     }
 
     private static Map<String, String> labels(ProvisionRequest request) {

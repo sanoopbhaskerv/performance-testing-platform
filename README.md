@@ -271,9 +271,13 @@ and add it to `runnerCell.images`:
 docker build -t perfplatform/jmeter-runner:5.6.3-1 runner-images/jmeter-runner
 ```
 
-> **Not yet run on a real cluster.** The image has executed a real plan against the demo service
-> under Docker, and the Job contract is tested against an in-process API server, but no Job has run
-> in Kubernetes. Try it on kind or minikube before a shared environment.
+**Try it on kind first.** [`docs/operations/local-kubernetes-run.md`](docs/operations/local-kubernetes-run.md)
+is the full procedure — cluster, images, RBAC checks, and what the Job should look like once the API
+server has admitted it. It is how this path was first proven, and the thing to repeat after changing
+the runner image, the Job manifest or the artifact store.
+
+> Not yet run on EKS, so IRSA specifically is unexercised — the kind run used a credentials Secret
+> instead. Everything else in the path has executed for real.
 
 ---
 

@@ -169,30 +169,48 @@ public class S3ArtifactStore implements ArtifactStore {
                 .toList();
 
         return objects.stream()
-                .map(object -> toReference(object.key(), object.size()))
+                .map(object -> toReference(runId, object.key(), object.size()))
                 .flatMap(Optional::stream)
                 .toList();
     }
 
-    /** Rebuilds a reference from an object's stored metadata, or empty if it is not ours. */
-    private Optional<ArtifactReference> toReference(String key, Long size) {
+    /**
+     * Rebuilds a reference from an object's key, using its metadata only where it adds something.
+     *
+     * <p><b>The key is the contract, not the metadata.</b> A runner uploads with an ordinary S3
+     * client and sets none of this platform's object metadata — it shares no process, filesystem or
+     * database with the control plane, and the key layout is the only thing both agree on. Deriving
+     * identity from metadata alone means silently ignoring everything a real runner produces, which
+     * presents as a run that measured nothing rather than as an error.
+     *
+     * <p>Metadata is still read for the digest, because a digest cannot be derived from a key and
+     * the platform's own uploads record one.
+     *
+     * @param runId the run being listed, which the caller already knows; taking it from here rather
+     *              than from the key keeps one authority for what run this belongs to
+     */
+    private Optional<ArtifactReference> toReference(TestRunId runId, String key, Long size) {
+        Optional<ArtifactType> type = FileSystemArtifactStore.typeForFileName(key);
+        if (type.isEmpty()) {
+            // An unrecognised file. Ignored rather than defaulted: adopting an unknown object as
+            // RESULTS would have it parsed as measurements and could quietly change a verdict.
+            log.debug("Ignoring object with an unrecognised artifact name key={}", key);
+            return Optional.empty();
+        }
+
         try {
             HeadObjectResponse head = s3.headObject(
                     HeadObjectRequest.builder().bucket(bucket).key(key).build());
 
-            Map<String, String> metadata = head.metadata();
-            String runId = metadata.get(METADATA_RUN_ID);
-            String type = metadata.get(METADATA_ARTIFACT_TYPE);
-            if (runId == null || type == null) {
-                // Not written by this platform. Ignored rather than guessed at.
-                return Optional.empty();
-            }
+            Map<String, String> metadata = head.metadata() == null ? Map.of() : head.metadata();
 
             return Optional.of(new ArtifactReference(
                     ArtifactId.generate(),
-                    TestRunId.of(java.util.UUID.fromString(runId)),
-                    Optional.empty(),
-                    ArtifactType.valueOf(type),
+                    runId,
+                    // From the key, so a runner's own uploads are attributed to the shard that
+                    // produced them. Analysis matches results to shards by this.
+                    FileSystemArtifactStore.shardIdIn(key),
+                    type.get(),
                     key,
                     metadata.getOrDefault(METADATA_DIGEST, ""),
                     head.contentType() == null ? "application/octet-stream" : head.contentType(),

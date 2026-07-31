@@ -159,6 +159,61 @@ public class FileSystemArtifactStore implements ArtifactStore {
     }
 
     /**
+     * The shard a key belongs to, if any.
+     *
+     * <p>The key is the contract between the control plane and a runner — they share no filesystem,
+     * no database and no process, and this layout is the only thing both agree on. A runner uploading
+     * with an ordinary S3 client sets none of the platform's object metadata, so anything derived
+     * from metadata alone would silently ignore everything a real runner produces.
+     *
+     * @return the shard identifier from {@code .../shards/{shardId}/...}, or empty for a run-level
+     *         artifact
+     */
+    static Optional<RunnerShardId> shardIdIn(String objectKey) {
+        String[] segments = objectKey.split("/");
+        for (int i = 0; i + 1 < segments.length; i++) {
+            if ("shards".equals(segments[i])) {
+                try {
+                    return Optional.of(RunnerShardId.of(java.util.UUID.fromString(segments[i + 1])));
+                } catch (IllegalArgumentException e) {
+                    return Optional.empty();
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * What kind of artifact a key holds, judged by its file name.
+     *
+     * <p>The names are fixed by the runner contract ({@code runner-images/jmeter-runner}), so this is
+     * a real agreement rather than a guess. Anything unrecognised is empty rather than defaulted: an
+     * unknown file adopted as {@code RESULTS} would be parsed as measurements and could quietly
+     * change a verdict.
+     */
+    static Optional<ArtifactType> typeForFileName(String objectKey) {
+        String fileName = objectKey.substring(objectKey.lastIndexOf('/') + 1)
+                .toLowerCase(java.util.Locale.ROOT);
+
+        if (fileName.endsWith(".jtl") || fileName.endsWith(".csv")) {
+            return Optional.of(ArtifactType.RESULTS);
+        }
+        if (fileName.equals("runner-manifest.json")) {
+            return Optional.of(ArtifactType.RUNNER_MANIFEST);
+        }
+        if (fileName.endsWith(".log")) {
+            return Optional.of(ArtifactType.RUNNER_LOG);
+        }
+        if (fileName.endsWith(".jmx")) {
+            return Optional.of(ArtifactType.EXECUTION_PLAN);
+        }
+        if (fileName.endsWith(".html") || fileName.endsWith(".html.gz")) {
+            return Optional.of(ArtifactType.REPORT);
+        }
+        return Optional.empty();
+    }
+
+    /**
      * Resolves a key under the root, refusing anything that would escape it.
      *
      * <p>Keys are constructed internally from identifiers, so this should be unreachable. It is here
