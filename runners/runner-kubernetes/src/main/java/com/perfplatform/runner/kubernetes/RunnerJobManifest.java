@@ -141,7 +141,7 @@ public final class RunnerJobManifest {
                                 .withName(COMPONENT)
                                 .withImage(settings.imageFor(request.engine()))
                                 .withImagePullPolicy("IfNotPresent")
-                                .withEnv(environment(request))
+                                .withEnv(environment(request, settings))
                                 .withNewResources()
                                     .withRequests(Map.of(
                                             "cpu", new Quantity(settings.cpuRequest()),
@@ -199,7 +199,7 @@ public final class RunnerJobManifest {
      * not match the run's plan are rejected rather than merged — they describe a different test.
      */
     private static java.util.List<io.fabric8.kubernetes.api.model.EnvVar> environment(
-            ProvisionRequest request) {
+            ProvisionRequest request, RunnerCellSettings settings) {
 
         Map<String, String> env = new LinkedHashMap<>();
         env.put("PERF_RUN_ID", request.runId().value().toString());
@@ -216,6 +216,25 @@ public final class RunnerJobManifest {
         // and by scenario, so output labelled any other way could not be judged.
         env.put("PERF_OPERATION_LABELS", String.join(",", request.operationLabels()));
         env.put("PERF_DEADLINE_SECONDS", String.valueOf(request.deadline().toSeconds()));
+
+        // Where to read the plan from and write results to. Coordinates only — a runner
+        // authenticates with its own projected service-account token, and a credential passed
+        // through a Job manifest would end up in an audit log.
+        RunnerCellSettings.ArtifactStorage artifacts = settings.artifacts();
+        env.put("PERF_ARTIFACT_BUCKET", artifacts.bucket());
+        if (!artifacts.region().isBlank()) {
+            env.put("PERF_ARTIFACT_REGION", artifacts.region());
+        }
+        if (!artifacts.endpoint().isBlank()) {
+            env.put("PERF_ARTIFACT_ENDPOINT", artifacts.endpoint());
+        }
+        env.put("PERF_ARTIFACT_PATH_STYLE", String.valueOf(artifacts.pathStyleAccess()));
+
+        // The prefix this shard writes under, so the runner never constructs a key of its own. Key
+        // layout is what makes authorization structural; a runner that built its own path could
+        // write into another team's prefix.
+        env.put("PERF_ARTIFACT_PREFIX", "teams/%s/runs/%s/shards/%s/".formatted(
+                request.teamId().value(), request.runId().value(), request.shardId().value()));
 
         return env.entrySet().stream()
                 .map(entry -> new EnvVarBuilder()

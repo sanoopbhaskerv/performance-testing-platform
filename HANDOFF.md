@@ -3,9 +3,9 @@
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Synthetic-run marking and reporting complete. A run now carries whether any load was
-generated, a synthetic run can never read as a pass, and there is a report endpoint and report UI
-backed by persisted measurements. See §3b.
+**Last updated:** Increment 1E complete, including the runner image — which has actually executed a
+plan and uploaded its evidence. Production load runs in isolated Kubernetes Jobs, artifacts live in
+object storage, and results are refused unless their plan digest matches. See §3d and §3e.
 
 ---
 
@@ -25,7 +25,7 @@ backed by persisted measurements. See §3b.
 | 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
 | 2 onward | **Not started** | — |
 
-**626 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
+**643 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -74,7 +74,8 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 codec), `RunFailureCode`, `RunnerShard`, `ShardState`, `InvalidRunTransitionException`.
 `domain/admission/` — `CapacityLimits`, `CapacitySnapshot`, `AdmissionPolicy`, `AdmissionDecision`,
 `ConcurrencyAdmissionPolicy`.
-`domain/plan/` — `ExecutionPlan`, `ExecutionPlanCompiler`, `BaselineExecutionPlanCompiler`.
+`domain/plan/` — `ExecutionPlan`, `ExecutionPlanCompiler`. (`BaselineExecutionPlanCompiler` was
+deleted in 1E once `EngineDispatchingPlanCompiler` had fully replaced it.)
 `domain/execution/` — `ExecutionProvider` port, `ProvisionRequest`, `ExecutionPhase`.
 `domain/port/` — `TestRunRepository`, `RunnerShardRepository`, `ExecutionPlanRepository`,
 `DefinitionVersionCatalog`, `TeamDirectory`.
@@ -285,12 +286,43 @@ Helm runner-cell namespace with `pod-security: restricted`, a runner ServiceAcco
 `docs/operations/runner-calibration.md` covers why a throttled generator reports its own latency, and
 why shard count stays at 1 until it is measured. `BaselineExecutionPlanCompiler` deleted.
 
+## 3e. The runner image — delivered
+
+`runner-images/jmeter-runner`. **It has actually run**: 7,969 requests against the demo service,
+executed by the image with a read-only root filesystem, all capabilities dropped and uid 10001,
+fetching its plan from MinIO and uploading `results.jtl`, `jmeter.log` and `runner-manifest.json`.
+
+Building it exposed two gaps that had to be closed first:
+
+1. **The Job manifest told the runner nothing about storage.** It passed `PERF_WORKLOAD_KEY` and no
+   bucket, so a runner had a key and nowhere to use it. `RunnerCellSettings.ArtifactStorage` now
+   carries the coordinates — and only coordinates, since a credential in a manifest is a credential
+   in an audit log. The runner is also *given* its key prefix rather than left to build one: key
+   layout is what makes authorization structural, and a runner that constructed its own path could
+   write into another team's prefix.
+
+2. **Nothing ingested what a runner uploaded.** The local providers store an artifact and record it
+   in one step because they share a process with the control plane. A runner Pod does not, and has no
+   database access by design. Analysis would have found nothing at all.
+   `RunWorkloadService.adoptUploadedArtifacts` now adopts what appeared in storage immediately before
+   results are read — once per analysis, and idempotent by object key.
+
+**Plan digest verification, finally implemented.** CLAUDE.md §15 required it and nothing did it. Every
+runner manifest is checked against the run's own plan, and a mismatch fails the run with
+`PLAN_DIGEST_MISMATCH` rather than merging the results. A manifest carrying *no* digest is tolerated —
+an older runner has said nothing rather than said something wrong.
+
+`RunnerOutputContractTest` parses a fixture the image genuinely produced. The image is versioned
+separately from the Java code, so nothing else keeps its output readable; if that test fails after an
+image change, the image is wrong until proven otherwise.
+
 ### Not done, and owned by later increments
-- **No runner image is built here.** The allowlist expects `perfplatform/jmeter-runner:<tag>`; the
-  image itself, including `ConcurrencyThreadGroup` for smooth ramping, is still to be built.
-- **Never run against a real cluster.** Everything is verified against the fabric8 mock server and
-  MinIO. A kind/minikube end-to-end run is the honest next verification step.
-- Sharding is still hardcoded to 1, pending the calibration the doc describes.
+- **Never run on a real cluster.** Verified with Docker against MinIO and the demo service, and via
+  the fabric8 mock API server. A kind/minikube run is the honest next verification step.
+- **Sharding is untested.** Everything so far is `PERF_SHARD_COUNT=1`, and dataset partitioning does
+  not exist — multiple shards would replay identical work. Shard count stays at 1 until calibration.
+- **`ConcurrencyThreadGroup` is installed in the image but unused.** Using it is a change to
+  `JmeterWorkloadRenderer`, which still emits stepwise thread groups.
 
 ---
 

@@ -182,14 +182,22 @@ public final class OrchestrationFixtures {
     /**
      * An artifact store and catalog in memory.
      *
-     * <p>Combined because the reconciler's analysis path uses them together: content goes into one
-     * and its reference into the other, and a test that let them disagree would be testing a state
-     * the production wiring cannot reach.
+     * <p>One class, but <b>two genuinely separate collections</b>, exactly as production has two
+     * systems: object storage holds content, PostgreSQL holds the record of it. Conflating them
+     * would hide the situation a remote runner creates — content that exists while the database
+     * knows nothing about it — which is precisely what artifact adoption exists to resolve.
      */
     public static final class InMemoryArtifacts implements ArtifactStore, ResultCatalog {
 
+        /** Object storage: content by key. */
         private final Map<String, byte[]> content = new HashMap<>();
-        private final List<ArtifactReference> references = new ArrayList<>();
+
+        /** Object storage: what is actually there, whether or not the catalog knows. */
+        private final List<ArtifactReference> stored = new ArrayList<>();
+
+        /** The catalog: what the platform has recorded. Deliberately not the same list. */
+        private final List<ArtifactReference> catalogued = new ArrayList<>();
+
         private final Map<TestRunId, List<ObjectiveOutcome>> outcomes = new HashMap<>();
         private final Map<TestRunId, NormalizedRunResult> metrics = new HashMap<>();
 
@@ -199,15 +207,32 @@ public final class OrchestrationFixtures {
                     descriptor.runId().value(),
                     descriptor.shardId().map(id -> "shards/" + id.value()).orElse("run"),
                     descriptor.fileName());
+            return put(key, descriptor, body);
+        }
 
+        /**
+         * Content appearing in storage with nothing recorded in the catalog.
+         *
+         * <p>What a Kubernetes runner leaves behind: it uploads directly and has no database access
+         * at all. Reconciliation has to notice.
+         */
+        public ArtifactReference uploadedByRunner(ArtifactDescriptor descriptor, byte[] body) {
+            String key = "teams/%s/runs/%s/shards/%s/%s".formatted(descriptor.teamId().value(),
+                    descriptor.runId().value(),
+                    descriptor.shardId().map(id -> id.value().toString()).orElse("run"),
+                    descriptor.fileName());
+            return put(key, descriptor, body);
+        }
+
+        private ArtifactReference put(String key, ArtifactDescriptor descriptor, byte[] body) {
             content.put(key, body == null ? new byte[0] : body);
             ArtifactReference reference = new ArtifactReference(ArtifactId.generate(),
                     descriptor.runId(), descriptor.shardId(), descriptor.type(), key,
                     "sha256:test", descriptor.contentType(), body == null ? 0 : body.length,
                     java.time.Instant.parse("2026-07-30T10:00:00Z"));
 
-            references.removeIf(existing -> existing.objectKey().equals(key));
-            references.add(reference);
+            stored.removeIf(existing -> existing.objectKey().equals(key));
+            stored.add(reference);
             return reference;
         }
 
@@ -218,17 +243,20 @@ public final class OrchestrationFixtures {
 
         @Override
         public List<ArtifactReference> listForRun(TestRunId runId) {
-            return references.stream().filter(r -> r.runId().equals(runId)).toList();
+            return stored.stream().filter(r -> r.runId().equals(runId)).toList();
         }
 
+        /** Deduplicates by object key, as the real catalog does, so adoption stays idempotent. */
         @Override
         public void recordArtifact(ArtifactReference reference) {
-            // Content and reference are stored together by store(), so this is already done.
+            if (catalogued.stream().noneMatch(r -> r.objectKey().equals(reference.objectKey()))) {
+                catalogued.add(reference);
+            }
         }
 
         @Override
         public List<ArtifactReference> artifactsFor(TestRunId runId) {
-            return listForRun(runId);
+            return catalogued.stream().filter(r -> r.runId().equals(runId)).toList();
         }
 
         /** Replaces both, as the store does, so re-analysis in a test behaves as it does in production. */

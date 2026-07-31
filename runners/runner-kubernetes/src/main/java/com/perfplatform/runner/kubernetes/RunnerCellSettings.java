@@ -32,6 +32,8 @@ import java.util.Objects;
  *                          control-plane restart; artifacts are already durable by then
  * @param deadlineGrace     added to the plan's own deadline to produce {@code activeDeadlineSeconds},
  *                          covering image pull, startup and artifact upload
+ * @param artifacts         where the runner reads its plan from and writes its results to. Without
+ *                          this a runner has a key and nowhere to use it
  */
 public record RunnerCellSettings(
         String namespace,
@@ -43,7 +45,33 @@ public record RunnerCellSettings(
         String memoryLimit,
         String workspaceSizeLimit,
         Duration finishedJobTtl,
-        Duration deadlineGrace) {
+        Duration deadlineGrace,
+        ArtifactStorage artifacts) {
+
+    /**
+     * The object storage a runner uses.
+     *
+     * <p>Coordinates only. There are deliberately no credential fields: a runner authenticates with
+     * its own service identity — a projected service-account token, an instance profile — and a key
+     * passed through a Job manifest would be a key in an audit log and, eventually, in a ticket.
+     *
+     * @param bucket          where artifacts live
+     * @param region          storage region, or empty to let the runner's own default apply
+     * @param endpoint        set only for an S3-compatible appliance or MinIO; empty means AWS S3
+     * @param pathStyleAccess path-style addressing, which most S3-compatible servers require
+     */
+    public record ArtifactStorage(
+            String bucket,
+            String region,
+            String endpoint,
+            boolean pathStyleAccess) {
+
+        public ArtifactStorage {
+            requireText(bucket, "bucket");
+            region = region == null ? "" : region;
+            endpoint = endpoint == null ? "" : endpoint;
+        }
+    }
 
     public RunnerCellSettings {
         requireText(namespace, "namespace");
@@ -55,6 +83,7 @@ public record RunnerCellSettings(
         requireText(workspaceSizeLimit, "workspaceSizeLimit");
         Objects.requireNonNull(finishedJobTtl, "finishedJobTtl");
         Objects.requireNonNull(deadlineGrace, "deadlineGrace");
+        Objects.requireNonNull(artifacts, "artifacts");
         runnerImages = runnerImages == null ? Map.of() : Map.copyOf(runnerImages);
     }
 

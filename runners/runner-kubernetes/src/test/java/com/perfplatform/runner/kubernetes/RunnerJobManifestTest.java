@@ -253,6 +253,49 @@ class RunnerJobManifestTest {
                     .containsEntry("PERF_PLAN_DIGEST", request.planDigest().value())
                     .containsEntry("PERF_OPERATION_LABELS", "checkout-load/browse");
         }
+
+        /**
+         * A runner shares no filesystem with the control plane: it fetches its plan and uploads its
+         * results over the network. Without these it holds a key and has nowhere to use it.
+         */
+        @Test
+        @DisplayName("the runner is told which bucket to read its plan from and write results to")
+        void environmentCarriesArtifactCoordinates() {
+            assertThat(env(build(RunnerFixtures.request())))
+                    .containsEntry("PERF_ARTIFACT_BUCKET",
+                            RunnerFixtures.SETTINGS.artifacts().bucket())
+                    .containsEntry("PERF_ARTIFACT_REGION",
+                            RunnerFixtures.SETTINGS.artifacts().region());
+        }
+
+        /**
+         * The runner is given its prefix rather than left to build one. Key layout is what makes
+         * authorization structural, and a runner that constructed its own path could write into
+         * another team's prefix.
+         */
+        @Test
+        @DisplayName("the runner is given its own key prefix, not the means to invent one")
+        void environmentCarriesTheShardPrefix() {
+            ProvisionRequest request = RunnerFixtures.request();
+
+            assertThat(env(build(request)))
+                    .containsEntry("PERF_ARTIFACT_PREFIX", "teams/%s/runs/%s/shards/%s/".formatted(
+                            request.teamId().value(),
+                            request.runId().value(),
+                            request.shardId().value()));
+        }
+
+        /**
+         * Coordinates, never credentials. A runner authenticates with its own projected
+         * service-account token; a key passed through a manifest would reach every audit log.
+         */
+        @Test
+        @DisplayName("no storage credential is passed to the runner")
+        void noStorageCredentialIsPassed() {
+            assertThat(env(build(RunnerFixtures.request())))
+                    .doesNotContainKeys("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                            "AWS_SESSION_TOKEN", "PERF_ARTIFACT_ACCESS_KEY");
+        }
     }
 
     @Nested

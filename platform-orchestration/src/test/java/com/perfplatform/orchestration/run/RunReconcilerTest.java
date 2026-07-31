@@ -28,6 +28,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.perfplatform.domain.port.ArtifactStore;
+
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -148,6 +151,142 @@ class RunReconcilerTest {
      * deployment actually runs. Its measurements are invented, and the platform's job is to make that
      * impossible to miss rather than to render them as a green verdict.
      */
+    /**
+     * A runner that uploads its own output.
+     *
+     * <p>The Kubernetes case. A runner Pod writes to object storage and has no database access at
+     * all — deliberately, since a provider that could write run state could mark its own failures as
+     * successes. Reconciliation therefore has to notice what appeared, and check that it belongs to
+     * this run's plan before believing any of it.
+     */
+    @Nested
+    @DisplayName("results uploaded directly by a runner")
+    class RunnerUploads {
+
+        /** Drives a run to the point where analysis is about to happen, without producing results. */
+        private TestRun runAwaitingAnalysis() {
+            TestRun run = queueRun("baseline");
+            RunReconciler reconciler = reconciler("reconciler-1");
+            reconciler.reconcile();
+            reconciler.reconcile();
+            return reload(run);
+        }
+
+        private void upload(TestRun run, ArtifactStore.ArtifactType type, String fileName,
+                String body) {
+            RunnerShard shard = shards.findByRun(run.id()).get(0);
+            artifacts.uploadedByRunner(new ArtifactStore.ArtifactDescriptor(
+                    run.teamId(), run.id(), java.util.Optional.of(shard.id()),
+                    type, fileName, "text/plain"), body.getBytes(StandardCharsets.UTF_8));
+        }
+
+        private String manifestWithDigest(TestRun run, String digest) {
+            return """
+                    {"runId":"%s","engine":"jmeter","planDigest":"%s","exitCode":0}"""
+                    .formatted(run.id(), digest);
+        }
+
+        private String planDigestOf(TestRun run) {
+            return plans.find(run.executionPlanId().orElseThrow()).orElseThrow()
+                    .planDigest().value();
+        }
+
+        /**
+         * Without adoption a Kubernetes run's output is invisible: the content is in storage and the
+         * catalog knows nothing, so analysis finds no results and the run fails as if the runner had
+         * produced nothing at all.
+         */
+        @Test
+        @DisplayName("uploads are adopted into the catalog, so analysis can find them")
+        void adoptsUploadedArtifacts() {
+            TestRun run = runAwaitingAnalysis();
+            upload(run, ArtifactStore.ArtifactType.RUNNER_LOG, "jmeter.log", "started\nfinished\n");
+
+            assertThat(artifacts.artifactsFor(run.id()))
+                    .as("before analysis, the catalog has only what the control plane stored")
+                    .noneMatch(a -> a.objectKey().endsWith("jmeter.log"));
+
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(artifacts.artifactsFor(run.id()))
+                    .anyMatch(a -> a.objectKey().endsWith("jmeter.log"));
+        }
+
+        /** Reconciliation repeats. A second pass must not record a run's evidence twice. */
+        @Test
+        @DisplayName("adopting the same upload twice records it once")
+        void adoptionIsIdempotent() {
+            TestRun run = runAwaitingAnalysis();
+            upload(run, ArtifactStore.ArtifactType.RUNNER_LOG, "jmeter.log", "output");
+
+            reconciler("reconciler-1").reconcile();
+            long afterFirst = artifacts.artifactsFor(run.id()).size();
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(artifacts.artifactsFor(run.id())).hasSize((int) afterFirst);
+        }
+
+        /**
+         * A stale Job, a reused Job name, or a runner handed the wrong key would otherwise
+         * contribute real-looking measurements of a different test. The numbers would be genuine and
+         * the report would look ordinary, which is exactly what makes accepting them dangerous.
+         */
+        @Test
+        @DisplayName("results reporting a different plan digest are refused, not merged")
+        void refusesResultsFromAnotherPlan() {
+            TestRun run = runAwaitingAnalysis();
+            upload(run, ArtifactStore.ArtifactType.RUNNER_MANIFEST, "runner-manifest.json",
+                    manifestWithDigest(run, "sha256:" + "0".repeat(64)));
+
+            reconciler("reconciler-1").reconcile();
+
+            TestRun finished = reload(run);
+            assertThat(finished.state()).isEqualTo(RunState.FAILED);
+            assertThat(finished.failure().orElseThrow().code())
+                    .isEqualTo(RunFailureCode.PLAN_DIGEST_MISMATCH);
+        }
+
+        @Test
+        @DisplayName("results reporting this run's own plan digest are accepted")
+        void acceptsResultsFromTheRunsOwnPlan() {
+            TestRun run = runAwaitingAnalysis();
+            upload(run, ArtifactStore.ArtifactType.RUNNER_MANIFEST, "runner-manifest.json",
+                    manifestWithDigest(run, planDigestOf(run)));
+
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(reload(run).failure().map(f -> f.code()))
+                    .isNotEqualTo(java.util.Optional.of(RunFailureCode.PLAN_DIGEST_MISMATCH));
+        }
+
+        /**
+         * An older runner, or one whose upload was cut short, has said nothing rather than said
+         * something wrong. Treating silence as a mismatch would fail runs for a missing field.
+         */
+        @Test
+        @DisplayName("a manifest with no digest is tolerated rather than treated as a mismatch")
+        void manifestWithoutDigestIsTolerated() {
+            TestRun run = runAwaitingAnalysis();
+            upload(run, ArtifactStore.ArtifactType.RUNNER_MANIFEST, "runner-manifest.json",
+                    "{\"runId\":\"" + run.id() + "\",\"exitCode\":0}");
+
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(reload(run).failure().map(f -> f.code()))
+                    .isNotEqualTo(java.util.Optional.of(RunFailureCode.PLAN_DIGEST_MISMATCH));
+        }
+
+        @Test
+        @DisplayName("a digest is read out of a manifest whatever its whitespace")
+        void digestIsReadFromVariedFormatting() {
+            assertThat(RunWorkloadService.planDigestIn("{\"planDigest\":\"sha256:abc\"}"))
+                    .contains("sha256:abc");
+            assertThat(RunWorkloadService.planDigestIn("{ \"planDigest\" : \"sha256:abc\" }"))
+                    .contains("sha256:abc");
+            assertThat(RunWorkloadService.planDigestIn("{\"exitCode\":0}")).isEmpty();
+        }
+    }
+
     @Nested
     @DisplayName("execution that generates no load")
     class SyntheticExecution {

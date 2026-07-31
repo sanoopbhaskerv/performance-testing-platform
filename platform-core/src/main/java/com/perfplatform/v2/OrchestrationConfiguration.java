@@ -258,6 +258,19 @@ public class OrchestrationConfiguration {
                             + "cannot be provisioned at all.");
         }
 
+        // A runner fetches its plan and uploads its results over the network — it shares no
+        // filesystem with the control plane. Without object storage it has a key and nowhere to use
+        // it, so this is refused here rather than discovered by a Job that starts and cannot work.
+        OrchestrationProperties.Artifacts artifactSettings = properties.getArtifacts();
+        if (!"s3".equalsIgnoreCase(artifactSettings.getStore())) {
+            throw new IllegalStateException(
+                    "The Kubernetes execution provider requires object storage: a runner Pod cannot "
+                            + "reach the control plane's filesystem. Set "
+                            + "platform.orchestration.artifacts.store=s3.");
+        }
+        requireConfigured(artifactSettings.getBucket(), "platform.orchestration.artifacts.bucket",
+                "the bucket runners read plans from and write results to");
+
         RunnerCellSettings settings = new RunnerCellSettings(
                 cell.getNamespace(),
                 cell.getServiceAccount(),
@@ -266,7 +279,12 @@ public class OrchestrationConfiguration {
                 cell.getMemoryRequest(), cell.getMemoryLimit(),
                 cell.getWorkspaceSizeLimit(),
                 cell.getFinishedJobTtl(),
-                cell.getDeadlineGrace());
+                cell.getDeadlineGrace(),
+                new RunnerCellSettings.ArtifactStorage(
+                        artifactSettings.getBucket(),
+                        artifactSettings.getRegion(),
+                        artifactSettings.getEndpoint(),
+                        artifactSettings.isPathStyleAccess()));
 
         if (!settings.hasOnlyPinnedImages()) {
             throw new IllegalStateException("Runner images must be pinned, but these are not: "

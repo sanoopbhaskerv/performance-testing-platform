@@ -133,16 +133,29 @@ class ProductionSafetyGuardTest {
     @DisplayName("the Kubernetes execution provider")
     class KubernetesProvider {
 
-        private OrchestrationProperties kubernetesProperties() {
+        /**
+         * A cell that would start. Each test below breaks exactly one thing, so a failure names the
+         * guard that fired rather than whichever check happens to run first.
+         */
+        private OrchestrationProperties validCell() {
             OrchestrationProperties properties = new OrchestrationProperties();
             properties.setExecutionProvider("kubernetes");
+            properties.getRunnerCell().setNamespace("perf-runners");
+            properties.getRunnerCell().setServiceAccount("perf-runner");
+            properties.getRunnerCell().setImages(
+                    java.util.Map.of("jmeter", "registry.internal/jmeter-runner:5.6.3-1"));
+            properties.getArtifacts().setStore("s3");
+            properties.getArtifacts().setBucket("perf-artifacts");
             return properties;
         }
 
         @Test
         @DisplayName("refuses to start without a runner namespace")
         void requiresNamespace() {
-            assertThatThrownBy(() -> configurationFor(kubernetesProperties(), "production")
+            OrchestrationProperties properties = validCell();
+            properties.getRunnerCell().setNamespace("");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
                     .executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("runner-cell.namespace");
@@ -151,8 +164,8 @@ class ProductionSafetyGuardTest {
         @Test
         @DisplayName("refuses to start without a runner service account")
         void requiresServiceAccount() {
-            OrchestrationProperties properties = kubernetesProperties();
-            properties.getRunnerCell().setNamespace("perf-runners");
+            OrchestrationProperties properties = validCell();
+            properties.getRunnerCell().setServiceAccount("");
 
             assertThatThrownBy(() -> configurationFor(properties, "production")
                     .executionProvider(Clock.systemUTC(), null, null))
@@ -167,9 +180,8 @@ class ProductionSafetyGuardTest {
         @Test
         @DisplayName("refuses to start with no approved runner images")
         void requiresAnImageAllowlist() {
-            OrchestrationProperties properties = kubernetesProperties();
-            properties.getRunnerCell().setNamespace("perf-runners");
-            properties.getRunnerCell().setServiceAccount("perf-runner");
+            OrchestrationProperties properties = validCell();
+            properties.getRunnerCell().setImages(java.util.Map.of());
 
             assertThatThrownBy(() -> configurationFor(properties, "production")
                     .executionProvider(Clock.systemUTC(), null, null))
@@ -185,9 +197,7 @@ class ProductionSafetyGuardTest {
         @Test
         @DisplayName("refuses a runner image on a floating tag")
         void refusesFloatingImageTags() {
-            OrchestrationProperties properties = kubernetesProperties();
-            properties.getRunnerCell().setNamespace("perf-runners");
-            properties.getRunnerCell().setServiceAccount("perf-runner");
+            OrchestrationProperties properties = validCell();
             properties.getRunnerCell().setImages(
                     java.util.Map.of("jmeter", "registry.internal/jmeter-runner:latest"));
 
@@ -195,6 +205,23 @@ class ProductionSafetyGuardTest {
                     .executionProvider(Clock.systemUTC(), null, null))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("must be pinned");
+        }
+
+        /**
+         * A runner Pod shares no filesystem with the control plane. Without object storage it is
+         * handed an artifact key and has nowhere to use it, so the Job would start and fail — after
+         * consuming a queue slot, and reading like a platform fault rather than a deployment one.
+         */
+        @Test
+        @DisplayName("refuses to start when artifacts are only on a pod-local filesystem")
+        void requiresObjectStorage() {
+            OrchestrationProperties properties = validCell();
+            properties.getArtifacts().setStore("filesystem");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .executionProvider(Clock.systemUTC(), null, null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("cannot reach the control plane's filesystem");
         }
     }
 

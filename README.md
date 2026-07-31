@@ -264,9 +264,16 @@ Before trusting any capacity number, read
 [`docs/operations/runner-calibration.md`](docs/operations/runner-calibration.md): a throttled load
 generator reports its own latency rather than the system's, and that failure is silent.
 
-> **The runner image is not built by this repository yet.** `runnerCell.images` expects a
-> `jmeter-runner` image that reads its `PERF_*` environment, executes the plan and uploads its
-> artifacts. Until it exists, the Kubernetes provider will create Jobs that cannot start.
+The runner image lives in [`runner-images/jmeter-runner/`](runner-images/jmeter-runner/) — build it
+and add it to `runnerCell.images`:
+
+```bash
+docker build -t perfplatform/jmeter-runner:5.6.3-1 runner-images/jmeter-runner
+```
+
+> **Not yet run on a real cluster.** The image has executed a real plan against the demo service
+> under Docker, and the Job contract is tested against an in-process API server, but no Job has run
+> in Kubernetes. Try it on kind or minikube before a shared environment.
 
 ---
 

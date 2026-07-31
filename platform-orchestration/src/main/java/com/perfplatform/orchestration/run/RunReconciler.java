@@ -316,8 +316,19 @@ public final class RunReconciler {
             return;
         }
 
-        RunAnalyzer.Analysis analysis = workloads.analyze(
-                run, plan.get(), version.get(), shards.findByRun(run.id()));
+        RunAnalyzer.Analysis analysis;
+        try {
+            analysis = workloads.analyze(
+                    run, plan.get(), version.get(), shards.findByRun(run.id()));
+        } catch (RunWorkloadService.PlanDigestMismatchException e) {
+            // A terminal, non-retryable outcome with its own code. Results that describe a different
+            // plan are refused rather than merged: the numbers would be real and the report would
+            // look ordinary, which is precisely what makes accepting them dangerous.
+            fail(run, RunFailureCode.PLAN_DIGEST_MISMATCH,
+                    "A runner returned results for a different execution plan than this run "
+                            + "references, so they were refused.", now, report);
+            return;
+        }
 
         // Checked before anything else about the result, and checked at all even though the objectives
         // are already indeterminate. A run with no objectives has nothing to be indeterminate about

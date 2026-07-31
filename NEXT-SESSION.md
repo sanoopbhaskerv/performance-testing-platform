@@ -16,7 +16,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **626 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
+Expect **643 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
 `An error occurred while setting up the SSL connection`, that is a known flaky Testcontainers
 start — retry once before investigating. If any integration test reports `Skipped`, that is a
 false green: investigate, do not accept it.
@@ -31,8 +31,8 @@ cd platform-ui && npm run dev
 ```
 
 Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
-New test → **edit `metadata.team` to `local-dev` and `metadata.application` to `local-service`** →
-Save test → Run this. A run reaches a terminal state in ~30s (three 10s reconciliation passes).
+New test → the **Demo service** template is pre-selected and runs unedited → Save test → Run this.
+A run reaches a terminal state in ~30s (three 10s reconciliation passes).
 
 **It ends in `Failed` / `NO_LOAD_GENERATED`, and that is correct.** The default provider generates no
 load, so the run measured nothing, so no objective can pass. See `HANDOFF.md` §3b. Real load needs
@@ -48,30 +48,34 @@ Other traps, all real, all hit at least once:
   success. If a test fails with that message, `mvn clean verify` — it is stale bytecode, not a bug.
 - `platform-ui/src/App.css` is **imported by nothing** — `main.tsx` loads only `index.css`.
   Rules added to App.css silently do nothing.
-- The console's starter specification names team `alpha` / application `alpha-service`, which do not
-  exist in the shipped `config/teams`. Saving it unedited fails with `specification.team.unknown`.
+- A background `java -jar` **survives `TaskStop`**. The shell dies, the JVM does not, and the next
+  start fails with `Port 8080 was already in use` — while `curl` answers happily from the *stale*
+  jar. `lsof -ti:8080 | xargs kill -9` first, or you will verify the wrong build.
 
 ---
 
-## 2. Next: finish 1E's physical half, then Increment 2
+## 2. Next: prove it on a cluster, then Increment 2
 
-The control plane can create runner Jobs, but **nothing has ever run in one**. `HANDOFF.md` §6 has
-the detail:
+The runner image exists and **has run** — 7,969 requests against the demo service, plan fetched from
+MinIO, evidence uploaded (`HANDOFF.md` §3e). What it has not done is run *in Kubernetes*.
 
-1. **Build the JMeter runner image.** It reads `PERF_*` from its environment, fetches the plan by
-   `PERF_WORKLOAD_KEY`, runs JMeter, and uploads `results.jtl`, `jmeter.log` and a
-   `runner-manifest.json` echoing `PERF_PLAN_DIGEST`. Non-root, read-only root filesystem, writes
-   only under `PERF_WORKSPACE`. Include `ConcurrencyThreadGroup` so stages stop being stepwise.
-2. **Run it once on kind or minikube.** Increment 1E is verified against a fabric8 mock API server
-   and MinIO — that is the right way to test the contract, and it is not the same as having run.
-3. **Calibrate, then raise shard count above 1.** See `docs/operations/runner-calibration.md`.
+1. **Run it once on kind or minikube.** Everything so far is Docker against MinIO plus the fabric8
+   mock API server. That is the right way to test the contract and it is not the same as having run:
+   `fsGroup` on an `emptyDir`, image pull, RBAC and the projected service-account token are all
+   untested. Expect the first real Job to find something.
+2. **Calibrate, then raise shard count above 1.** `docs/operations/runner-calibration.md` has the
+   procedure. Dataset partitioning does not exist yet either, so multiple shards would replay
+   identical work — that has to come first.
+3. **Use `ConcurrencyThreadGroup`.** It is installed in the image but unused; the plan generator
+   still emits stepwise thread groups. This is a change to `JmeterWorkloadRenderer`.
 
 Then **Increment 2 — importers**: OpenAPI, Postman, HAR, cURL, manual. A scenario can already carry
 its own `method` and `path`; what it still cannot express is headers, query parameters and bodies.
 
 **Already delivered — do not rebuild these:** the report endpoint and UI, artifact download with
 per-request authorization and digest verification, persisted `run_metrics`, the synthetic-run
-marking, the Kubernetes execution provider, and the S3 artifact store. `HANDOFF.md` §3b–§3d.
+marking, the Kubernetes execution provider, the S3 artifact store, artifact adoption with plan-digest
+verification, and the JMeter runner image. `HANDOFF.md` §3b–§3e.
 
 ---
 

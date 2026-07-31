@@ -26,7 +26,8 @@ final class RunnerFixtures {
             "2Gi", "4Gi",
             "8Gi",
             Duration.ofHours(6),
-            Duration.ofMinutes(5));
+            Duration.ofMinutes(5),
+            new RunnerCellSettings.ArtifactStorage("perf-artifacts", "us-east-1", "", false));
 
     private RunnerFixtures() {
     }
@@ -36,7 +37,8 @@ final class RunnerFixtures {
                 SETTINGS.namespace(), SETTINGS.serviceAccount(), images,
                 SETTINGS.cpuRequest(), SETTINGS.cpuLimit(),
                 SETTINGS.memoryRequest(), SETTINGS.memoryLimit(),
-                SETTINGS.workspaceSizeLimit(), SETTINGS.finishedJobTtl(), SETTINGS.deadlineGrace());
+                SETTINGS.workspaceSizeLimit(), SETTINGS.finishedJobTtl(), SETTINGS.deadlineGrace(),
+                SETTINGS.artifacts());
     }
 
     static ProvisionRequest request() {

@@ -28,6 +28,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * The engine-facing half of a run: preparing what executes, and reducing what came back.
@@ -54,6 +58,15 @@ public final class RunWorkloadService {
      */
     public static final String SYNTHETIC_OBJECTIVE_DETAIL =
             "No load was generated, so nothing could be measured.";
+
+    /**
+     * Finds {@code "planDigest": "sha256:…"} in a runner manifest.
+     *
+     * <p>Tolerant of whitespace, because the manifest is written by a runner image that may not be
+     * this repository's, and strict about the value, because the value is what gates acceptance.
+     */
+    private static final Pattern PLAN_DIGEST =
+            Pattern.compile("\"planDigest\"\\s*:\\s*\"([^\"]+)\"");
 
     private final EngineRegistry engines;
     private final ArtifactStore artifacts;
@@ -148,6 +161,12 @@ public final class RunWorkloadService {
 
         ExecutionEngineProvider engine = engines.require(plan.engine());
 
+        // Adopt anything a remote runner uploaded before looking for results. A Kubernetes runner
+        // writes to object storage and cannot write to the database — it has no credentials for one
+        // and must never have any (a provider that could write run state could mark its own failures
+        // as successes). Without this step a Job's output would be invisible to analysis.
+        adoptUploadedArtifacts(run, plan);
+
         List<RunnerOutput.ShardResult> shardResults = new ArrayList<>();
         for (RunnerShard shard : shards) {
             resultDataFor(run.id(), shard).ifPresent(data ->
@@ -197,6 +216,112 @@ public final class RunWorkloadService {
                 workload.scenarios().forEach(scenario ->
                         labels.add(workload.name() + "/" + scenario.name())));
         return List.copyOf(labels);
+    }
+
+    /**
+     * Raised when a runner's output describes a different plan than the run references.
+     *
+     * <p>Its own type because merging such results would be worse than losing them: the numbers
+     * would be real, the report would look ordinary, and it would describe a test nobody approved.
+     */
+    public static class PlanDigestMismatchException extends RuntimeException {
+        public PlanDigestMismatchException(TestRunId runId, String expected, String reported) {
+            super("Run " + runId + " references plan digest " + expected
+                    + " but a runner reported results for " + reported
+                    + ". The results describe a different test and will not be accepted.");
+        }
+    }
+
+    /**
+     * Records artifacts a runner uploaded directly, and refuses any that describe another plan.
+     *
+     * <p>Two halves, and both matter.
+     *
+     * <p><b>Adoption.</b> The local providers store artifacts and record them in one step because
+     * they share a process with the control plane. A runner Pod does not: it uploads to object
+     * storage and has no database access at all, by design. Reconciliation therefore has to notice
+     * what appeared. Doing it here — immediately before results are read — means it happens exactly
+     * once per analysis and cannot be forgotten by a caller.
+     *
+     * <p><b>Verification.</b> Every runner echoes back the plan digest it was given, and it is
+     * compared against the run's own plan before anything is accepted (CLAUDE.md §15). A stale Job,
+     * a Job name reused across runs, or a runner handed the wrong key would otherwise contribute
+     * real-looking measurements of the wrong test.
+     *
+     * <p>Idempotent: {@code recordArtifact} deduplicates by object key, so a repeated pass over the
+     * same uploads is a no-op rather than a second set of evidence.
+     */
+    private void adoptUploadedArtifacts(TestRun run, ExecutionPlan plan) {
+        Set<String> known = results.artifactsFor(run.id()).stream()
+                .map(ArtifactReference::objectKey)
+                .collect(Collectors.toSet());
+
+        List<ArtifactReference> uploaded;
+        try {
+            uploaded = artifacts.listForRun(run.id());
+        } catch (RuntimeException e) {
+            // Storage being briefly unreadable must not fail the run. Analysis proceeds with what is
+            // already recorded, and reports fewer shards than expected — which makes every objective
+            // indeterminate rather than passing on partial data.
+            log.warn("Could not list uploaded artifacts for runId={}; analysing what is already "
+                    + "recorded", run.id(), e);
+            return;
+        }
+
+        int adopted = 0;
+        for (ArtifactReference reference : uploaded) {
+            if (known.contains(reference.objectKey())) {
+                continue;
+            }
+            results.recordArtifact(reference);
+            adopted++;
+        }
+
+        if (adopted > 0) {
+            log.info("Adopted {} runner-uploaded artifacts runId={} teamId={}",
+                    adopted, run.id(), run.teamId());
+        }
+
+        verifyPlanIdentity(run, plan);
+    }
+
+    /**
+     * Checks every runner manifest against the plan the run actually references.
+     *
+     * <p>A manifest that carries no digest is not treated as a mismatch — an older runner, or one
+     * whose upload was cut short, has said nothing rather than said something wrong. A manifest that
+     * carries a <em>different</em> digest is refused outright.
+     */
+    private void verifyPlanIdentity(TestRun run, ExecutionPlan plan) {
+        String expected = plan.planDigest().value();
+
+        for (ArtifactReference reference : results.artifactsFor(run.id())) {
+            if (reference.type() != ArtifactType.RUNNER_MANIFEST) {
+                continue;
+            }
+            Optional<String> reported = artifacts.read(reference)
+                    .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
+                    .flatMap(RunWorkloadService::planDigestIn);
+
+            if (reported.isPresent() && !expected.equals(reported.get())) {
+                log.error("Plan digest mismatch runId={} expected={} reported={} artifact={}",
+                        run.id(), expected, reported.get(), reference.objectKey());
+                throw new PlanDigestMismatchException(run.id(), expected, reported.get());
+            }
+        }
+    }
+
+    /**
+     * Reads {@code planDigest} out of a runner manifest.
+     *
+     * <p>Hand-parsed for the same reason the domain has no Jackson: this reads a file a runner wrote,
+     * and the only field that matters is one flat string. A full parse would fail on a manifest with
+     * an unexpected shape, turning "the digest could not be read" — which is tolerated — into a
+     * crash during analysis.
+     */
+    static Optional<String> planDigestIn(String manifestJson) {
+        Matcher matcher = PLAN_DIGEST.matcher(manifestJson);
+        return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
     }
 
     /** This shard's results content, if it produced any. */
