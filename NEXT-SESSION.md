@@ -2,8 +2,8 @@
 
 **Read `HANDOFF.md` first** (state, decisions, gotchas), then this. `CLAUDE.md` is the contract.
 
-Branch `feature/platform-v2-foundation`. Working tree clean. **Nothing is pushed** — pushing, tagging
-and opening a PR each need explicit authorization (CLAUDE.md §6).
+Branch `feature/platform-v2-foundation`. Working tree clean at `9fcefe1`. **Nothing is pushed** —
+pushing, tagging and opening a PR each need explicit authorization (CLAUDE.md §6).
 
 ---
 
@@ -16,10 +16,10 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **648 tests, 0 failures, 0 skipped**. If a PostgreSQL module fails wholesale with
-`An error occurred while setting up the SSL connection`, that is a known flaky Testcontainers
-start — retry once before investigating. If any integration test reports `Skipped`, that is a
-false green: investigate, do not accept it.
+Expect **684 tests, 0 failures, 0 skipped** across 11 modules. Docker must be running (Testcontainers
+uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
+setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
+reports `Skipped`, that is a false green: investigate, do not accept it.**
 
 ```bash
 # Run it (terminal 1)
@@ -32,54 +32,83 @@ cd platform-ui && npm run dev
 
 Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
 New test → the **Demo service** template is pre-selected and runs unedited → Save test → Run this.
-A run reaches a terminal state in ~30s (three 10s reconciliation passes).
 
 **It ends in `Failed` / `NO_LOAD_GENERATED`, and that is correct.** The default provider generates no
-load, so the run measured nothing, so no objective can pass. See `HANDOFF.md` §3b. Real load needs
-`brew install jmeter` and `--platform.orchestration.execution-provider=local-jmeter`.
+load, so the run measured nothing, so no objective can pass (`HANDOFF.md` §3b). For real load:
+`brew install jmeter`, start the demo service, and add
+`--platform.orchestration.execution-provider=local-jmeter`. Full guide in `README.md`.
 
-Other traps, all real, all hit at least once:
+For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
 
-- Bash working directory **persists between calls**. `cd` into `platform-ui` breaks later commands.
-  Always `cd` to the repo root or use absolute paths.
-- Single test across the reactor needs `-Dsurefire.failIfNoSpecifiedTests=false`.
+### Traps, all real, all hit at least once
+
+- Bash working directory **persists between calls**. `cd platform-ui` breaks every later command.
+  Always `cd` to the repo root or use absolute paths. This has bitten four times.
+- A background `java -jar` **survives `TaskStop`**. The shell dies, the JVM does not; the next start
+  fails with `Port 8080 was already in use` while `curl` answers happily from the *stale* jar.
+  `lsof -ti:8080 | xargs kill -9` first, or you will verify the wrong build. Same for vite on 5173.
 - An IDE language server can leave **Eclipse-compiled `.class` files** in `target/test-classes` that
   throw `java.lang.Error: Unresolved compilation problem` at runtime while `mvn test-compile` reports
-  success. If a test fails with that message, `mvn clean verify` — it is stale bytecode, not a bug.
+  success. `mvn clean verify` — it is stale bytecode, not a bug.
+- Single test across the reactor needs `-Dsurefire.failIfNoSpecifiedTests=false`.
 - `platform-ui/src/App.css` is **imported by nothing** — `main.tsx` loads only `index.css`.
-  Rules added to App.css silently do nothing.
-- A background `java -jar` **survives `TaskStop`**. The shell dies, the JVM does not, and the next
-  start fails with `Port 8080 was already in use` — while `curl` answers happily from the *stale*
-  jar. `lsof -ti:8080 | xargs kill -9` first, or you will verify the wrong build.
+- **UI lint reports 10 errors, 3 warnings, all pre-existing**, in `App.tsx` and the pre-1D parts of
+  `PerformanceConsole.tsx`. Verified by linting the committed files. Do not "fix" them as part of
+  something else; the count rose from 3 without code changing, because eslint's React rules began
+  analysing a file that always had them.
 
 ---
 
-## 2. Next: Increment 2 — importers
+## 2. Where I stopped, mid-Increment 2
 
-**Increment 1E is finished and proven.** A real Kubernetes Job has run a performance test end to end
-on kind: 7,932 requests, two objectives passed and one breached, results in a report. The procedure
-is [`docs/operations/local-kubernetes-run.md`](docs/operations/local-kubernetes-run.md) — repeat it
-after changing the runner image, the Job manifest or the artifact store. It found three real defects
-the first time (`HANDOFF.md` §3f), all presenting as *a run that measured nothing*.
+Increment 2 (CLAUDE.md §28) is large: five importers plus dataset partitioning, dry-run preflight,
+baseline comparisons and Jenkins integration. I split it. **Two parts are done and committed:**
 
-**Increment 2 — importers**: OpenAPI, Postman, HAR, cURL, manual. A scenario can already carry its
-own `method` and `path`, so an importer's job is to produce those plus **headers, query parameters
-and request bodies**, which the specification still cannot express at all. That is the gap between
-this platform and a genuinely useful test of a real API.
+- **2a — a specification can express a whole request** (`1b61d0e`). Headers, query parameters and
+  bodies, in the digest, with credential refusals. This was the gap; everything else builds on it.
+- **2b — the cURL importer** (`9fcefe1`). `SourceImporter` port, `platform-importers/importer-curl`,
+  and `POST /api/v2/imports/{sourceType}`.
 
-Smaller things still open, none blocking:
+**The immediate next step is 2c — the OpenAPI importer.** The scaffolding is all in place:
 
-- **Sharding is untested and unpartitioned.** Everything so far is one shard; multiple shards would
-  replay identical work. Dataset partitioning has to come before shard count rises above 1, and
+1. New module `platform-importers/importer-openapi`, modelled exactly on `importer-curl` — same pom
+   shape, `platform-domain` only, no Spring. Register it in the root `pom.xml` `<modules>` and
+   `<dependencyManagement>`, add it to `platform-core/pom.xml`, and add a `@Bean` beside
+   `curlImporter()` in `OrchestrationConfiguration`. The controller finds it through the port;
+   nothing enumerates importers.
+2. Add it to `ModuleDependencyRulesTest.importersAreIsolated()` — that test currently names
+   `importer-curl` explicitly and will not cover a new module until you add it.
+3. **It needs a YAML/JSON parser and `platform-domain` has none by design.** Jackson is already a
+   dependency of `platform-api`, not of the domain. Either put the module's parsing behind its own
+   Jackson dependency (fine — an importer is an adapter, and `ModuleDependencyRulesTest` does not
+   forbid `SERIALIZATION` for importers as written), or pass a parsed tree in. Decide deliberately.
+4. CLAUDE.md §23 is specific about OpenAPI: import operations, methods, paths, parameters and
+   schemas; **preserve `operationId`**; allow user mapping of examples to datasets; and
+   **do not invent valid business data silently.** A schema says a field is a string, not which
+   string. Inventing one produces a test that exercises validation-failure paths at scale and reports
+   them as latency — emit a finding and leave it for a person.
+
+Then the rest of Increment 2, in rough order of value: **HAR** (sanitize cookies, auth and sensitive
+query parameters; group into candidate journeys), **Postman** (flag scripts, never execute them),
+**dataset partitioning** (also unblocks sharding — see below), dry-run preflight, baseline
+comparisons, Jenkins shared library.
+
+### Smaller things still open
+
+- **Sharding is untested and unpartitioned.** Everything so far is `PERF_SHARD_COUNT=1`; multiple
+  shards would replay identical work. Dataset partitioning must land before shard count rises, and
   calibration before that (`docs/operations/runner-calibration.md`).
 - **`ConcurrencyThreadGroup` is in the runner image but unused** — the plan generator still emits
   stepwise thread groups. A change to `JmeterWorkloadRenderer`.
-- **Not run on EKS**, so IRSA specifically is unexercised; kind used a Secret instead.
+- **Not run on EKS**, so IRSA specifically is unexercised; the kind run used a credentials Secret.
+- **A UI path for importing does not exist.** The endpoint works; the console has no button.
 
-**Already delivered — do not rebuild these:** the report endpoint and UI, artifact download with
-per-request authorization and digest verification, persisted `run_metrics`, the synthetic-run
-marking, the Kubernetes execution provider, the S3 artifact store, artifact adoption with plan-digest
-verification, and the JMeter runner image. `HANDOFF.md` §3b–§3f.
+### Already delivered — do not rebuild
+
+The report endpoint and UI, artifact download with per-request authorization and digest verification,
+persisted `run_metrics`, synthetic-run marking, the Kubernetes execution provider, the S3 artifact
+store, artifact adoption with plan-digest verification, the JMeter runner image, the request model,
+and the cURL importer. `HANDOFF.md` §3b–§3g.
 
 ---
 
@@ -93,5 +122,8 @@ verification, and the JMeter runner image. `HANDOFF.md` §3b–§3f.
 - Pause and ask before: a new unapproved dependency, k6, a secret manager, an identity provider, a
   production S3 bucket, production or unrestricted targets, or real credentials.
 - **Never present a synthetic run's numbers as evidence of anything**, and never weaken the marking
-  that says so. The platform now enforces this in four places; each one is there because a report
-  travels further than its caveats.
+  that says so. The platform enforces this in four places; each is there because a report travels
+  further than its caveats.
+- **A specification never contains a credential value.** Headers, query parameters and bodies are all
+  checked, and importers strip what they find. If you add a field that can hold a string a consumer
+  authored, ask whether a secret can be written into it.

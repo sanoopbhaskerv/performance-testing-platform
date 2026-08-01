@@ -3,8 +3,9 @@
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 1E complete and **proven on a real Kubernetes cluster** — a Job has run a
-performance test end to end and its results reached a report. See §3d, §3e and §3f.
+**Last updated:** Increment 1E complete and proven on a real Kubernetes cluster (§3d–§3f).
+**Increment 2 is in progress**: the request model and the cURL importer are done (§3g); the OpenAPI
+importer is next. `NEXT-SESSION.md` §2 has the exact next step.
 
 ---
 
@@ -21,11 +22,12 @@ performance test end to end and its results reached a report. See §3d, §3e and
 | Synthetic marking and reporting | **Complete** `7438f29` | see §3b |
 | Manual requests + demo-service path | **Complete** `e57b38a` | see §3c |
 | 1E — Kubernetes provider and object storage | **Complete** `1556f43` | see §3d |
-| 1E — runner image, proven on kind | **Complete** this commit | see §3e, §3f |
+| 1E — runner image, proven on kind | **Complete** `cfdec46`, `7cbe93d` | see §3e, §3f |
 | 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
-| 2 onward | **Not started** | — |
+| 2 — request model + cURL importer | **In progress** `1b61d0e`, `9fcefe1` | see §3g |
+| 2 — OpenAPI, HAR, Postman, datasets | **Not started** | `NEXT-SESSION.md` §2 |
 
-**648 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
+**684 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -36,8 +38,8 @@ Further commits on `feature/platform-v2-foundation` land in it automatically.
 
 `v1-poc` tag exists on the remote at the baseline commit `9233d96` (created by the user).
 
-**Immediate next action:** none outstanding. **Increment 2** (importers) is next — do not start it
-without the user asking. Read §6.
+**Immediate next action:** the **OpenAPI importer** (Increment 2c). `NEXT-SESSION.md` §2 lists the
+four steps and the one real decision it needs. Everything it depends on is committed and green.
 
 ---
 
@@ -50,7 +52,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - **`JAVA_HOME` is not set in the shell profile.** Every `mvn` call must supply it or Maven fails immediately.
 - Only **JDK 21** is installed; the project targets **Java 17**. Building on 21 with `--release 17` is correct. **Do not change `java.version`** — CLAUDE.md §31 pause condition.
   - Consequence: **Java 21-only APIs do not compile.** `Math.clamp` was written and had to be reverted. Check the API's `@since` before using anything recent.
-- The Bash tool's **working directory persists between calls**. A `cd` into a module (or `platform-ui`) silently breaks later commands. Always `cd` to the repo root first or use absolute paths. This has now bitten three times.
+- The Bash tool's **working directory persists between calls**. A `cd` into a module (or `platform-ui`) silently breaks later commands. Always `cd` to the repo root first or use absolute paths. This has now bitten four times.
 - Single test across the reactor: **`-Dsurefire.failIfNoSpecifiedTests=false`** (not `-DfailIfNoSpecifiedTests=false`).
 - `-pl <module>` alone fails unless dependencies are installed in `~/.m2`; list them or run the full reactor.
 - **Docker 29 rejects API < 1.44.** Testcontainers' docker-java negotiates lower and then *silently skips* every integration test rather than failing. Fixed permanently via `docker.api.version` → surefire `api.version` in the root pom. **If integration tests ever report `Skipped`, that is a false green — investigate, do not accept it.**
@@ -361,6 +363,78 @@ plane.
 - **`ConcurrencyThreadGroup` is installed in the image but unused.** Using it is a change to
   `JmeterWorkloadRenderer`, which still emits stepwise thread groups.
 - **Not run on EKS**, so IRSA specifically is still unexercised; kind used a Secret instead.
+
+---
+
+## 3g. Increment 2 — in progress
+
+Increment 2 as CLAUDE.md §28 specifies it is large: five importers plus dataset partitioning, dry-run
+preflight, baseline comparisons and Jenkins integration. It was split. **Two parts are committed.**
+
+### 2a — a specification can express a whole request (`1b61d0e`)
+
+A scenario could name a method and a path and nothing else, so there was nowhere for an importer to
+put what it imported. Scenarios now carry `headers`, `query` and `body`.
+
+All three are in the canonical form and therefore the **digest**: two versions differing only in a
+header describe different requests. Maps canonicalize **sorted**, so reordering a header block is not
+a new test, and `.count` is written even when empty so "no headers" cannot collide with "headers
+absent".
+
+**Credentials cannot be smuggled in.** This is the part to be careful about, because a specification
+is stored, rendered, committed to Git and echoed back by the validate endpoint:
+
+- `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token` and
+  `X-Amz-Security-Token` are refused **by name**, whatever the value. That check cannot produce a
+  false negative.
+- A token-shaped value under any other header name is refused too
+  (`SecretValueDetector.looksLikeCredential`).
+- Query parameters get the same treatment for a sharper reason: a query string is written to every
+  access log between the runner and the target.
+- **No finding ever echoes the value it rejected**, and a test pins that.
+
+The shape check is deliberately **narrow**. It runs over ordinary values like `application/json`, and
+a validator that cried wolf would be worked around — at which point it protects nothing. A test pins
+that ordinary values pass untouched. Widening it is a mistake; add a name to the refused-header list
+instead.
+
+A body on `GET`/`HEAD` is refused: many servers and proxies drop it silently, so the test would
+measure a different request than the one written — a wrong answer rather than a failure.
+
+Rendering: query parameters are **encoded** (a value containing a space or `&` would otherwise change
+which parameters the target sees); a body is **raw**, not form-encoded, and carries a `Content-Type`
+header even when the scenario sets no headers at all, because JMeter sends none by default and most
+APIs reject a JSON body without one. Headers go in a **per-sampler** `HeaderManager`, so one
+scenario's headers do not reach another's requests.
+
+### 2b — the cURL importer (`9fcefe1`)
+
+`SourceImporter` is a domain port: a source in, draft scenarios **plus findings** out. Its javadoc
+records the four things an importer must never do — invent business data, import a credential,
+execute anything, or choose a target.
+
+`platform-importers/importer-curl` parses a command as arguments and **never hands it to a shell**
+(CLAUDE.md §23). `$(whoami); rm -rf /` survives as literal text, and a test pins that *absence of
+interpretation* — it arrives over HTTP from whoever pasted it. The tokenizer implements only the
+quoting a pasted command uses; no substitution, globbing, pipes or redirection.
+
+It strips and **reports**: Authorization, cookies, `-u`, `--oauth2-bearer`, client certs, token-shaped
+header values, credential-looking query parameters, and the host. Reporting matters as much as
+stripping — someone told "authentication was removed, declare it as a secret reference" does that;
+someone told nothing meets a wall of 401s at run time. `Content-Length`, `Host` and `Connection` are
+dropped as client-negotiated rather than authored.
+
+`POST /api/v2/imports/{sourceType}` **creates nothing** — no definition, no version, no run. Safe to
+call repeatedly while iterating, and an import cannot become an executable test without someone
+having looked at it. It returns scenarios rather than a whole specification, because a source cannot
+answer what the load model, objectives or journey mix should be, and placeholders would produce a
+test that looks ready and means nothing.
+
+### Not done
+
+The OpenAPI, HAR and Postman importers; dataset partitioning; dry-run preflight; baseline
+comparisons; Jenkins shared library. **No UI path for importing** — the endpoint works, the console
+has no button. `NEXT-SESSION.md` §2 has the exact next step and the one decision it needs.
 
 ---
 
