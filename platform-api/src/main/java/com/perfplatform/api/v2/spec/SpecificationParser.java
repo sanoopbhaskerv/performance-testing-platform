@@ -345,7 +345,9 @@ public final class SpecificationParser {
 
     private ScenarioSpec scenario(JsonNode node, String path, List<ValidationFinding> findings) {
         rejectUnknownFields(node, path,
-                Set.of("name", "weight", "operationId", "method", "path"), findings);
+                Set.of("name", "weight", "operationId", "method", "path",
+                        "headers", "query", "body"),
+                findings);
 
         Integer weight = integer(node, "weight", path + "/weight", findings);
         return new ScenarioSpec(
@@ -353,7 +355,68 @@ public final class SpecificationParser {
                 weight == null ? 0 : weight,
                 text(node, "operationId", path + "/operationId", findings),
                 text(node, "method", path + "/method", findings),
-                text(node, "path", path + "/path", findings));
+                text(node, "path", path + "/path", findings),
+                stringMap(node, "headers", path + "/headers", findings),
+                stringMap(node, "query", path + "/query", findings),
+                requestBody(node.get("body"), path + "/body", findings));
+    }
+
+    /**
+     * A body, or null when the scenario sends none.
+     *
+     * <p>A bare string is accepted as shorthand for {@code {content: "…"}}, because that is how
+     * almost every body is written and demanding the longer form for the common case is friction
+     * with no safety benefit.
+     */
+    private ScenarioSpec.RequestBody requestBody(JsonNode node, String path,
+            List<ValidationFinding> findings) {
+
+        if (isAbsent(node)) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return new ScenarioSpec.RequestBody(null, node.asText());
+        }
+        if (!node.isObject()) {
+            findings.add(typeError(path, "an object or a string"));
+            return null;
+        }
+
+        rejectUnknownFields(node, path, Set.of("contentType", "content"), findings);
+        return new ScenarioSpec.RequestBody(
+                text(node, "contentType", path + "/contentType", findings),
+                text(node, "content", path + "/content", findings));
+    }
+
+    /**
+     * A map of strings, preserving authoring order.
+     *
+     * <p>Values are read as text rather than coerced: a header written as {@code X-Retries: 3}
+     * is sent as the string {@code 3}, which is what a header is. Coercing it to a number and back
+     * would be a chance to change what gets sent.
+     */
+    private Map<String, String> stringMap(JsonNode parent, String field, String path,
+            List<ValidationFinding> findings) {
+
+        JsonNode node = parent.get(field);
+        if (isAbsent(node)) {
+            return Map.of();
+        }
+        if (!node.isObject()) {
+            findings.add(typeError(path, "an object"));
+            return Map.of();
+        }
+
+        Map<String, String> values = new LinkedHashMap<>();
+        node.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value.isObject() || value.isArray()) {
+                findings.add(typeError(path + "/" + entry.getKey(), "a single value"));
+            } else {
+                values.put(entry.getKey(), value.asText());
+            }
+        });
+        return values;
     }
 
     private ObjectiveSpec objective(JsonNode node, String path, List<ValidationFinding> findings) {

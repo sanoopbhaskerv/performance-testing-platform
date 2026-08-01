@@ -97,6 +97,56 @@ public final class SecretValueDetector {
         return value.length() > scheme.length() && !value.substring(scheme.length()).isBlank();
     }
 
+    /**
+     * Whether a value in a field that should <em>not</em> hold a credential looks like one.
+     *
+     * <p>The mirror of {@link #check}: that one asks "is this a proper reference?" of a field meant
+     * for credentials, this asks "is this a credential?" of a field meant for anything else — a
+     * header, a query parameter, a request body. Both exist because a specification is stored,
+     * rendered, committed to Git and echoed back by the validate endpoint, so a secret in one is
+     * disclosed rather than merely misplaced.
+     *
+     * <p>Deliberately narrow. This runs over ordinary values like {@code application/json} and
+     * {@code GBP}, so it matches only shapes that are recognisably credentials. Broad heuristics
+     * here would produce false positives on legitimate content, and a validator people learn to work
+     * around protects nothing.
+     */
+    public static boolean looksLikeCredential(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return LITERAL_SHAPES.stream().anyMatch(pattern -> pattern.matcher(trimmed).matches());
+    }
+
+    /**
+     * Header names that carry credentials by definition and are refused outright.
+     *
+     * <p>Refused by <em>name</em>, whatever the value: unlike the shape check, this cannot produce a
+     * false negative. Authentication belongs in {@code spec.authentication} as a reference the runner
+     * resolves at execution time — that is the whole point of the secret-reference model, and a
+     * header is a way around it.
+     */
+    private static final List<String> CREDENTIAL_HEADERS = List.of(
+            "authorization",
+            "proxy-authorization",
+            "cookie",
+            "set-cookie",
+            "x-api-key",
+            "x-auth-token",
+            "x-amz-security-token");
+
+    /** Whether a header carries credentials by definition, regardless of its value. */
+    public static boolean isCredentialHeader(String headerName) {
+        return headerName != null
+                && CREDENTIAL_HEADERS.contains(headerName.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /** Header names refused outright, for error messages and documentation. */
+    public static List<String> credentialHeaders() {
+        return CREDENTIAL_HEADERS;
+    }
+
     /** The reference schemes currently accepted, for error messages and documentation. */
     public static List<String> approvedSchemes() {
         return APPROVED_SCHEMES;

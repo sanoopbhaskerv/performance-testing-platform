@@ -182,17 +182,14 @@ final class JmeterWorkloadRenderer {
     private static void writeSampler(JmxWriter jmx, WorkloadSpec workload, ScenarioSpec scenario,
             TargetAddress target) {
 
+        boolean hasBody = scenario.hasBody();
+
         // Named {workload}/{scenario}, because that is the label JMeter writes into the results and
         // the platform reads back. Objectives are scoped by workload and by scenario, so both parts
         // have to be in the name for either kind of objective to be evaluable. V1 wrote neither.
         jmx.element("HTTPSamplerProxy", attributes("HttpTestSampleGui", "HTTPSamplerProxy",
                         workload.name() + "/" + scenario.name()))
-                .raw("""
-                        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" \
-                        guiclass="HTTPArgumentsPanel" testclass="Arguments">
-                        <collectionProp name="Arguments.arguments"/>
-                        </elementProp>
-                        """)
+                .raw(argumentsFor(scenario))
                 .stringProp("HTTPSampler.domain", target.host())
                 .stringProp("HTTPSampler.protocol", target.scheme())
                 .longProp("HTTPSampler.port", target.port())
@@ -202,6 +199,104 @@ final class JmeterWorkloadRenderer {
                 .stringProp("HTTPSampler.method", scenario.methodOrDefault())
                 .boolProp("HTTPSampler.follow_redirects", true)
                 .boolProp("HTTPSampler.use_keepalive", true)
+                // Tells JMeter the arguments collection is a raw body rather than form fields.
+                // Without it a JSON body is sent as an encoded form and the target sees nonsense.
+                .boolProp("HTTPSampler.postBodyRaw", hasBody);
+
+        // A body needs a HeaderManager even with no headers of its own, to carry its content type.
+        if (scenario.headers().isEmpty() && !hasBody) {
+            jmx.endLeaf();
+            return;
+        }
+
+        // A per-sampler HeaderManager, so one scenario's headers do not leak into another's. The
+        // plan-level manager carries the run correlation id and applies to everything.
+        jmx.endWithChildren();
+        writeScenarioHeaders(jmx, scenario);
+        jmx.endChildren();
+    }
+
+    /**
+     * The sampler's arguments: either a raw body, or the query parameters, or neither.
+     *
+     * <p>JMeter uses the same collection for both, which is why they are mutually exclusive here.
+     * A body and a query string together would need the query in the path instead — worth doing when
+     * something asks for it, and not worth guessing at now.
+     */
+    private static String argumentsFor(ScenarioSpec scenario) {
+        StringBuilder arguments = new StringBuilder(256);
+        arguments.append("<elementProp name=\"HTTPsampler.Arguments\" elementType=\"Arguments\" ")
+                .append("guiclass=\"HTTPArgumentsPanel\" testclass=\"Arguments\">\n")
+                .append("<collectionProp name=\"Arguments.arguments\">\n");
+
+        if (scenario.hasBody()) {
+            // A raw body is one unnamed argument whose value is the whole payload. `always_encode`
+            // must stay false or the payload is percent-encoded and the target receives gibberish.
+            arguments.append("<elementProp name=\"\" elementType=\"HTTPArgument\">\n")
+                    .append("<boolProp name=\"HTTPArgument.always_encode\">false</boolProp>\n")
+                    .append("<stringProp name=\"Argument.value\">")
+                    .append(JmxWriter.escape(scenario.body().content()))
+                    .append("</stringProp>\n")
+                    .append("<stringProp name=\"Argument.metadata\">=</stringProp>\n")
+                    .append("</elementProp>\n");
+        } else {
+            scenario.query().forEach((name, value) -> arguments
+                    .append("<elementProp name=\"").append(JmxWriter.escape(name))
+                    .append("\" elementType=\"HTTPArgument\">\n")
+                    // Encoded, because a query value may legitimately contain spaces or '&', and an
+                    // unencoded one would silently change which parameters the target sees.
+                    .append("<boolProp name=\"HTTPArgument.always_encode\">true</boolProp>\n")
+                    .append("<stringProp name=\"Argument.name\">").append(JmxWriter.escape(name))
+                    .append("</stringProp>\n")
+                    .append("<stringProp name=\"Argument.value\">").append(JmxWriter.escape(value))
+                    .append("</stringProp>\n")
+                    .append("<stringProp name=\"Argument.metadata\">=</stringProp>\n")
+                    .append("<boolProp name=\"HTTPArgument.use_equals\">true</boolProp>\n")
+                    .append("</elementProp>\n"));
+        }
+
+        return arguments.append("</collectionProp>\n</elementProp>\n").toString();
+    }
+
+    /**
+     * This scenario's own headers, plus the content type its body is sent as.
+     *
+     * <p>The content type is written here rather than left to JMeter's default, because the default
+     * is none: a JSON body sent without {@code Content-Type} is rejected by most APIs, and the test
+     * would measure the rejection rather than the endpoint.
+     *
+     * <p>A scenario that states its own {@code Content-Type} keeps it — the author was more specific
+     * than the default, and overriding them would be the tool second-guessing the test.
+     */
+    private static void writeScenarioHeaders(JmxWriter jmx, ScenarioSpec scenario) {
+        StringBuilder headers = new StringBuilder(256);
+        headers.append("<collectionProp name=\"HeaderManager.headers\">\n");
+
+        boolean declaresContentType = scenario.headers().keySet().stream()
+                .anyMatch(name -> "content-type".equalsIgnoreCase(name.trim()));
+
+        scenario.headers().forEach((name, value) -> headers
+                .append("<elementProp name=\"\" elementType=\"Header\">\n")
+                .append("<stringProp name=\"Header.name\">").append(JmxWriter.escape(name))
+                .append("</stringProp>\n")
+                .append("<stringProp name=\"Header.value\">").append(JmxWriter.escape(value))
+                .append("</stringProp>\n")
+                .append("</elementProp>\n"));
+
+        if (scenario.hasBody() && !declaresContentType) {
+            headers.append("<elementProp name=\"\" elementType=\"Header\">\n")
+                    .append("<stringProp name=\"Header.name\">Content-Type</stringProp>\n")
+                    .append("<stringProp name=\"Header.value\">")
+                    .append(JmxWriter.escape(scenario.body().contentTypeOrDefault()))
+                    .append("</stringProp>\n")
+                    .append("</elementProp>\n");
+        }
+
+        headers.append("</collectionProp>\n");
+
+        jmx.element("HeaderManager", attributes("HeaderPanel", "HeaderManager",
+                        scenario.name() + " headers"))
+                .raw(headers.toString())
                 .endLeaf();
     }
 

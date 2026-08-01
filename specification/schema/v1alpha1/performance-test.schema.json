@@ -284,6 +284,39 @@
           "type": "string",
           "pattern": "^/",
           "description": "Request path, relative to the base URL the platform resolves for this application. Never a full URL: where a run's traffic goes is decided by the team's registered targets, not by the specification."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Request headers. Never credentials: Authorization, Cookie, X-Api-Key and similar are refused outright, and any value shaped like a token is rejected. Authentication belongs in spec.authentication as a reference the runner resolves at execution time.",
+          "propertyNames": {
+            "not": {
+              "pattern": "^(?i)(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-amz-security-token)$"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Query parameters appended to the path. Never credentials: a query string is written to every access log between the runner and the target."
+        },
+        "body": {
+          "description": "The request body, for methods that carry one. A bare string is shorthand for {content: \"...\"}.",
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["content"],
+              "properties": {
+                "contentType": {
+                  "type": "string",
+                  "description": "Media type sent. Defaults to application/json, and is written as a Content-Type header so the target does not reject the request."
+                },
+                "content": { "type": "string" }
+              }
+            }
+          ]
         }
       },
       "anyOf": [

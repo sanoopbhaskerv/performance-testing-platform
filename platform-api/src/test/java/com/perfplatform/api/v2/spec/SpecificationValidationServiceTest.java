@@ -128,6 +128,160 @@ class SpecificationValidationServiceTest {
                     .containsAnyOf("spec.scenario.path.invalid", "spec.scenario.path.absolute");
         }
 
+        /**
+         * The whole point of the secret-reference model is that a credential never enters a
+         * document that is stored, rendered, committed to Git and echoed back by this endpoint.
+         * A header is the most obvious way around it, so the name is refused whatever the value —
+         * that check cannot produce a false negative.
+         */
+        @Test
+        @DisplayName("an Authorization header is refused whatever its value")
+        void authorizationHeaderIsRefused() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              path: /api/users
+                              headers:
+                                Authorization: "Bearer not-a-real-token"\
+                    """));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.header.credential");
+        }
+
+        @Test
+        @DisplayName("Cookie and X-Api-Key are refused too")
+        void otherCredentialHeadersAreRefused() {
+            for (String header : java.util.List.of("Cookie", "X-Api-Key", "Proxy-Authorization")) {
+                var outcome = service.validate(scenarioDocument("""
+                        weight: 100
+                                  path: /api/users
+                                  headers:
+                                    %s: something\
+                        """.formatted(header)));
+
+                assertThat(outcome.findings().errors())
+                        .as("header %s", header)
+                        .extracting(f -> f.code())
+                        .contains("spec.scenario.header.credential");
+            }
+        }
+
+        /** A token written under a name the platform does not recognise is still a token. */
+        @Test
+        @DisplayName("a credential-shaped value under an ordinary header name is refused")
+        void tokenShapedHeaderValueIsRefused() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              path: /api/users
+                              headers:
+                                X-Trace: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc"\
+                    """));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.header.inline-secret");
+        }
+
+        /**
+         * A finding is logged and returned over HTTP. One that quoted the credential would spread it
+         * further than the document did.
+         */
+        @Test
+        @DisplayName("a rejected header finding never echoes the value it rejected")
+        void findingNeverEchoesTheCredential() {
+            String credential = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.s3cr3t";
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              path: /api/users
+                              headers:
+                                X-Trace: "%s"\
+                    """.formatted(credential)));
+
+            assertThat(outcome.findings().findings())
+                    .allSatisfy(finding -> assertThat(finding.message() + finding.remediation())
+                            .doesNotContain(credential));
+        }
+
+        /**
+         * Sharper than the header case: a query string is recorded by every proxy, load balancer and
+         * access log between the runner and the target (CLAUDE.md §20).
+         */
+        @Test
+        @DisplayName("a credential in a query parameter is refused")
+        void credentialInQueryIsRefused() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              path: /api/users
+                              query:
+                                api_key: "AKIAIOSFODNN7EXAMPLE"\
+                    """));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.query.inline-secret");
+        }
+
+        /**
+         * The check runs over ordinary values, so it has to leave them alone. A validator that cried
+         * wolf on {@code application/json} would be worked around, and then it would protect nothing.
+         */
+        @Test
+        @DisplayName("ordinary headers and query values are left alone")
+        void ordinaryValuesAreNotFlagged() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              path: /api/users
+                              headers:
+                                Accept: application/json
+                                X-Correlation-Mode: passthrough
+                              query:
+                                page: "1"
+                                sort: name,asc\
+                    """));
+
+            assertThat(outcome.findings().errors())
+                    .as("errors: %s", outcome.findings().errors())
+                    .isEmpty();
+            assertThat(outcome.isValid()).isTrue();
+        }
+
+        /**
+         * Many servers and proxies drop a GET body silently, so the test would measure a different
+         * request than the one written — a wrong answer rather than a failure.
+         */
+        @Test
+        @DisplayName("a body on a GET is refused")
+        void bodyOnGetIsRefused() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              method: GET
+                              path: /api/users
+                              body: '{"filter":"all"}'\
+                    """));
+
+            assertThat(outcome.findings().errors())
+                    .extracting(f -> f.code())
+                    .contains("spec.scenario.body.notAllowed");
+        }
+
+        @Test
+        @DisplayName("a bare string body is accepted as shorthand")
+        void bareStringBodyIsShorthand() {
+            var outcome = service.validate(scenarioDocument("""
+                    weight: 100
+                              method: POST
+                              path: /api/payments
+                              body: '{"amount":100}'\
+                    """));
+
+            assertThat(outcome.findings().errors()).isEmpty();
+            var scenario = outcome.specification().orElseThrow()
+                    .spec().workloads().get(0).scenarios().get(0);
+            assertThat(scenario.body().content()).isEqualTo("{\"amount\":100}");
+            assertThat(scenario.body().contentTypeOrDefault()).isEqualTo("application/json");
+        }
+
         @Test
         @DisplayName("an unsupported HTTP method is refused rather than passed to the engine")
         void unsupportedMethodIsRefused() {

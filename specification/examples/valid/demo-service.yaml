@@ -50,6 +50,16 @@ spec:
           weight: 80
           method: GET
           path: /api/users
+          query:
+            # Appended to the path and encoded, so a value containing a space or an
+            # ampersand cannot silently change which parameters the target sees.
+            page: "1"
+            pageSize: "25"
+          headers:
+            # Ordinary headers only. Authorization, Cookie and the like are refused —
+            # authentication belongs in spec.authentication as a reference the runner
+            # resolves at execution time, so it never appears in this document.
+            Accept: application/json
 
         # The slow write path: 150-600ms, and fails about 5% of the time by design. This is what
         # makes the report interesting — and what makes the error-rate objective below breach.
@@ -57,6 +67,13 @@ spec:
           weight: 20
           method: POST
           path: /api/payments
+          body:
+            # Sent as a raw body with this Content-Type. Every virtual user submits the
+            # same payload for now; one row per iteration needs dataset partitioning,
+            # which is deliberately not faked with a placeholder here.
+            contentType: application/json
+            content: |
+              {"amount": 4999, "currency": "GBP", "method": "card"}
 
   objectives:
     # The demo service's payment path alone runs to ~600ms, so a 400ms ceiling across the whole

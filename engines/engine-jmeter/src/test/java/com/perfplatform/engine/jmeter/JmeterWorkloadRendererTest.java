@@ -227,6 +227,97 @@ class JmeterWorkloadRendererTest {
                     + JmeterFixtures.TARGET.host() + "</stringProp>");
         }
 
+        @Test
+        @DisplayName("query parameters are rendered as encoded arguments")
+        void queryParametersAreRendered() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "browse", 100, null, "GET", "/api/users",
+                            java.util.Map.of(),
+                            new java.util.LinkedHashMap<>(java.util.Map.of("page", "1")),
+                            null))));
+
+            assertThat(jmx).contains("<stringProp name=\"Argument.name\">page</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"Argument.value\">1</stringProp>");
+            // Encoded, because a value may legitimately contain a space or an ampersand, and an
+            // unencoded one would silently change which parameters the target sees.
+            assertThat(jmx).contains("<boolProp name=\"HTTPArgument.always_encode\">true</boolProp>");
+        }
+
+        @Test
+        @DisplayName("a body is sent raw, with the content type the scenario declares")
+        void bodyIsSentRaw() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "pay", 100, null, "POST", "/api/payments",
+                            java.util.Map.of(), java.util.Map.of(),
+                            new PerformanceTestSpecification.ScenarioSpec.RequestBody(
+                                    "application/json", "{\"amount\":100}")))));
+
+            // Raw, not form-encoded. Without this a JSON body is sent as an encoded form and the
+            // target receives nonsense.
+            assertThat(jmx).contains("<boolProp name=\"HTTPSampler.postBodyRaw\">true</boolProp>");
+            assertThat(jmx).contains("{&quot;amount&quot;:100}");
+            assertThat(jmx).contains("<boolProp name=\"HTTPArgument.always_encode\">false</boolProp>");
+        }
+
+        /**
+         * JMeter sends no {@code Content-Type} by default. A JSON body without one is rejected by
+         * most APIs, so the test would measure the rejection rather than the endpoint.
+         */
+        @Test
+        @DisplayName("a body gets a Content-Type header even when the scenario sets no headers")
+        void bodyCarriesItsContentType() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "pay", 100, null, "POST", "/api/payments",
+                            java.util.Map.of(), java.util.Map.of(),
+                            new PerformanceTestSpecification.ScenarioSpec.RequestBody(
+                                    null, "{}")))));
+
+            assertThat(jmx).contains("<stringProp name=\"Header.name\">Content-Type</stringProp>");
+            assertThat(jmx).contains("<stringProp name=\"Header.value\">application/json</stringProp>");
+        }
+
+        /** The author was more specific than the default; overriding them would second-guess the test. */
+        @Test
+        @DisplayName("a scenario's own Content-Type is not overridden by the default")
+        void explicitContentTypeWins() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "pay", 100, null, "POST", "/api/payments",
+                            java.util.Map.of("Content-Type", "application/vnd.api+json"),
+                            java.util.Map.of(),
+                            new PerformanceTestSpecification.ScenarioSpec.RequestBody(
+                                    "application/json", "{}")))));
+
+            assertThat(jmx).contains("application/vnd.api+json");
+            assertThat(countOf(jmx, "<stringProp name=\"Header.name\">Content-Type</stringProp>"))
+                    .isEqualTo(1);
+        }
+
+        /**
+         * A per-sampler HeaderManager, so one scenario's headers do not reach another's requests.
+         * A shared one would send a JSON content type on a scenario posting form data.
+         */
+        @Test
+        @DisplayName("headers belong to their own scenario, not to every request in the plan")
+        void headersAreScopedToTheirScenario() {
+            String jmx = renderDefault(withScenarios(java.util.List.of(
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "browse", 50, null, "GET", "/api/users",
+                            java.util.Map.of("Accept", "application/json"),
+                            java.util.Map.of(), null),
+                    new PerformanceTestSpecification.ScenarioSpec(
+                            "health", 50, null, "GET", "/health",
+                            java.util.Map.of(), java.util.Map.of(), null))));
+
+            // One scenario declares a header, the other declares none — so exactly one scenario-level
+            // HeaderManager, plus the plan-level one carrying the run correlation id.
+            assertThat(countOf(jmx, "testclass=\"HeaderManager\"")).isEqualTo(2);
+            assertThat(jmx).contains("browse headers");
+        }
+
         /**
          * The unimported case. Deliberately obvious rather than plausible: a plan that looked like it
          * was hitting a real endpoint when no importer had resolved one would be worse than a plan

@@ -455,6 +455,114 @@ public final class SemanticValidator {
                     "HTTP method '" + method + "' is not supported.",
                     "Supported methods are " + SUPPORTED_METHODS.stream().sorted().toList() + "."));
         }
+
+        validateHeaders(scenario, scenarioPath, findings);
+        validateQuery(scenario, scenarioPath, findings);
+        validateBody(scenario, scenarioPath, findings);
+    }
+
+    /**
+     * Headers must not carry credentials.
+     *
+     * <p>Two checks, and the first is the one that cannot be evaded. A header named
+     * {@code Authorization} is refused whatever its value, because there is no legitimate reason to
+     * write one into a specification — authentication belongs in {@code spec.authentication} as a
+     * reference the runner resolves at execution time. The second catches a token written under some
+     * other name, and is deliberately narrow: it runs over ordinary values like
+     * {@code application/json}, and a validator that cried wolf would be worked around.
+     *
+     * <p>Neither finding echoes the offending value. A specification is stored, rendered in the UI,
+     * committed to Git and returned by the validate endpoint — a finding quoting the secret would
+     * spread it further than the document did.
+     */
+    private static void validateHeaders(ScenarioSpec scenario, String scenarioPath,
+            List<ValidationFinding> findings) {
+
+        scenario.headers().forEach((name, value) -> {
+            String path = scenarioPath + "/headers/" + name;
+
+            if (isBlank(name)) {
+                findings.add(ValidationFinding.error("spec.scenario.header.name.missing",
+                        scenarioPath + "/headers", "A header name must not be blank.", null));
+                return;
+            }
+
+            if (SecretValueDetector.isCredentialHeader(name)) {
+                findings.add(ValidationFinding.error("spec.scenario.header.credential", path,
+                        "Header '" + name + "' carries credentials and cannot be set in a "
+                                + "specification.",
+                        "Declare the credential under spec.authentication as a secret reference. "
+                                + "The runner resolves it at execution time, so it never appears in "
+                                + "the document, the database, or a report."));
+                return;
+            }
+
+            if (SecretValueDetector.looksLikeCredential(value)) {
+                findings.add(ValidationFinding.error("spec.scenario.header.inline-secret", path,
+                        "Header '" + name + "' appears to contain a credential value.",
+                        "Specifications hold secret references, never secret values. Move it to "
+                                + "spec.authentication."));
+            }
+        });
+    }
+
+    /**
+     * Query parameters must not carry credentials either — and for a sharper reason than headers.
+     *
+     * <p>A query string is recorded by every proxy, load balancer and access log between the runner
+     * and the target, and lands in browser history and referrer headers besides. A credential in one
+     * is disclosed to systems nobody enumerated (CLAUDE.md §20).
+     */
+    private static void validateQuery(ScenarioSpec scenario, String scenarioPath,
+            List<ValidationFinding> findings) {
+
+        scenario.query().forEach((name, value) -> {
+            if (isBlank(name)) {
+                findings.add(ValidationFinding.error("spec.scenario.query.name.missing",
+                        scenarioPath + "/query", "A query parameter name must not be blank.", null));
+                return;
+            }
+            if (SecretValueDetector.looksLikeCredential(value)
+                    || SecretValueDetector.isCredentialHeader(name)) {
+                findings.add(ValidationFinding.error("spec.scenario.query.inline-secret",
+                        scenarioPath + "/query/" + name,
+                        "Query parameter '" + name + "' appears to contain a credential value.",
+                        "A query string is written to every access log between the runner and the "
+                                + "target. Declare the credential under spec.authentication."));
+            }
+        });
+    }
+
+    /**
+     * A body may not carry a credential either, and must accompany a method that can send one.
+     *
+     * <p>The method check is a warning, not an error: {@code DELETE} with a body is unusual but
+     * legal, and some APIs do it. A {@code GET} with a body is where it becomes a mistake worth
+     * blocking on — many servers and proxies silently drop it, so the test would measure a request
+     * the author did not write.
+     */
+    private static void validateBody(ScenarioSpec scenario, String scenarioPath,
+            List<ValidationFinding> findings) {
+
+        if (!scenario.hasBody()) {
+            return;
+        }
+
+        if ("GET".equals(scenario.methodOrDefault()) || "HEAD".equals(scenario.methodOrDefault())) {
+            findings.add(ValidationFinding.error("spec.scenario.body.notAllowed",
+                    scenarioPath + "/body",
+                    "A " + scenario.methodOrDefault() + " request cannot carry a body.",
+                    "Many servers and proxies drop it silently, so the test would measure a "
+                            + "different request than the one written. Use query parameters, or a "
+                            + "method that carries a body."));
+        }
+
+        if (SecretValueDetector.looksLikeCredential(scenario.body().content())) {
+            findings.add(ValidationFinding.error("spec.scenario.body.inline-secret",
+                    scenarioPath + "/body/content",
+                    "The request body appears to contain a credential value.",
+                    "Specifications hold secret references, never secret values."));
+        }
     }
 
     private static void validateBrowserWorkload(WorkloadSpec workload, String path,

@@ -195,10 +195,25 @@ public final class SpecificationCanonicalizer {
                 field(out, prefix + ".scenarios[" + s + "].weight", String.valueOf(scenario.weight()));
                 field(out, prefix + ".scenarios[" + s + "].operationId", scenario.operationId());
                 // Part of the digest, because they are part of what executes. Two versions that
-                // differ only in the path they call are different tests, and a digest that could not
-                // tell them apart would let results from one be accepted for the other.
+                // differ only in the path they call — or in a header, a query parameter or a body —
+                // are different tests, and a digest that could not tell them apart would let results
+                // from one be accepted for the other.
                 field(out, prefix + ".scenarios[" + s + "].method", scenario.method());
                 field(out, prefix + ".scenarios[" + s + "].path", scenario.path());
+
+                String scenarioPrefix = prefix + ".scenarios[" + s + "]";
+                // Sorted, so that two documents differing only in the order they list headers
+                // produce the same digest: they describe the same request.
+                canonicalMap(out, scenarioPrefix + ".headers", scenario.headers());
+                canonicalMap(out, scenarioPrefix + ".query", scenario.query());
+
+                var body = scenario.body();
+                if (body == null) {
+                    field(out, scenarioPrefix + ".body", null);
+                } else {
+                    field(out, scenarioPrefix + ".body.contentType", body.contentType());
+                    field(out, scenarioPrefix + ".body.content", body.content());
+                }
             }
 
             var startWhen = workload.startWhen();
@@ -246,6 +261,26 @@ public final class SpecificationCanonicalizer {
 
     private static void field(StringBuilder out, String key, String value) {
         out.append(key).append('=').append(value == null ? ABSENT : escape(value)).append('\n');
+    }
+
+    /**
+     * Writes a map in sorted order, with its size.
+     *
+     * <p>Sorted so that two documents listing the same headers in a different order canonicalize
+     * identically — they describe the same request, and a digest that disagreed would treat an
+     * editor reformatting a file as a new test.
+     *
+     * <p>The count is written even when the map is empty, so that "no headers" and "headers absent"
+     * cannot collide with a map whose single entry happened to canonicalize to nothing.
+     */
+    private static void canonicalMap(StringBuilder out, String prefix, Map<String, String> values) {
+        field(out, prefix + ".count", String.valueOf(values == null ? 0 : values.size()));
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : new TreeMap<>(values).entrySet()) {
+            field(out, prefix + "[" + escape(entry.getKey()) + "]", entry.getValue());
+        }
     }
 
     /**

@@ -236,23 +236,67 @@ public record PerformanceTestSpecification(
      * @param path        request path beginning with {@code /}, relative to the resolved target's
      *                    base URL. Never a full URL: a specification cannot choose its own host, and
      *                    accepting one here would be a way around that (CLAUDE.md §20)
+     * @param headers     request headers. <b>Never credentials</b> — {@code Authorization} and
+     *                    {@code Cookie} are refused outright, and any value shaped like a token is
+     *                    rejected. Authentication belongs in {@code spec.authentication} as a
+     *                    reference the runner resolves at execution time
+     * @param query       query parameters, appended to {@code path}. Also credential-checked: an API
+     *                    key in a query string ends up in every access log between here and the
+     *                    target
+     * @param body        the request body, for methods that carry one
      */
     public record ScenarioSpec(
             String name,
             int weight,
             String operationId,
             String method,
-            String path) {
+            String path,
+            Map<String, String> headers,
+            Map<String, String> query,
+            RequestBody body) {
+
+        /**
+         * A request body.
+         *
+         * <p>Inline content only for now. A body drawn from a dataset — one row per iteration, so a
+         * thousand users do not all submit the same order — needs the dataset partitioning that is
+         * still ahead, and is deliberately not faked with a placeholder here.
+         *
+         * @param contentType the media type sent, e.g. {@code application/json}
+         * @param content     the body itself
+         */
+        public record RequestBody(String contentType, String content) {
+
+            /** The media type to send, defaulting to JSON, which is what an API test almost always is. */
+            public String contentTypeOrDefault() {
+                return contentType == null || contentType.isBlank()
+                        ? "application/json" : contentType.trim();
+            }
+
+            public boolean isEmpty() {
+                return content == null || content.isBlank();
+            }
+        }
+
+        public ScenarioSpec {
+            headers = immutableMap(headers);
+            query = immutableMap(query);
+        }
 
         /**
          * A scenario that refers to an operation in an imported source.
          *
-         * <p>The other form — {@code method} and {@code path} stated directly — uses the canonical
-         * constructor. Both are first-class; this one exists because it is the shorter of the two and
-         * predates the manual form.
+         * <p>The other form — the request stated directly — uses the canonical constructor. Both are
+         * first-class; this one exists because it is the shorter of the two and predates the manual
+         * form.
          */
         public ScenarioSpec(String name, int weight, String operationId) {
-            this(name, weight, operationId, null, null);
+            this(name, weight, operationId, null, null, Map.of(), Map.of(), null);
+        }
+
+        /** A scenario stating a bare method and path, with no headers, query or body. */
+        public ScenarioSpec(String name, int weight, String operationId, String method, String path) {
+            this(name, weight, operationId, method, path, Map.of(), Map.of(), null);
         }
 
         /** Whether this scenario states its own request rather than referring to an imported one. */
@@ -263,6 +307,11 @@ public record PerformanceTestSpecification(
         /** The method to use, defaulting to {@code GET} when the scenario does not state one. */
         public String methodOrDefault() {
             return method == null || method.isBlank() ? "GET" : method.trim().toUpperCase(Locale.ROOT);
+        }
+
+        /** Whether this scenario sends a body. */
+        public boolean hasBody() {
+            return body != null && !body.isEmpty();
         }
     }
 
@@ -338,5 +387,19 @@ public record PerformanceTestSpecification(
 
     private static <T> List<T> immutable(List<T> values) {
         return values == null ? List.of() : List.copyOf(values);
+    }
+
+    /**
+     * An immutable copy that keeps its authoring order.
+     *
+     * <p>{@code Map.copyOf} returns an unordered map whose iteration order is randomized per JVM
+     * run, which would make a rendered plan's header order differ between two runs of the same
+     * immutable version. The digest is taken over a sorted form regardless, so ordering here is
+     * about the plan reading the way its author wrote it.
+     */
+    private static Map<String, String> immutableMap(Map<String, String> values) {
+        return values == null || values.isEmpty()
+                ? Map.of()
+                : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(values));
     }
 }
