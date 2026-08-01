@@ -169,6 +169,18 @@ public class OrchestrationConfiguration {
         return new EngineDispatchingPlanCompiler(engines);
     }
 
+    /**
+     * The cURL importer.
+     *
+     * <p>A bean per importer, discovered by the API through the {@code SourceImporter} port. Nothing
+     * enumerates them, so adding an importer is adding a bean — and an importer that is not deployed
+     * is refused by name rather than silently returning nothing.
+     */
+    @Bean
+    public com.perfplatform.domain.importer.SourceImporter curlImporter() {
+        return new com.perfplatform.importer.curl.CurlImporter();
+    }
+
     @Bean
     public RunAnalyzer runAnalyzer() {
         return new DefaultRunAnalyzer();

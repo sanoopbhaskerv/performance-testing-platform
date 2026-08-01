@@ -1,5 +1,6 @@
 package com.perfplatform.api.v2.error;
 
+import com.perfplatform.api.v2.SourceImportController;
 import com.perfplatform.api.v2.TestDefinitionController;
 import com.perfplatform.api.v2.security.CallerContextProvider;
 import com.perfplatform.domain.port.TestDefinitionRepository;
@@ -201,6 +202,23 @@ public class V2ProblemHandler {
         return problem(HttpStatus.NOT_FOUND, "run.notFound",
                 "No such test run.",
                 request, e);
+    }
+
+    /**
+     * A source type this deployment cannot read.
+     *
+     * <p>The response names what <em>is</em> available, because the alternative is a consumer
+     * guessing. Nothing is disclosed by doing so: which importers are deployed is not a secret, and
+     * an importer creates nothing.
+     */
+    @ExceptionHandler(SourceImportController.UnsupportedSourceException.class)
+    public ProblemDetail handleUnsupportedSource(
+            SourceImportController.UnsupportedSourceException e, HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_ENTITY, "import.source.unsupported",
+                e.getMessage(), request, e);
+        problem.setProperty("supported", e.supported());
+        return problem;
     }
 
     /**

@@ -177,6 +177,25 @@ class ModuleDependencyRulesTest {
     }
 
     /**
+     * An importer reads a document and returns a draft. Nothing else.
+     *
+     * <p>No Spring, so it is testable without a context. No persistence, because an importer creates
+     * nothing — the draft it returns is deliberately not stored until someone acts on it. No engine
+     * types, because what a source describes is a request, not a JMeter sampler; the same import must
+     * serve a browser engine later.
+     *
+     * <p>The rule this cannot express, and which matters most, is that an importer executes nothing:
+     * a cURL command is parsed, never run. That is asserted in the importer's own tests, where the
+     * absence of interpretation is observable.
+     */
+    @Test
+    @DisplayName("an importer depends on the domain only — no Spring, storage or engine types")
+    void importersAreIsolated() {
+        assertNoImports("platform-importers/importer-curl",
+                allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
+    }
+
+    /**
      * The one module permitted a Kubernetes client, and permitted nothing else.
      *
      * <p>It knows how to start, observe and stop a runner; it must not know what the runner does. No

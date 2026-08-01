@@ -41,7 +41,7 @@ public record ValidationResponse(
             String message,
             String remediation) {
 
-        static Finding from(ValidationFinding finding) {
+        public static Finding from(ValidationFinding finding) {
             return new Finding(
                     finding.code(),
                     finding.severity().name(),

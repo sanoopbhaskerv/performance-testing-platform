@@ -81,6 +81,7 @@
     <module>platform-api</module>
     <module>engines/engine-jmeter</module>
     <module>runners/runner-kubernetes</module>
+    <module>platform-importers/importer-curl</module>
     <module>platform-core</module>
   </modules>
 
@@ -132,6 +133,11 @@
       <dependency>
         <groupId>com.perfplatform</groupId>
         <artifactId>runner-kubernetes</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-curl</artifactId>
         <version>${project.version}</version>
       </dependency>
 

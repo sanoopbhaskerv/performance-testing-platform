@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>importer-curl</artifactId>
+  <packaging>jar</packaging>
+  <name>Importer — cURL</name>
+  <description>
+    Turns a cURL command into draft scenarios.
+
+    The lowest-friction way onto the platform: everyone has a cURL command, usually copied straight
+    out of browser dev tools, and it already contains the method, path, headers and body a test
+    needs.
+
+    It also carries credentials, which is why this module strips them and reports their absence
+    rather than importing them. Depends on platform-domain only, and executes nothing: the command
+    is parsed as arguments, never handed to a shell (CLAUDE.md §23).
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -55,6 +55,14 @@
       <groupId>com.perfplatform</groupId>
       <artifactId>runner-kubernetes</artifactId>
     </dependency>
+    <!--
+      Importers. Only the composition root knows the implementations; the API reaches every one of
+      them through the SourceImporter port, so adding an importer is adding a bean.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-curl</artifactId>
+    </dependency>
 
     <!-- Spring Boot starters -->
     <dependency>
