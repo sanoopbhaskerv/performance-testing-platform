@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>importer-openapi</artifactId>
+  <packaging>jar</packaging>
+  <name>Importer — OpenAPI / Swagger</name>
+  <description>
+    Turns an OpenAPI 3 or Swagger 2 document into draft scenarios.
+
+    The document a team already publishes is the one source that describes every operation an API
+    has, so it is the fastest way from "we have an API" to "we have a draft test". What it does not
+    describe is which of those operations matter, in what mix, or what data they need — so this
+    importer produces a draft plus findings and never a finished test.
+
+    It reads operations, methods, paths, parameters and request bodies, and preserves operationId
+    (CLAUDE.md §23). It uses example, default and enum values the document itself states, and where
+    a value is required and the document states none, it says so rather than inventing one: a made-up
+    identifier produces a test that exercises validation-failure paths at scale and reports them as
+    latency.
+
+    Depends on platform-domain, plus Jackson for reading the document. Jackson is deliberate: the
+    domain stays free of serialization types (a rule from Increment 1B), an importer is an adapter
+    and adapters may hold their format library, and Jackson — databind and the YAML dataformat — is
+    already a dependency of platform-api and platform-core, so nothing new enters the build.
+    Neither Spring, persistence, engine nor Kubernetes types are permitted here, and
+    ModuleDependencyRulesTest enforces that.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <!--
+      Reading the document, and nothing else. Jackson's YAML dataformat parses JSON too, so one
+      parser covers both serializations an OpenAPI document arrives in. It builds a data tree and
+      instantiates no application types, so a document cannot construct an object by being parsed.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

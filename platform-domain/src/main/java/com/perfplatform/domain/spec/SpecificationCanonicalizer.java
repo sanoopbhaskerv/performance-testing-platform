@@ -157,6 +157,12 @@ public final class SpecificationCanonicalizer {
             var source = dataset.source();
             field(out, prefix + ".source.type", source == null ? null : source.type());
             field(out, prefix + ".source.uri", source == null ? null : source.uri());
+            // In declaration order, not sorted: a scenario binds ${column} by name, but the order is
+            // the file's own and a test that expects a different one is a different test.
+            field(out, prefix + ".columns.count", String.valueOf(dataset.columns().size()));
+            for (int c = 0; c < dataset.columns().size(); c++) {
+                field(out, prefix + ".columns[" + c + "]", dataset.columns().get(c));
+            }
             field(out, prefix + ".partitionByShard", String.valueOf(dataset.partitionByShard()));
         }
     }

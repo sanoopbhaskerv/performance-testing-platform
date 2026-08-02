@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>importer-har</artifactId>
+  <packaging>jar</packaging>
+  <name>Importer — HAR</name>
+  <description>
+    Turns a browser HAR capture into draft scenarios grouped into candidate journeys.
+
+    A HAR is the only source that records what a real user actually did, in what order and how
+    often — which makes it the best starting point for a realistic traffic mix, and the most
+    dangerous document this platform accepts.
+
+    It is a verbatim recording of a live session. Every cookie in it is a live cookie, every
+    Authorization header a live token, and a sign-in request carries the password in plain text.
+    It also records every static asset, every third-party beacon and every failed request the page
+    made. So this importer removes far more than it keeps, and reports everything it removed:
+    the value of a HAR is what a person does with it after reviewing it, and a draft that quietly
+    smuggled a session into the platform would be worse than no draft.
+
+    Depends on platform-domain, plus Jackson for reading the capture — the same reasoning as
+    importer-openapi. No Spring, persistence, engine or Kubernetes types; ModuleDependencyRulesTest
+    enforces that.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <!--
+      Reading the capture. A HAR is JSON by definition, so unlike importer-openapi this needs
+      databind alone. It builds a data tree and instantiates no application types.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

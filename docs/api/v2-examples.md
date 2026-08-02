@@ -11,11 +11,19 @@
 ## Available today
 
 ```text
+POST /api/v2/imports/{sourceType}                    # curl | openapi | har | postman
 POST /api/v2/test-definitions/validate
+POST /api/v2/test-definitions
+GET  /api/v2/test-definitions
+GET  /api/v2/test-definitions/{definitionId}
+POST /api/v2/test-definitions/{definitionId}/versions
+GET  /api/v2/test-definitions/{definitionId}/versions
 POST /api/v2/test-runs
 GET  /api/v2/test-runs/{runId}
 GET  /api/v2/test-runs/{runId}/events
 POST /api/v2/test-runs/{runId}/cancel
+GET  /api/v2/test-runs/{runId}/report
+GET  /api/v2/test-runs/{runId}/artifacts
 ```
 
 Validates a specification. **Creates nothing and executes nothing** — safe to call from a pull
@@ -28,6 +36,123 @@ document in either form produces the same digest.
 Authentication is the existing `X-API-Key` header. (V1's known cross-team authorization gap
 applies here too until Increment 4 — see the register in
 [`../migration/baseline-report.md`](../migration/baseline-report.md).)
+
+---
+
+## Importing a source
+
+```text
+POST /api/v2/imports/{sourceType}      # curl | openapi | har | postman
+```
+
+**Creates nothing.** No definition, no version, no run — so it is safe to call repeatedly while
+iterating, and pasting the wrong file costs nothing. It returns draft *scenarios*, not a whole
+specification: a source cannot answer what the load model, objectives or journey mix should be, and
+placeholder values for them would produce a test that looks ready and means nothing.
+
+```bash
+curl -X POST http://localhost:8080/api/v2/imports/openapi \
+  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Content-Type: application/yaml" \
+  --data-binary @openapi.yaml
+```
+
+```json
+{
+  "sourceType": "openapi",
+  "scenarios": [
+    {
+      "name": "list-orders",
+      "weight": 34,
+      "operationId": "listOrders",
+      "method": "GET",
+      "path": "/v1/orders",
+      "headers": {},
+      "query": {"status": "open"},
+      "body": null
+    }
+  ],
+  "findings": [ /* the same Finding shape the validate endpoint returns */ ]
+}
+```
+
+**The findings are as much the answer as the scenarios.** An importer strips credentials and hosts,
+and it does not invent data — so what it *could not* import is what stands between the draft and a
+test that measures anything.
+
+`operationId` is preserved verbatim while `name` is its kebab-case form, because names reach
+artifact object keys and Kubernetes labels and must be short lowercase identifiers. `null` for
+sources with no such concept, such as cURL.
+
+### What an importer never does
+
+| | Why |
+|---|---|
+| Invent business data | A schema says a field is a string, not which string. A made-up value produces a test that exercises validation-failure paths at full load and reports them as latency. |
+| Import a credential | Sources are full of them. They are stripped and their removal reported, so it is replaced with a secret reference rather than discovered as a wall of 401s at run time. |
+| Execute anything | A cURL command is parsed as arguments, never handed to a shell. An external `$ref` in an OpenAPI document is not fetched. |
+| Choose a target | The host is reported and dropped; where traffic goes is resolved from the team's registered targets. A server URL's *path* prefix is kept, because that is part of the request rather than the address. |
+
+### OpenAPI findings worth knowing
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `import.openapi.path.parameter.unresolved` | ERROR | A `{placeholder}` was left in the path. Sent as it stands, every request 404s and the run reports the latency of an error path. |
+| `import.openapi.body.missing` | WARNING | The operation takes a body and the document states no example. None was generated from the schema. |
+| `import.openapi.value.missing` | WARNING | A required parameter has no example, default or enum value. |
+| `import.openapi.parameter.credential` | WARNING | A parameter named as authentication, or whose example was token-shaped. Never echoes the value. |
+| `import.openapi.security.declared` | WARNING | The document declares security. Declare it under `spec.authentication` as a secret reference. |
+| `import.openapi.ref.external` | WARNING | A `$ref` to another file or URL was not followed. Provide a bundled document. |
+| `import.openapi.values.fromDocument` | INFO | How many values came from the document. Valid shapes; not necessarily data that exists in your environment. |
+| `import.openapi.weights.equal` | INFO | Every operation got an equal weight. The document says nothing about traffic mix. |
+
+### HAR findings worth knowing
+
+A capture is a recording of a live session, so this importer removes far more than it keeps and
+every removal is reported.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `import.har.reviewRequired` | WARNING | Emitted on **every** import. What survives is what a real person did, against the environment they did it in. |
+| `import.har.body.credential` | WARNING | A body carrying a field named `password`, `clientSecret`, `token`… was refused whole. Names the field, never the value. |
+| `import.har.body.personalData` | WARNING | A body carrying `ssn`, `cardNumber`, `dateOfBirth`… A capture records a real customer. |
+| `import.har.thirdParty.dropped` | WARNING | Requests to other hosts. Every scenario goes to one registered target, so importing these would aim another service's paths at your application. |
+| `import.har.cookies.stripped` | WARNING | Cookies are a live session and expire besides. |
+| `import.har.header.credential` / `.session` | WARNING | `Authorization`, and CSRF/session headers — minted for one session, rejected on replay. |
+| `import.har.journeys.notOrdered` | WARNING | Scenarios are named after the page they came from, but **order and correlation are not preserved**: the platform runs scenarios independently in weighted proportion. |
+| `import.har.assets.dropped` | INFO | Scripts, stylesheets, images and fonts. |
+| `import.har.failures.dropped` | INFO | Requests that failed when captured. Replaying a known failure measures an error path. |
+| `import.har.duplicates.collapsed` | INFO | Repeats raised a scenario's weight rather than adding a scenario. |
+| `import.har.weights.observed` | INFO | Weights come from observed frequency — the one thing a recording knows that an API document does not. Still one session, not production traffic. |
+
+Also dropped without a finding, because sending them would be wrong rather than sensitive: HTTP/2
+pseudo-headers, browser negotiation headers (`User-Agent`, `sec-*`, `Accept-Encoding`), host-bearing
+headers (`Referer`, `Origin`), and **conditional headers** — replaying `If-None-Match` makes the
+target answer `304` without doing any work, and the run would report excellent latency for a service
+that did nothing.
+
+### Postman findings worth knowing
+
+Collection **v2.0 and v2.1** only. A v1 export is refused by name — re-export it from Postman.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `import.postman.path.unresolved` | ERROR | A `{{placeholder}}` or `:name` was left in the path. Sent as it stands, every request 404s. |
+| `import.postman.script.notExecuted` | WARNING | One per script, naming what it belongs to. **Scripts are never executed** (CLAUDE.md §23). |
+| `import.postman.scripts.summary` | WARNING | If a script performs the sign-in, the collection imports cleanly and every request still fails at run time. |
+| `import.postman.variable.credential` | WARNING | A collection variable holding a credential. An export ships its values, so these are live — rotate them if it has been shared. |
+| `import.postman.body.credential` / `.personalData` | WARNING | A saved request body keeps whatever value made it work. Refused whole; names the field, never the value. |
+| `import.postman.auth.declared` | WARNING | An `auth` block at collection, folder or request level. |
+| `import.postman.variable.unknown` | WARNING | A variable with no stated value — usually in a Postman *environment*, which exports separately. |
+| `import.postman.variable.dynamic` | WARNING | `{{$guid}}`, `{{$randomInt}}` … The platform does not evaluate them; a dataset is the equivalent. |
+| `import.postman.body.unsupported` | WARNING | form-data or file. A collection stores a path on the author's machine, not the contents. |
+| `import.postman.disabled.skipped` | INFO | Headers, parameters and fields switched off in Postman. |
+| `import.postman.weights.equal` | INFO | A collection says nothing about traffic mix; folder order is how someone organised their work. |
+
+Scenario names come from the author — folder path plus request name, kebab-cased — because a
+collection is the one source where somebody already wrote down what each request is *for*.
+
+A source type with no importer deployed is refused by name with `422`, listing the ones that are.
 
 ---
 
@@ -351,12 +476,11 @@ See [cancellation-and-recovery.md](../operations/cancellation-and-recovery.md).
 Not yet implemented. Listed so integrations can be designed against the intended shape.
 
 ```text
-POST   /api/v2/test-definitions                      # create a definition
-GET    /api/v2/test-definitions/{definitionId}
-POST   /api/v2/test-definitions/{definitionId}/versions
-GET    /api/v2/test-runs/{runId}/report
-GET    /api/v2/test-runs/{runId}/artifacts
+POST   /api/v2/imports/playwright                    # Increment 3
 ```
+
+Importers are added as beans and discovered through the `SourceImporter` port, so a source type
+with no importer deployed is refused by name (`422`) listing the ones that are.
 
 Definition endpoints are the first thing Increment 1D needs: without them a definition version can
 only be created through the storage layer, so the run endpoints above are not yet reachable end to

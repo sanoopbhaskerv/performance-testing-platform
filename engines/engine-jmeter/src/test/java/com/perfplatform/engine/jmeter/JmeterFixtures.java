@@ -6,6 +6,7 @@ import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.spec.LoadModelType;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.EnvironmentSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadModel;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
@@ -53,14 +54,31 @@ final class JmeterFixtures {
                         List.of(new ScenarioSpec("search-client", 100, "searchClient")))));
     }
 
+    /** A workload whose requests draw their values from a dataset. */
+    static PerformanceTestSpecification withDataset() {
+        return specification(
+                List.of(workload("api-load", List.of(new LoadStage(Duration.ofMinutes(5), 50)),
+                        List.of(new ScenarioSpec("open-proposal", 100, null, "GET",
+                                "/proposals/${proposalId}", Map.of(), Map.of("view", "${view}"),
+                                null)))),
+                List.of(new DatasetSpec("proposals",
+                        new DatasetSpec.DataSource("object-storage", "dataset://proposals"),
+                        List.of("proposalId", "view"), true)));
+    }
+
     static PerformanceTestSpecification specification(List<WorkloadSpec> workloads) {
+        return specification(workloads, List.of());
+    }
+
+    static PerformanceTestSpecification specification(List<WorkloadSpec> workloads,
+            List<DatasetSpec> datasets) {
         return new PerformanceTestSpecification(
                 PerformanceTestSpecification.SUPPORTED_API_VERSION,
                 PerformanceTestSpecification.SUPPORTED_KIND,
                 new SpecMetadata("proposal-baseline", "advice", "proposal", Map.of()),
                 new TestSpec(
                         new EnvironmentSpec("performance", "advice-perf", TargetClass.NON_PRODUCTION),
-                        List.of(), List.of(), List.of(),
+                        List.of(), List.of(), datasets,
                         workloads,
                         List.of(),
                         new ObservabilitySpec("dynatrace", null, null, List.of()),

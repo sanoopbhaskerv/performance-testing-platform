@@ -1,5 +1,6 @@
 package com.perfplatform.domain.validation;
 
+import com.perfplatform.domain.dataset.DatasetBinding;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
@@ -248,6 +249,20 @@ public final class SemanticValidator {
                         "Use object-storage for a stored dataset, or inline for values carried "
                                 + "in the specification."));
             }
+            if (dataset.columns().isEmpty()) {
+                findings.add(ValidationFinding.warning("spec.dataset.columns.undeclared",
+                        path + "/columns",
+                        "This dataset declares no columns, so nothing can check that the values "
+                                + "your journeys ask for exist in it.",
+                        "List the column names, e.g. columns: [orderId, sku]. They are compared "
+                                + "against the file's own header before the run starts."));
+            }
+            for (int c = 0; c < dataset.columns().size(); c++) {
+                if (isBlank(dataset.columns().get(c))) {
+                    findings.add(ValidationFinding.error("spec.dataset.column.blank",
+                            path + "/columns/" + c, "A column name must not be blank.", null));
+                }
+            }
             if (!dataset.partitionByShard()) {
                 findings.add(ValidationFinding.warning("spec.dataset.partition.disabled",
                         path + "/partitionByShard",
@@ -255,6 +270,67 @@ public final class SemanticValidator {
                         "If the run is sharded, every shard replays the same rows, which can "
                                 + "distort results and duplicate writes to the target."));
             }
+        }
+    }
+
+    /**
+     * Every column name the specification's datasets declare.
+     *
+     * <p>Pooled across datasets rather than tracked per dataset. A scenario says {@code ${orderId}}
+     * without naming which dataset it came from — that is the engine's binding model, where every
+     * dataset's columns share one variable namespace — so validating per dataset would enforce a
+     * distinction the execution does not make.
+     */
+    private static Set<String> declaredColumns(PerformanceTestSpecification spec) {
+        Set<String> columns = new HashSet<>();
+        spec.spec().datasets().forEach(dataset -> columns.addAll(dataset.columns()));
+        return columns;
+    }
+
+    /**
+     * Checks that every {@code ${column}} a scenario asks for is one a dataset supplies.
+     *
+     * <p>An error, not a warning, and for the reason that keeps recurring: an unresolved reference
+     * is not left empty, it is sent <em>literally</em>. {@code /orders/${orderId}} goes out with
+     * those characters in the path, every request 404s, and the run reports fast, healthy-looking
+     * latency for a target that did no work. A misspelled column name is an easy mistake and an
+     * expensive one, so it is caught here rather than discovered in a report.
+     *
+     * <p>When no dataset declares its columns at all, the references cannot be checked against
+     * anything and are reported as unverifiable instead — a warning, because the test may well be
+     * correct and the platform simply has not been told enough to say so.
+     */
+    private static void validateDatasetReferences(ScenarioSpec scenario, String scenarioPath,
+            Set<String> datasetColumns, List<ValidationFinding> findings) {
+
+        Set<String> referenced = DatasetBinding.referencesIn(scenario);
+        if (referenced.isEmpty()) {
+            return;
+        }
+
+        if (datasetColumns.isEmpty()) {
+            findings.add(ValidationFinding.warning("spec.scenario.dataset.unverifiable",
+                    scenarioPath,
+                    "This journey uses " + String.join(", ", referenced) + ", but no dataset "
+                            + "declares any columns, so nothing can confirm those values will be "
+                            + "supplied.",
+                    "Declare a dataset with a columns list. An unfilled reference is sent as "
+                            + "literal text, so the run would measure the target rejecting it."));
+            return;
+        }
+
+        List<String> unresolved = referenced.stream()
+                .filter(name -> !datasetColumns.contains(name))
+                .toList();
+
+        if (!unresolved.isEmpty()) {
+            findings.add(ValidationFinding.error("spec.scenario.dataset.unresolved",
+                    scenarioPath,
+                    "This journey uses " + String.join(", ", unresolved)
+                            + ", which no dataset supplies.",
+                    "Declared columns are " + datasetColumns.stream().sorted().toList()
+                            + ". An unfilled reference is sent as literal text, so every request "
+                            + "would fail and the run would report the latency of an error path."));
         }
     }
 
@@ -301,7 +377,7 @@ public final class SemanticValidator {
             }
 
             if (workload.type() == WorkloadType.PROTOCOL) {
-                validateProtocolWorkload(workload, path, findings);
+                validateProtocolWorkload(workload, path, declaredColumns(spec), findings);
             } else {
                 validateBrowserWorkload(workload, path, findings);
             }
@@ -311,7 +387,7 @@ public final class SemanticValidator {
     }
 
     private static void validateProtocolWorkload(WorkloadSpec workload, String path,
-            List<ValidationFinding> findings) {
+            Set<String> datasetColumns, List<ValidationFinding> findings) {
         if (workload.model() == null || workload.model().stages().isEmpty()) {
             findings.add(ValidationFinding.error("spec.workload.model.missing", path + "/model",
                     "A protocol workload requires a staged load model.",
@@ -348,7 +424,7 @@ public final class SemanticValidator {
             }
         }
 
-        validateScenarioWeights(workload, path, findings);
+        validateScenarioWeights(workload, path, datasetColumns, findings);
 
         if (workload.browserUsers() != null) {
             findings.add(ValidationFinding.warning("spec.workload.browserUsers.ignored",
@@ -359,7 +435,7 @@ public final class SemanticValidator {
     }
 
     private static void validateScenarioWeights(WorkloadSpec workload, String path,
-            List<ValidationFinding> findings) {
+            Set<String> datasetColumns, List<ValidationFinding> findings) {
         List<ScenarioSpec> scenarios = workload.scenarios();
         if (scenarios.isEmpty()) {
             return;
@@ -383,7 +459,7 @@ public final class SemanticValidator {
                         "A scenario weight must be greater than zero.",
                         "A zero weight means the scenario never runs; remove it instead."));
             }
-            validateScenarioRequest(scenario, scenarioPath, findings);
+            validateScenarioRequest(scenario, scenarioPath, datasetColumns, findings);
             total += scenario.weight();
         }
 
@@ -415,7 +491,7 @@ public final class SemanticValidator {
      * time where it would surface as a failed run.
      */
     private static void validateScenarioRequest(ScenarioSpec scenario, String scenarioPath,
-            List<ValidationFinding> findings) {
+            Set<String> datasetColumns, List<ValidationFinding> findings) {
 
         boolean hasPath = scenario.path() != null && !scenario.path().isBlank();
         boolean hasOperation = scenario.operationId() != null && !scenario.operationId().isBlank();
@@ -459,6 +535,7 @@ public final class SemanticValidator {
         validateHeaders(scenario, scenarioPath, findings);
         validateQuery(scenario, scenarioPath, findings);
         validateBody(scenario, scenarioPath, findings);
+        validateDatasetReferences(scenario, scenarioPath, datasetColumns, findings);
     }
 
     /**

@@ -181,6 +181,40 @@ public class OrchestrationConfiguration {
         return new com.perfplatform.importer.curl.CurlImporter();
     }
 
+    /**
+     * The OpenAPI / Swagger importer.
+     *
+     * <p>Registered exactly as the cURL one is. It holds Jackson, which the domain deliberately does
+     * not: an importer is an adapter, and reading a published document is the whole of its job.
+     */
+    @Bean
+    public com.perfplatform.domain.importer.SourceImporter openApiImporter() {
+        return new com.perfplatform.importer.openapi.OpenApiImporter();
+    }
+
+    /**
+     * The HAR importer.
+     *
+     * <p>The one whose findings matter most. A capture is a recording of a live session, so what it
+     * <em>refuses</em> — cookies, tokens, passwords, third-party hosts — is the greater part of what
+     * it does.
+     */
+    @Bean
+    public com.perfplatform.domain.importer.SourceImporter harImporter() {
+        return new com.perfplatform.importer.har.HarImporter();
+    }
+
+    /**
+     * The Postman importer.
+     *
+     * <p>The only source that carries executable code. It is flagged and never evaluated
+     * (CLAUDE.md §23): the control plane does not run code that arrived in a document.
+     */
+    @Bean
+    public com.perfplatform.domain.importer.SourceImporter postmanImporter() {
+        return new com.perfplatform.importer.postman.PostmanImporter();
+    }
+
     @Bean
     public RunAnalyzer runAnalyzer() {
         return new DefaultRunAnalyzer();

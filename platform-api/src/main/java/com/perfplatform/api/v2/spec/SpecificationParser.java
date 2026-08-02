@@ -255,7 +255,8 @@ public final class SpecificationParser {
     }
 
     private DatasetSpec dataset(JsonNode node, String path, List<ValidationFinding> findings) {
-        rejectUnknownFields(node, path, Set.of("name", "source", "partitionByShard"), findings);
+        rejectUnknownFields(node, path,
+                Set.of("name", "source", "columns", "partitionByShard"), findings);
 
         DatasetSpec.DataSource source = null;
         JsonNode sourceNode = node.get("source");
@@ -270,9 +271,20 @@ public final class SpecificationParser {
             }
         }
 
+        List<String> columns = new ArrayList<>();
+        JsonNode columnsNode = node.get("columns");
+        if (!isAbsent(columnsNode)) {
+            if (columnsNode.isArray()) {
+                columnsNode.forEach(item -> columns.add(item.asText()));
+            } else {
+                findings.add(typeError(path + "/columns", "an array"));
+            }
+        }
+
         return new DatasetSpec(
                 text(node, "name", path + "/name", findings),
                 source,
+                columns,
                 bool(node, "partitionByShard", path + "/partitionByShard", findings));
     }
 

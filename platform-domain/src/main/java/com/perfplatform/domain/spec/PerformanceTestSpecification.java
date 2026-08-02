@@ -130,10 +130,35 @@ public record PerformanceTestSpecification(
     }
 
     /**
+     * Data a workload draws on, so that every virtual user does not send the same request.
+     *
+     * <p>A scenario binds to a column by name — {@code path: /orders/${orderId}} — and each
+     * iteration takes the next row.
+     *
+     * @param columns          the column names this test expects the dataset to have. Declared here
+     *                         because validation is side-effect-free and has to work before any file
+     *                         is attached: it is what a scenario's {@code ${...}} references are
+     *                         checked against. The file's actual header is compared to this before a
+     *                         run, so a re-exported dataset cannot silently bind different values to
+     *                         the same names. Empty when the author has not said, in which case
+     *                         references can only be reported as unverifiable
      * @param partitionByShard when true, each shard receives a non-overlapping slice, so sharding
      *                         a run does not make every generator replay the same rows
      */
-    public record DatasetSpec(String name, DataSource source, boolean partitionByShard) {
+    public record DatasetSpec(
+            String name,
+            DataSource source,
+            List<String> columns,
+            boolean partitionByShard) {
+
+        public DatasetSpec {
+            columns = immutable(columns);
+        }
+
+        /** A dataset declared without columns, the form that predates column binding. */
+        public DatasetSpec(String name, DataSource source, boolean partitionByShard) {
+            this(name, source, List.of(), partitionByShard);
+        }
 
         public record DataSource(String type, String uri) {
         }

@@ -658,3 +658,113 @@
     border: 2px solid;
   }
 }
+
+/* ── Importing ────────────────────────────────────────────────────────────
+   The import panel sits inside the editor, because importing is a step in
+   describing a test rather than a destination of its own. Findings get more
+   room than the journeys do: what an importer removed is what stands between
+   a draft and a test that measures something. */
+
+.v2 .editor-import {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.v2 .import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.v2 .import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.v2 .import-head h3 {
+  margin: 0;
+}
+
+.v2 .import-panel textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e2e8f0;
+  resize: vertical;
+}
+
+.v2 .import-result h4,
+.v2 .import-findings h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.v2 .import-scenarios code {
+  font-size: 0.75rem;
+  color: #cbd5e1;
+  word-break: break-all;
+}
+
+.v2 .findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.v2 .finding {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  background: #111c33;
+  border-left: 3px solid #334155;
+}
+
+.v2 .finding p {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.v2 .finding code {
+  font-size: 0.72rem;
+}
+
+.v2 .tone-warn { color: #fbbf24; }
+
+/* Keeps a file input operable by keyboard and screen reader while the styled
+   button in front of it is what everyone else sees. `display: none` would take
+   it out of the accessibility tree entirely. */
+.v2 .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

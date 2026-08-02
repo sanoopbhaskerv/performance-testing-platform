@@ -79,7 +79,7 @@ public class SourceImportController {
             consumes = {MediaType.TEXT_PLAIN_VALUE, MediaType.APPLICATION_JSON_VALUE, "application/yaml"},
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ImportResponse importSource(
-            @Parameter(description = "One of: curl, openapi", required = true)
+            @Parameter(description = "One of: curl, openapi, har, postman", required = true)
             @PathVariable String sourceType,
             @RequestBody String document) {
 

@@ -30,11 +30,20 @@ public record ImportResponse(
         List<ImportedScenario> scenarios,
         List<ValidationResponse.Finding> findings) {
 
-    /** One draft scenario. Mirrors the specification's own shape, so it can be pasted straight in. */
+    /**
+     * One draft scenario. Mirrors the specification's own shape, so it can be pasted straight in.
+     *
+     * <p>{@code operationId} is carried separately from {@code name} because the two answer to
+     * different rules: a name is a short lowercase identifier that ends up in artifact object keys
+     * and Kubernetes labels, while an operationId is whatever the source document called the
+     * operation. CLAUDE.md §23 requires preserving it, and that is what lets a report be matched
+     * back to the operation in the document. Null for sources that have no such concept.
+     */
     @Schema(description = "A draft scenario, in the shape a specification uses")
     public record ImportedScenario(
             String name,
             int weight,
+            String operationId,
             String method,
             String path,
             Map<String, String> headers,
@@ -61,6 +70,7 @@ public record ImportResponse(
         return new ImportedScenario(
                 scenario.name(),
                 scenario.weight(),
+                scenario.operationId(),
                 scenario.methodOrDefault(),
                 scenario.path(),
                 scenario.headers(),

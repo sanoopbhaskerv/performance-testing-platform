@@ -2,6 +2,7 @@ package com.perfplatform.engine.jmeter;
 
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
@@ -37,12 +38,17 @@ import java.util.List;
  * document; scheme, host and port come from the target the platform resolved, so a specification
  * still cannot choose where its traffic goes.
  *
+ * <h2>Data</h2>
+ * A declared dataset becomes a plan-level {@code CSVDataSet}, and a scenario binds to a column with
+ * {@code ${name}} anywhere in its path, query, headers or body. Each shard reads its own
+ * non-overlapping partition, written beside the plan under {@link #partitionFileName}.
+ *
  * <h2>What this cannot do yet</h2>
- * A scenario that instead names an {@code operationId} refers to an imported source, and no importer
- * exists until Increment 2. Until then such samplers address {@code /{operationId}}, which exercises
- * the whole pipeline but does not reproduce a real request. Headers, query parameters and request
- * bodies are not yet expressible at all — also Increment 2. Both limits are visible in the generated
- * plan rather than papered over.
+ * A scenario that names only an {@code operationId} refers to an operation in an imported source
+ * without stating the request itself. Such samplers address {@code /{operationId}}, which exercises
+ * the whole pipeline but does not reproduce a real request — deliberately obvious rather than
+ * plausible. The importers produce scenarios that state their request directly, so this affects only
+ * hand-written documents.
  */
 final class JmeterWorkloadRenderer {
 
@@ -84,6 +90,7 @@ final class JmeterWorkloadRenderer {
         // from a request that carries no run identifier and cannot be attributed.
         writeHeaderManager(jmx, assignment);
         writeHttpDefaults(jmx, target);
+        writeDatasets(jmx, specification);
 
         for (WorkloadSpec workload : workloads) {
             writeWorkload(jmx, workload, assignment, target);
@@ -314,6 +321,56 @@ final class JmeterWorkloadRenderer {
                                 JmxWriter.escape(assignment.correlationHeader()),
                                 JmxWriter.escape(assignment.correlationValue())))
                 .endLeaf();
+    }
+
+    /**
+     * The name a shard's partition of a dataset is written under, in the runner's workspace.
+     *
+     * <p>A plain file name, resolved relative to the working directory JMeter is started in. The
+     * plan never contains an absolute path: a path that made sense on the control plane would be
+     * meaningless inside a runner Pod, which is exactly the V1 defect that made stored report paths
+     * useless.
+     */
+    static String partitionFileName(String datasetName) {
+        return datasetName + ".csv";
+    }
+
+    /**
+     * One {@code CSVDataSet} per declared dataset, at plan level.
+     *
+     * <p>Plan level rather than per thread group, so a column is bound the same way wherever it is
+     * referenced. {@code shareMode: all} matches that: every thread draws from one shared cursor, so
+     * a row is used once per shard rather than once per thread group. Rows are <em>not</em> recycled
+     * and a thread that runs out stops — the alternative is a test that quietly starts replaying the
+     * first row under load, which reads as excellent latency because the target begins answering
+     * from cache.
+     *
+     * <p>The header is read from the file rather than declared here, so the names a scenario binds
+     * to are the names the file actually carries. The specification's own {@code columns} list is
+     * what validation checks against, and the two are compared before the run starts.
+     */
+    private static void writeDatasets(JmxWriter jmx, PerformanceTestSpecification specification) {
+        List<DatasetSpec> datasets = specification.spec() == null
+                ? List.of() : specification.spec().datasets();
+
+        for (DatasetSpec dataset : datasets) {
+            if (dataset.name() == null || dataset.name().isBlank()) {
+                continue;
+            }
+            jmx.element("CSVDataSet", attributes("TestBeanGUI", "CSVDataSet",
+                            "Dataset " + dataset.name()))
+                    .stringProp("filename", partitionFileName(dataset.name()))
+                    .stringProp("fileEncoding", "UTF-8")
+                    // Empty: JMeter then takes the variable names from the file's first line.
+                    .stringProp("variableNames", "")
+                    .boolProp("ignoreFirstLine", true)
+                    .stringProp("delimiter", ",")
+                    .boolProp("quotedData", true)
+                    .boolProp("recycle", false)
+                    .boolProp("stopThread", true)
+                    .stringProp("shareMode", "shareMode.all")
+                    .endLeaf();
+        }
     }
 
     private static void writeHttpDefaults(JmxWriter jmx, TargetAddress target) {

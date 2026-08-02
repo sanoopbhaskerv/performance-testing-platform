@@ -214,6 +214,39 @@ export interface OperationMetrics {
   throughputPerSecond: number;
 }
 
+/** The sources this release can read. Matches the importers the server has deployed. */
+export type SourceType = 'curl' | 'openapi' | 'har' | 'postman';
+
+/**
+ * One draft scenario an importer produced.
+ *
+ * `operationId` is what the source called the operation and `name` is its identifier form, because
+ * a name reaches artifact object keys and Kubernetes labels. Null for sources with no such concept.
+ */
+export interface ImportedScenario {
+  name: string;
+  weight: number;
+  operationId: string | null;
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  body: { contentType: string; content: string } | null;
+}
+
+/**
+ * What an import produced.
+ *
+ * The findings are as much the answer as the scenarios. An importer strips credentials, drops hosts
+ * and refuses to invent data, and what it *could not* import is what stands between this draft and a
+ * test that measures something — so never render the scenarios without them.
+ */
+export interface ImportResponse {
+  sourceType: string;
+  scenarios: ImportedScenario[];
+  findings: ValidationFinding[];
+}
+
 /** RFC 7807 problem detail, which every V2 error uses. */
 export interface Problem {
   title: string;
@@ -267,6 +300,24 @@ export class V2Client {
         document,
         { headers: { ...this.headers, 'Content-Type': 'application/yaml' } },
       )
+      .then((r) => r.data);
+  }
+
+  /**
+   * Reads a source into draft scenarios.
+   *
+   * Creates nothing — no definition, no version, no run — which is what makes it safe to call
+   * repeatedly while someone iterates, and what keeps an import from becoming an executable test
+   * without a person having looked at it.
+   *
+   * Sent as `text/plain` whatever the source is: the server reads the body itself and a browser
+   * would otherwise attach a charset the endpoint does not accept.
+   */
+  importSource(sourceType: SourceType, document: string) {
+    return axios
+      .post<ImportResponse>(`/api/v2/imports/${sourceType}`, document, {
+        headers: { ...this.headers, 'Content-Type': 'text/plain' },
+      })
       .then((r) => r.data);
   }
 

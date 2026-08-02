@@ -184,6 +184,12 @@ class ModuleDependencyRulesTest {
      * types, because what a source describes is a request, not a JMeter sampler; the same import must
      * serve a browser engine later.
      *
+     * <p>{@code SERIALIZATION} is deliberately <em>not</em> forbidden, and importer-openapi holds
+     * Jackson because of it. Reading a published document is the whole of an importer's job, and a
+     * format library is what an adapter is for; the rule that matters — that the <em>domain</em>
+     * stays free of serialization types, so its shape is never dictated by a wire format — is
+     * asserted separately against platform-domain.
+     *
      * <p>The rule this cannot express, and which matters most, is that an importer executes nothing:
      * a cURL command is parsed, never run. That is asserted in the importer's own tests, where the
      * absence of interpretation is observable.
@@ -192,6 +198,12 @@ class ModuleDependencyRulesTest {
     @DisplayName("an importer depends on the domain only — no Spring, storage or engine types")
     void importersAreIsolated() {
         assertNoImports("platform-importers/importer-curl",
+                allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
+        assertNoImports("platform-importers/importer-openapi",
+                allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
+        assertNoImports("platform-importers/importer-har",
+                allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
+        assertNoImports("platform-importers/importer-postman",
                 allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, ENGINE_SPECIFIC, PLATFORM_CORE_V1));
     }
 

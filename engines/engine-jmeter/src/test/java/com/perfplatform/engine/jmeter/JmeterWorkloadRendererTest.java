@@ -465,6 +465,90 @@ class JmeterWorkloadRendererTest {
         }
     }
 
+    /**
+     * Datasets, which are what let a test send something other than one repeated request.
+     */
+    @Nested
+    @DisplayName("datasets")
+    class Datasets {
+
+        @Test
+        @DisplayName("each declared dataset becomes a CSVDataSet reading its shard's partition")
+        void rendersACsvDataSet() {
+            String jmx = renderDefault(JmeterFixtures.withDataset());
+
+            assertThat(jmx).contains("testclass=\"CSVDataSet\"");
+            assertThat(jmx).contains("<stringProp name=\"filename\">proposals.csv</stringProp>");
+        }
+
+        /**
+         * A relative name, resolved against the runner's working directory. An absolute path made
+         * on the control plane means nothing inside a runner Pod — the V1 defect that made stored
+         * report paths unopenable.
+         */
+        @Test
+        @DisplayName("the dataset is referenced by file name, never by an absolute path")
+        void referencesTheFileByNameOnly() {
+            String jmx = renderDefault(JmeterFixtures.withDataset());
+
+            assertThat(jmx).doesNotContain("<stringProp name=\"filename\">/");
+        }
+
+        /**
+         * Column names come from the file's own header. Declaring them here as well would be a
+         * second source of truth, and a re-exported file would bind values to the wrong names.
+         */
+        @Test
+        @DisplayName("variable names are taken from the file's header, not restated in the plan")
+        void takesColumnNamesFromTheFile() {
+            String jmx = renderDefault(JmeterFixtures.withDataset());
+
+            assertThat(jmx).contains("<stringProp name=\"variableNames\"></stringProp>");
+            assertThat(jmx).contains("<boolProp name=\"ignoreFirstLine\">true</boolProp>");
+        }
+
+        /**
+         * Recycling would restart the file under load, so the target begins answering the same
+         * requests from cache and the run reports excellent latency for work it stopped doing.
+         */
+        @Test
+        @DisplayName("rows are not recycled when a shard runs out")
+        void doesNotRecycleRows() {
+            String jmx = renderDefault(JmeterFixtures.withDataset());
+
+            assertThat(jmx).contains("<boolProp name=\"recycle\">false</boolProp>");
+            assertThat(jmx).contains("<boolProp name=\"stopThread\">true</boolProp>");
+        }
+
+        /** One shared cursor per shard, so a row is used once rather than once per thread group. */
+        @Test
+        @DisplayName("every thread group draws from one shared cursor")
+        void sharesOneCursor() {
+            assertThat(renderDefault(JmeterFixtures.withDataset()))
+                    .contains("<stringProp name=\"shareMode\">shareMode.all</stringProp>");
+        }
+
+        /**
+         * {@code ${name}} is JMeter's own variable syntax, so a bound value needs no rewriting.
+         * The reference must survive into the sampler exactly as written.
+         */
+        @Test
+        @DisplayName("a column reference reaches the request untouched")
+        void passesReferencesThrough() {
+            String jmx = renderDefault(JmeterFixtures.withDataset());
+
+            assertThat(jmx).contains("/proposals/${proposalId}");
+            assertThat(jmx).contains("${view}");
+        }
+
+        @Test
+        @DisplayName("a specification with no datasets renders no CSVDataSet at all")
+        void rendersNothingWithoutDatasets() {
+            assertThat(renderDefault(JmeterFixtures.twoStagesThreeScenarios()))
+                    .doesNotContain("CSVDataSet");
+        }
+    }
+
     private static int countOf(String haystack, String needle) {
         int count = 0;
         int at = haystack.indexOf(needle);

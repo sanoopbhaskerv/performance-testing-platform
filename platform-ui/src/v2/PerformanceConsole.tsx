@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Download,
   HelpCircle,
   Loader2,
   Play,
@@ -26,6 +27,7 @@ import type {
 } from './api';
 import { V2Client, describeError, isTerminal } from './api';
 import RunReport from './RunReport';
+import ImportPanel from './ImportPanel';
 import { objectiveLabel } from './labels';
 import './console.css';
 
@@ -273,6 +275,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
   const [document, setDocument] = useState(TEMPLATES[0].document);
   const [validation, setValidation] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -524,6 +527,36 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
                 </label>
               ))}
             </fieldset>
+
+            <div className="editor-import">
+              <button
+                className="btn btn-quiet"
+                onClick={() => setImportOpen((open) => !open)}
+                aria-expanded={importOpen}
+              >
+                <Download size={14} />
+                {importOpen ? 'Hide import' : 'Import journeys from a file or command'}
+              </button>
+              <span className="muted">
+                A cURL command, an OpenAPI document, a browser recording or a Postman collection.
+              </span>
+            </div>
+
+            {importOpen && (
+              <ImportPanel
+                client={client}
+                document={document}
+                onApply={(next) => {
+                  setDocument(next);
+                  setValidation(null);
+                  setNotice(
+                    'The imported journeys are in the test below. Read the findings, fill in ' +
+                      'anything the import could not, then save it.',
+                  );
+                }}
+                onClose={() => setImportOpen(false)}
+              />
+            )}
 
             <label htmlFor="spec">
               Describe the test. The same document works here, through the API and in Git.

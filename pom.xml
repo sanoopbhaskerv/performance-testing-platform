@@ -56,6 +56,16 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
+          <!--
+            Raised from the 3.1.2 managed by spring-boot-starter-parent 3.2.3. Up to and including
+            3.5.2, Surefire files a test class's own @Test methods into the report of the last
+            @Nested class it emitted, then prints "Tests run: 0" for the outer class. The tests do
+            run — the <testcase> entries keep the correct classname — but the console line reads as
+            lost coverage and was twice recorded in this repo as a defect that does not exist.
+            3.5.3 attributes each test to its own class. Test reporting only: the full reactor
+            produces the same 803 tests, 0 skipped, on both versions.
+          -->
+          <version>3.5.3</version>
           <configuration>
             <systemPropertyVariables>
               <api.version>${docker.api.version}</api.version>
@@ -82,6 +92,9 @@
     <module>engines/engine-jmeter</module>
     <module>runners/runner-kubernetes</module>
     <module>platform-importers/importer-curl</module>
+    <module>platform-importers/importer-openapi</module>
+    <module>platform-importers/importer-har</module>
+    <module>platform-importers/importer-postman</module>
     <module>platform-core</module>
   </modules>
 
@@ -138,6 +151,21 @@
       <dependency>
         <groupId>com.perfplatform</groupId>
         <artifactId>importer-curl</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-openapi</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-har</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-postman</artifactId>
         <version>${project.version}</version>
       </dependency>
 

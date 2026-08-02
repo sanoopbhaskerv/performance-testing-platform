@@ -63,6 +63,18 @@
       <groupId>com.perfplatform</groupId>
       <artifactId>importer-curl</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-openapi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-har</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-postman</artifactId>
+    </dependency>
 
     <!-- Spring Boot starters -->
     <dependency>
