@@ -255,6 +255,31 @@ class RunnerJobManifestTest {
         }
 
         /**
+         * A runner is told where its data is, never given the data. A Job manifest is readable by
+         * anyone with cluster access, appears in audit logs and gets pasted into tickets — and a
+         * dataset is the team's business data.
+         */
+        @Test
+        @DisplayName("dataset partitions travel as fileName=objectKey pairs, never as content")
+        void environmentCarriesDatasetKeys() {
+            String key = "teams/t/runs/r/shards/s/dataset-client-data.csv";
+            ProvisionRequest request = RunnerFixtures.requestWithDatasets(java.util.List.of(
+                    new com.perfplatform.domain.execution.DatasetDelivery("client-data.csv", key),
+                    new com.perfplatform.domain.execution.DatasetDelivery("skus.csv",
+                            "teams/t/runs/r/shards/s/dataset-skus.csv")));
+
+            assertThat(env(build(request)))
+                    .containsEntry("PERF_DATASETS", "client-data.csv=" + key
+                            + ",skus.csv=teams/t/runs/r/shards/s/dataset-skus.csv");
+        }
+
+        @Test
+        @DisplayName("a test with no dataset sets the variable empty rather than omitting it")
+        void datasetsAreEmptyWhenThereAreNone() {
+            assertThat(env(build(RunnerFixtures.request()))).containsEntry("PERF_DATASETS", "");
+        }
+
+        /**
          * A runner shares no filesystem with the control plane: it fetches its plan and uploads its
          * results over the network. Without these it holds a key and has nowhere to use it.
          */

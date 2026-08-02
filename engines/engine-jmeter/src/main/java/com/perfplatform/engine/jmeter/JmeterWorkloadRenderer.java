@@ -331,7 +331,7 @@ final class JmeterWorkloadRenderer {
      * meaningless inside a runner Pod, which is exactly the V1 defect that made stored report paths
      * useless.
      */
-    static String partitionFileName(String datasetName) {
+    public static String partitionFileName(String datasetName) {
         return datasetName + ".csv";
     }
 

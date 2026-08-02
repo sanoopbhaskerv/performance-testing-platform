@@ -118,4 +118,21 @@ public interface ExecutionEngineProvider {
      * the error rate, which is how V1 reported healthier results the more corrupt its output was.
      */
     SampleSet parse(RunnerOutput output);
+
+    /**
+     * The file name this engine expects a dataset's partition to be delivered under.
+     *
+     * <p>The control plane slices a dataset per shard and hands each partition to a provider as a
+     * key plus a file name; the engine's rendered workload refers to the same name. Those two are
+     * one contract, so the engine states it — a name decided in orchestration and a name written
+     * into the plan by a renderer would eventually differ, and the run would start with the file
+     * present under the wrong name and every {@code ${column}} sent as literal text.
+     *
+     * <p>The default is the plain {@code {name}.csv} that JMeter's {@code CSVDataSet} reads from the
+     * working directory. It must stay a plain file name: a name with a separator could place a file
+     * outside the runner's workspace.
+     */
+    default String datasetFileName(String datasetName) {
+        return datasetName + ".csv";
+    }
 }

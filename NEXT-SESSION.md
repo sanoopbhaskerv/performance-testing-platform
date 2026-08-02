@@ -36,7 +36,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **833 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
+Expect **898 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
@@ -75,28 +75,36 @@ For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole 
 **`ROADMAP.md` is the full list. Read §0 of it first — it says where to stop.**
 
 The short version: **the foundation is complete** (CLAUDE.md §32, with team authorization enforced
-against a development identity provider until Increment 4). There is **one loose thread**:
+against a development identity provider until Increment 4), and **the dataset loose thread is now
+closed** — Increment 2h uploaded, stored, verified and delivered them (`HANDOFF.md` §3m). A consumer
+can onboard an API from four kinds of source, give it real data, run it and read a report, without
+writing JMX.
 
-> **A dataset can be declared, bound to with `${column}` and validated — but not delivered.**
-> Uploading and storing the file is Increment 2h. A specification can reference `${orderId}`, pass
-> validation, and find no data at run time.
+**A good place to stop.** Everything left is a new chapter rather than an unfinished one:
+dry-run preflight, baseline comparisons, correlation and extraction, Playwright, enterprise
+identity, assisted authoring — all in `ROADMAP.md` §§2–5, each with a size and a reason. None is
+urgent, and none should be started because it is next in a list.
 
-**Recommended: do 2h, then stop.** One increment; it closes Increment 2 and turns the last
-half-built thing in the tree into a whole one. `ROADMAP.md` §1 has the four steps and the one real
-decision (the artifact port is run-scoped; a dataset outlives a run).
+**The one caveat to carry forward:** 2h changed the runner image's entrypoint (it now fetches
+dataset partitions), and that change has **not been run on a cluster**. The local-JMeter path is
+verified with real load. Before trusting the Kubernetes path with a dataset, re-run
+`docs/operations/local-kubernetes-run.md`.
 
-Everything else — dry-run preflight, baseline comparisons, correlation and extraction, Playwright,
-enterprise identity, assisted authoring — is in `ROADMAP.md` §§2–5, with a size and a reason. None of
-it is urgent, and none of it should be started because it is next in a list.
+### Datasets, in one paragraph
+
+`POST /api/v2/datasets?team=…&name=…` with the CSV as the body. It returns a
+`dataset://{name}/{version}` uri; put that in `spec.datasets[].source.uri` along with the columns
+the test expects, and bind to a column with `${column}` in a journey's path, query, headers or body.
+Versions are allocated, never chosen, and never overwritten. A column named as a credential is
+refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
 
 ### What is already done — do not rebuild
 
-Increments 0 through 2g. The canonical specification, durable run orchestration, the JMeter engine
+Increments 0 through 2h. The canonical specification, durable run orchestration, the JMeter engine
 behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact store, the runner
 image, report and artifact download, synthetic-run marking, **four source importers**, the console's
-import panel, and dataset binding and partitioning. `HANDOFF.md` §3–§3l is the account of each.
-
----
+import panel, dataset binding and partitioning, and dataset upload, storage and delivery.
+`HANDOFF.md` §3–§3m is the account of each.
 
 ## 3. Rules that do not bend
 

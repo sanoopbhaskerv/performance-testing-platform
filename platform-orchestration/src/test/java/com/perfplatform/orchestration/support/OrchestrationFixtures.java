@@ -278,6 +278,86 @@ public final class OrchestrationFixtures {
         }
     }
 
+    /**
+     * Dataset content and its record, in memory.
+     *
+     * <p>One class implementing both ports, as {@code InMemoryArtifacts} does, because a test that
+     * has to keep two fakes agreeing about which versions exist is a test about the fakes.
+     */
+    public static final class InMemoryDatasets
+            implements com.perfplatform.domain.port.DatasetStore,
+                       com.perfplatform.domain.port.DatasetCatalog {
+
+        private final Map<String, byte[]> content = new HashMap<>();
+        private final List<DatasetVersion> versions = new ArrayList<>();
+
+        @Override
+        public StoredContent store(com.perfplatform.domain.identity.TeamId teamId,
+                com.perfplatform.domain.dataset.DatasetUri uri, byte[] body) {
+            String key = "teams/%s/datasets/%s/%d/data.csv"
+                    .formatted(teamId.value(), uri.name(), uri.version());
+            content.put(key, body == null ? new byte[0] : body);
+            return new StoredContent(key, "sha256:test", body == null ? 0 : body.length);
+        }
+
+        @Override
+        public Optional<byte[]> read(String objectKey) {
+            return Optional.ofNullable(content.get(objectKey));
+        }
+
+        @Override
+        public DatasetVersion register(DatasetVersion version) {
+            if (find(version.teamId(), version.name(), version.version()).isPresent()) {
+                throw new DatasetVersionExistsException(version.uri());
+            }
+            versions.add(version);
+            return version;
+        }
+
+        @Override
+        public Optional<DatasetVersion> find(com.perfplatform.domain.identity.TeamId teamId,
+                String name, int version) {
+            return versions.stream()
+                    .filter(stored -> stored.teamId().equals(teamId)
+                            && stored.name().equals(name)
+                            && stored.version() == version)
+                    .findFirst();
+        }
+
+        @Override
+        public List<DatasetVersion> listForTeam(com.perfplatform.domain.identity.TeamId teamId) {
+            return versions.stream().filter(stored -> stored.teamId().equals(teamId)).toList();
+        }
+
+        @Override
+        public int latestVersion(com.perfplatform.domain.identity.TeamId teamId, String name) {
+            return versions.stream()
+                    .filter(stored -> stored.teamId().equals(teamId) && stored.name().equals(name))
+                    .mapToInt(DatasetVersion::version)
+                    .max()
+                    .orElse(0);
+        }
+
+        /** Uploads a dataset the way the upload use case would, so a run can resolve it. */
+        public DatasetVersion given(com.perfplatform.domain.identity.TeamId teamId, String name,
+                int version, String csv) {
+
+            com.perfplatform.domain.dataset.DatasetUri uri =
+                    com.perfplatform.domain.dataset.DatasetUri.of(name, version);
+            StoredContent stored = store(teamId, uri, csv.getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8));
+
+            return register(new DatasetVersion(
+                    com.perfplatform.domain.identity.DatasetId.generate(), teamId, uri,
+                    stored.objectKey(), stored.digest(),
+                    com.perfplatform.domain.dataset.DatasetPartitioner.columnsOf(csv),
+                    com.perfplatform.domain.dataset.DatasetPartitioner.partition(csv, 1)
+                            .get(0).rows().size(),
+                    stored.sizeBytes(), "fixture",
+                    java.time.Instant.parse("2026-07-30T10:00:00Z")));
+        }
+    }
+
     /** A resolver that always returns the same permitted address. */
     public static TargetResolver fixedTarget() {
         return (teamId, applicationName, environment) ->

@@ -157,6 +157,19 @@ public final class JmeterEngineProvider implements ExecutionEngineProvider {
         return JmeterWorkloadRenderer.render(specification, plan, assignment, target);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Delegates to the renderer, which is the thing that writes the name into the plan. The
+     * alternative — orchestration deciding a name and the renderer writing another — is a run whose
+     * data file is present under a name JMeter never looks for, and every {@code ${column}} sent as
+     * literal text.
+     */
+    @Override
+    public String datasetFileName(String datasetName) {
+        return JmeterWorkloadRenderer.partitionFileName(datasetName);
+    }
+
     @Override
     public SampleSet parse(RunnerOutput output) {
         SampleSet combined = SampleSet.empty();

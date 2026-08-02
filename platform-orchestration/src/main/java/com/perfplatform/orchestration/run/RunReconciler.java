@@ -248,21 +248,23 @@ public final class RunReconciler {
                 continue;
             }
 
-            // Rendered and stored before the runner is asked to start, so the file that executed is
-            // recoverable whatever happens to the runner afterwards.
-            ArtifactReference workload;
+            // Rendered, sliced and stored before the runner is asked to start, so both what
+            // executed and what it sent are recoverable whatever happens to the runner afterwards.
+            RunWorkloadService.PreparedShard prepared;
             try {
-                workload = workloads.prepareShard(withPlan, plan, version, shard);
-            } catch (RunWorkloadService.TargetUnresolvableException e) {
-                // Not transient. A target that is not registered does not become registered by
-                // retrying, and a run that sat in PROVISIONING forever would hold a capacity slot
-                // while telling the consumer nothing. The message is the actionable part.
+                prepared = workloads.prepareShard(withPlan, plan, version, shard);
+            } catch (RunWorkloadService.TargetUnresolvableException
+                    | RunWorkloadService.DatasetUnavailableException e) {
+                // Neither is transient. A target that is not registered does not become registered
+                // by retrying, and a dataset that does not have the declared columns will not grow
+                // them — and a run that sat in PROVISIONING forever would hold a capacity slot while
+                // telling the consumer nothing. The message is the actionable part.
                 fail(withPlan, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
                 return;
             }
 
             ExecutionProvider.ProvisioningResult result = provider.provision(
-                    provisionRequest(withPlan, plan, shard, workload.objectKey(),
+                    provisionRequest(withPlan, plan, shard, prepared,
                             RunWorkloadService.operationLabels(version.specification())));
 
             if (!result.isAccepted()) {
@@ -387,7 +389,7 @@ public final class RunReconciler {
     }
 
     private ProvisionRequest provisionRequest(TestRun run, ExecutionPlan plan, RunnerShard shard,
-            String workloadKey, List<String> operationLabels) {
+            RunWorkloadService.PreparedShard prepared, List<String> operationLabels) {
         return new ProvisionRequest(
                 run.id(),
                 run.teamId(),
@@ -397,8 +399,9 @@ public final class RunReconciler {
                 plan.engine(),
                 plan.id(),
                 plan.planDigest(),
-                workloadKey,
+                prepared.workload().objectKey(),
                 operationLabels,
+                prepared.datasets(),
                 deadlineFor(plan));
     }
 

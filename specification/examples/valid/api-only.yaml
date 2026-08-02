@@ -35,7 +35,7 @@ spec:
     - name: client-data
       source:
         type: object-storage
-        uri: artifact://datasets/proposal-clients.csv
+        uri: dataset://proposal-clients/1
       # Each shard gets a non-overlapping slice, so sharding does not make every
       # generator replay the same rows.
       partitionByShard: true

@@ -1,11 +1,17 @@
 package com.perfplatform.orchestration.run;
 
+import com.perfplatform.domain.dataset.DatasetPartitioner;
+import com.perfplatform.domain.dataset.DatasetUri;
+import com.perfplatform.domain.execution.DatasetDelivery;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactDescriptor;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactReference;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactType;
+import com.perfplatform.domain.port.DatasetCatalog;
+import com.perfplatform.domain.port.DatasetCatalog.DatasetVersion;
+import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
@@ -14,6 +20,7 @@ import com.perfplatform.domain.results.SampleSet;
 import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.target.TargetAddress;
 import com.perfplatform.engine.spi.ExecutionEngineProvider;
 import com.perfplatform.engine.spi.RenderedWorkload;
@@ -73,14 +80,19 @@ public final class RunWorkloadService {
     private final ResultCatalog results;
     private final RunAnalyzer analyzer;
     private final TargetResolver targets;
+    private final DatasetCatalog datasetCatalog;
+    private final DatasetStore datasetStore;
 
     public RunWorkloadService(EngineRegistry engines, ArtifactStore artifacts, ResultCatalog results,
-            RunAnalyzer analyzer, TargetResolver targets) {
+            RunAnalyzer analyzer, TargetResolver targets, DatasetCatalog datasetCatalog,
+            DatasetStore datasetStore) {
         this.engines = Objects.requireNonNull(engines, "engines");
         this.artifacts = Objects.requireNonNull(artifacts, "artifacts");
         this.results = Objects.requireNonNull(results, "results");
         this.analyzer = Objects.requireNonNull(analyzer, "analyzer");
         this.targets = Objects.requireNonNull(targets, "targets");
+        this.datasetCatalog = Objects.requireNonNull(datasetCatalog, "datasetCatalog");
+        this.datasetStore = Objects.requireNonNull(datasetStore, "datasetStore");
     }
 
     /** Raised when a run cannot be pointed at a permitted target. */
@@ -92,15 +104,47 @@ public final class RunWorkloadService {
     }
 
     /**
-     * Renders one shard's workload and stores it.
+     * Raised when a run's declared dataset cannot be delivered as written.
      *
-     * <p>Stored before the runner is asked to start, so the file that executed is recoverable
-     * afterwards whatever happens to the runner. It is the evidence of what actually ran, which a
-     * result nobody can reproduce is not.
-     *
-     * @return the stored reference, so the caller can pass its key to the runner
+     * <p>Fatal to the run, on purpose, and this is the decision worth defending. A missing or
+     * mismatched dataset does not stop JMeter: every unresolved {@code ${orderId}} is sent as those
+     * literal characters, the target answers 404 to all of it in a few milliseconds, and the run
+     * reports excellent latency for a system that did no work. That is the failure mode this
+     * platform is most suspicious of, so it is refused <em>before</em> a single request is made
+     * rather than surfaced afterwards as a curiously fast result.
      */
-    public ArtifactReference prepareShard(TestRun run, ExecutionPlan plan, DefinitionVersion version,
+    public static class DatasetUnavailableException extends RuntimeException {
+        public DatasetUnavailableException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * One shard's inputs: the workload it executes, and the data it sends.
+     *
+     * @param workload the rendered plan, stored before the runner starts
+     * @param datasets this shard's partitions, already sliced so no two shards send the same row
+     */
+    public record PreparedShard(ArtifactReference workload, List<DatasetDelivery> datasets) {
+
+        public PreparedShard {
+            datasets = List.copyOf(datasets);
+        }
+    }
+
+    /**
+     * Renders one shard's workload, slices its data, and stores both.
+     *
+     * <p>Stored before the runner is asked to start, so what executed is recoverable afterwards
+     * whatever happens to the runner — and that now covers the inputs as well as the plan. A result
+     * is reproducible only if the rows that produced it are still retrievable; a partition that
+     * existed only inside a pod would leave "which orders did shard 3 submit?" permanently
+     * unanswerable.
+     *
+     * @throws DatasetUnavailableException if a declared dataset is missing, unreadable or does not
+     *                                    carry the columns the specification says it has
+     */
+    public PreparedShard prepareShard(TestRun run, ExecutionPlan plan, DefinitionVersion version,
             RunnerShard shard) {
 
         PerformanceTestSpecification specification = version.specification();
@@ -120,11 +164,109 @@ public final class RunWorkloadService {
                 rendered.bytes());
         results.recordArtifact(stored);
 
-        log.info("Workload prepared runId={} shardIndex={} engine={} target={} artifact={} bytes={}",
-                run.id(), shard.shardIndex(), plan.engine(), target.baseUrl(),
-                stored.objectKey(), stored.sizeBytes());
+        List<DatasetDelivery> datasets = prepareDatasets(run, specification, engine, shard);
 
-        return stored;
+        log.info("Workload prepared runId={} shardIndex={} engine={} target={} artifact={} bytes={} "
+                        + "datasets={}",
+                run.id(), shard.shardIndex(), plan.engine(), target.baseUrl(),
+                stored.objectKey(), stored.sizeBytes(), datasets.size());
+
+        return new PreparedShard(stored, datasets);
+    }
+
+    /**
+     * Resolves, verifies and slices every dataset the specification declares.
+     *
+     * <p>Three checks, in this order, each refusing rather than degrading:
+     *
+     * <ol>
+     *   <li><b>The reference resolves.</b> {@code dataset://orders/3} must name a version this
+     *       team uploaded. A team's own prefix is the only place looked, so a specification cannot
+     *       reach another team's data by naming it.</li>
+     *   <li><b>The columns match.</b> Every column the specification declares must be present in the
+     *       file's header. This is what turns {@code spec.datasets[].columns} from a second source of
+     *       truth into a contract — the same shape as the plan digest. A dataset re-exported with
+     *       {@code order_id} where the test expects {@code orderId} passes validation, because
+     *       validation ran against the declaration, and would then send the literal text.</li>
+     *   <li><b>The content is readable.</b> A catalog row whose object is gone is a dataset that
+     *       resolves and delivers nothing.</li>
+     * </ol>
+     *
+     * <p>Extra columns in the file are fine and deliberately not reported: a dataset legitimately
+     * carries more than one test uses, and refusing that would make datasets un-shareable.
+     */
+    private List<DatasetDelivery> prepareDatasets(TestRun run,
+            PerformanceTestSpecification specification, ExecutionEngineProvider engine,
+            RunnerShard shard) {
+
+        if (specification.spec() == null || specification.spec().datasets().isEmpty()) {
+            return List.of();
+        }
+
+        List<DatasetDelivery> deliveries = new ArrayList<>();
+        for (DatasetSpec declared : specification.spec().datasets()) {
+            DatasetUri uri = DatasetUri.parse(declared.source() == null ? null
+                            : declared.source().uri())
+                    .orElseThrow(() -> new DatasetUnavailableException(
+                            "Dataset '" + declared.name() + "' does not name a stored dataset "
+                                    + "version. Its source uri must be dataset://<name>/<version>, "
+                                    + "which is what an upload returns."));
+
+            DatasetVersion stored = datasetCatalog.find(run.teamId(), uri.name(), uri.version())
+                    .orElseThrow(() -> new DatasetUnavailableException(
+                            "Dataset " + uri + " is not registered for this team, so the journeys "
+                                    + "bound to it would send unfilled ${...} references."));
+
+            List<String> missing = declared.columns().stream()
+                    .filter(column -> !stored.columns().contains(column))
+                    .toList();
+            if (!missing.isEmpty()) {
+                throw new DatasetUnavailableException(
+                        "Dataset " + uri + " does not have the columns this test declares: "
+                                + missing + ". The stored file has " + stored.columns() + ". "
+                                + "A journey binding to a missing column would send the literal "
+                                + "text ${name}, and every such request would fail while the run "
+                                + "reported fast, healthy-looking latency.");
+            }
+
+            byte[] content = datasetStore.read(stored.objectKey())
+                    .orElseThrow(() -> new DatasetUnavailableException(
+                            "Dataset " + uri + " is registered but its content could not be read, "
+                                    + "so this run has no data to send."));
+
+            deliveries.add(sliceAndStore(run, shard, engine, declared, uri,
+                    new String(content, StandardCharsets.UTF_8)));
+        }
+        return List.copyOf(deliveries);
+    }
+
+    /**
+     * This shard's slice of one dataset, stored as an artifact of the run.
+     *
+     * <p>A dataset that is not partitioned by shard is delivered whole to every shard. That is what
+     * the specification asked for and the validator already warns about it: with more than one shard
+     * every generator replays the same rows, which distorts the result and can duplicate writes to
+     * the target.
+     */
+    private DatasetDelivery sliceAndStore(TestRun run, RunnerShard shard,
+            ExecutionEngineProvider engine, DatasetSpec declared, DatasetUri uri, String csv) {
+
+        String slice = declared.partitionByShard()
+                ? DatasetPartitioner.partition(csv, shard.shardCount())
+                        .get(shard.shardIndex()).toCsv()
+                : csv;
+
+        // The stored object carries a prefix and the delivered file does not. A partition is a CSV
+        // and so is a JMeter results file; without something in the object name to tell them apart,
+        // an input would be adopted as a result and its rows parsed as measurements.
+        ArtifactReference stored = artifacts.store(
+                new ArtifactDescriptor(run.teamId(), run.id(), Optional.of(shard.id()),
+                        ArtifactType.DATASET,
+                        ArtifactStore.DATASET_OBJECT_PREFIX + declared.name() + ".csv", "text/csv"),
+                slice.getBytes(StandardCharsets.UTF_8));
+        results.recordArtifact(stored);
+
+        return new DatasetDelivery(engine.datasetFileName(declared.name()), stored.objectKey());
     }
 
     /**

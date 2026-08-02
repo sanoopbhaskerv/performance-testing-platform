@@ -127,12 +127,50 @@ s3 cp "s3://${PERF_ARTIFACT_BUCKET}/${PERF_WORKLOAD_KEY}" "${PLAN}" --only-show-
 
 [[ -s "${PLAN}" ]] || { log "FATAL: the fetched plan is empty"; exit 78; }
 
+# ── Fetch this shard's data ──────────────────────────────────────────────────
+#
+# PERF_DATASETS is `fileName=objectKey` pairs, comma-separated. The control
+# plane has already sliced each dataset so no two shards send the same row, so
+# there is nothing to decide here — fetch, and put it where the plan looks.
+#
+# A dataset that cannot be fetched is fatal, before any load is generated. JMeter
+# would otherwise start happily and send the literal text ${orderId} in every
+# request: the target answers 404 to all of it in a millisecond or two, and the
+# run reports excellent latency for a system that did no work.
+if [[ -n "${PERF_DATASETS:-}" ]]; then
+    IFS=',' read -ra datasets <<< "${PERF_DATASETS}"
+    for entry in "${datasets[@]}"; do
+        file_name="${entry%%=*}"
+        object_key="${entry#*=}"
+        [[ -n "${file_name}" && -n "${object_key}" && "${file_name}" != "${entry}" ]] || {
+            log "FATAL: PERF_DATASETS entry is not fileName=objectKey"; exit 78; }
+        # Refused rather than sanitised: the control plane builds these names and
+        # a separator in one means something upstream is wrong, not that this
+        # should guess a safe name.
+        [[ "${file_name}" == *"/"* || "${file_name}" == *".."* ]] && {
+            log "FATAL: dataset file name would escape the workspace"; exit 78; }
+
+        log "fetching dataset ${file_name}"
+        s3 cp "s3://${PERF_ARTIFACT_BUCKET}/${object_key}" "${WORKSPACE}/${file_name}" \
+            --only-show-errors
+        [[ -s "${WORKSPACE}/${file_name}" ]] || {
+            log "FATAL: dataset ${file_name} is empty"; exit 78; }
+    done
+    log "fetched ${#datasets[@]} dataset partitions"
+fi
+
 # ── Run it ───────────────────────────────────────────────────────────────────
 #
 # -n non-GUI, -f overwrite an existing results file. JMeter is backgrounded so
 # the SIGTERM trap can reach it; a foreground child would leave the signal
 # unhandled until it finished, which is the opposite of what cancelling means.
 log "starting JMeter, deadline ${DEADLINE_SECONDS}s"
+
+# A CSVDataSet in the plan names a plain file, which JMeter resolves against the
+# working directory. The image already sets WORKDIR to /workspace; this makes it
+# true for a PERF_WORKSPACE pointing anywhere else, rather than leaving the data
+# a directory away from where JMeter looks for it.
+cd "${WORKSPACE}"
 
 jmeter -n -f \
     -t "${PLAN}" \

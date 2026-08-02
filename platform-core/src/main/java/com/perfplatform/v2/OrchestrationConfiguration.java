@@ -10,6 +10,8 @@ import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.plan.ExecutionPlanCompiler;
 import com.perfplatform.domain.port.ArtifactStore;
+import com.perfplatform.domain.port.DatasetCatalog;
+import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.TargetDirectory;
@@ -22,6 +24,7 @@ import com.perfplatform.domain.port.TeamProvisioning;
 import com.perfplatform.domain.port.TestDefinitionRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.orchestration.OrchestrationSettings;
+import com.perfplatform.orchestration.dataset.ManageDatasetsUseCase;
 import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.domain.target.TargetPolicy;
 import com.perfplatform.engine.jmeter.JmeterEngineProvider;
@@ -38,6 +41,8 @@ import com.perfplatform.orchestration.run.RunWorkloadService;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import com.perfplatform.persistence.artifact.FileSystemArtifactStore;
 import com.perfplatform.persistence.artifact.S3ArtifactStore;
+import com.perfplatform.persistence.dataset.FileSystemDatasetStore;
+import com.perfplatform.persistence.dataset.S3DatasetStore;
 import com.perfplatform.persistence.definition.TestDefinitionRegistry;
 import com.perfplatform.runner.kubernetes.KubernetesExecutionProvider;
 import com.perfplatform.runner.kubernetes.RunnerCellSettings;
@@ -381,6 +386,49 @@ public class OrchestrationConfiguration {
     }
 
     /**
+     * Dataset storage.
+     *
+     * <p>Follows the artifact store's choice rather than having a switch of its own. A deployment
+     * whose artifacts are in object storage and whose datasets are on a pod-local disk would fail in
+     * the least obvious way available: runs would provision, and every shard would start without the
+     * data it was supposed to send.
+     */
+    @Bean
+    public DatasetStore datasetStore() {
+        OrchestrationProperties.Artifacts settings = properties.getArtifacts();
+        boolean production = environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES));
+
+        if ("s3".equalsIgnoreCase(settings.getStore())) {
+            requireConfigured(settings.getBucket(), "platform.orchestration.artifacts.bucket",
+                    "the bucket datasets are stored in");
+            return new S3DatasetStore(s3Client(settings), settings.getBucket());
+        }
+
+        if (production) {
+            throw new IllegalStateException(
+                    "Datasets must not be stored on a pod-local filesystem in production: a file "
+                            + "written by one replica is invisible to the others, and a runner "
+                            + "cannot reach it at all. Set "
+                            + "platform.orchestration.artifacts.store=s3.");
+        }
+
+        return new FileSystemDatasetStore(Path.of(properties.getWorkDirectory(), "datasets"));
+    }
+
+    /**
+     * Uploading and reading the data a test sends.
+     *
+     * <p>Authorized by team like everything else: someone who can change a test's rows can change
+     * what it exercises as surely as someone who can edit its journeys.
+     */
+    @Bean
+    public ManageDatasetsUseCase manageDatasetsUseCase(DatasetStore datasetStore,
+            DatasetCatalog datasetCatalog, TeamDirectory teams, Clock clock) {
+        return new ManageDatasetsUseCase(datasetStore, datasetCatalog, teams, clock,
+                properties.getDatasets().getMaxSize());
+    }
+
+    /**
      * The S3 client.
      *
      * <p>Credentials come from the default provider chain — environment, instance profile, or an
@@ -432,8 +480,10 @@ public class OrchestrationConfiguration {
 
     @Bean
     public RunWorkloadService runWorkloadService(EngineRegistry engines, ArtifactStore artifacts,
-            ResultCatalog results, RunAnalyzer analyzer, TargetResolver targets) {
-        return new RunWorkloadService(engines, artifacts, results, analyzer, targets);
+            ResultCatalog results, RunAnalyzer analyzer, TargetResolver targets,
+            DatasetCatalog datasetCatalog, DatasetStore datasetStore) {
+        return new RunWorkloadService(engines, artifacts, results, analyzer, targets,
+                datasetCatalog, datasetStore);
     }
 
     @Bean

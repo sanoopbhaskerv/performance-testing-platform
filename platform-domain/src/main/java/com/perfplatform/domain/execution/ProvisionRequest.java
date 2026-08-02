@@ -41,6 +41,9 @@ import java.util.Objects;
  *                    {@code workload/scenario}. Carried so a runner can label its output the way the
  *                    platform expects to read it — objectives are scoped by workload and by
  *                    scenario, and results that used different names could not be judged against them
+ * @param datasets    this shard's dataset partitions, as keys plus the file names the engine expects
+ *                    them under. Already sliced so no two shards send the same row — a provider
+ *                    fetches and places them, and decides nothing about their contents
  * @param deadline    hard wall-clock ceiling; the provider must stop the workload at this point
  *                    even if the plan believes it has more to do
  */
@@ -55,6 +58,7 @@ public record ProvisionRequest(
         SpecificationDigest planDigest,
         String workloadKey,
         List<String> operationLabels,
+        List<DatasetDelivery> datasets,
         Duration deadline) {
 
     public ProvisionRequest {
@@ -68,6 +72,7 @@ public record ProvisionRequest(
             throw new IllegalArgumentException("workloadKey must not be null or blank");
         }
         operationLabels = operationLabels == null ? List.of() : List.copyOf(operationLabels);
+        datasets = datasets == null ? List.of() : List.copyOf(datasets);
         if (engine == null || engine.isBlank()) {
             throw new IllegalArgumentException("engine must not be null or blank");
         }

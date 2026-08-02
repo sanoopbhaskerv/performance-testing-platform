@@ -84,6 +84,8 @@ class RunReconcilerTest {
     private final InMemoryPlanRepository plans = new InMemoryPlanRepository();
     private final StubDefinitionVersionCatalog versions = new StubDefinitionVersionCatalog();
     private final InMemoryArtifacts artifacts = new InMemoryArtifacts();
+    private final OrchestrationFixtures.InMemoryDatasets datasets =
+            new OrchestrationFixtures.InMemoryDatasets();
     private final EngineRegistry engines = new EngineRegistry(List.of(new StubEngineProvider()));
 
     private FakeExecutionProvider provider;
@@ -127,7 +129,8 @@ class RunReconcilerTest {
             com.perfplatform.domain.execution.ExecutionProvider executionProvider) {
 
         RunWorkloadService workloads = new RunWorkloadService(engines, artifacts, artifacts,
-                OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget());
+                OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget(),
+                datasets, datasets);
 
         return new RunReconciler(runs, shards, plans, versions,
                 new EngineDispatchingPlanCompiler(engines), executionProvider,

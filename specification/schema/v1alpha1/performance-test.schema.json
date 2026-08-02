@@ -327,7 +327,9 @@
             },
             "uri": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^dataset://[a-z0-9]([-a-z0-9]*[a-z0-9])?/[1-9][0-9]*$",
+              "description": "The stored dataset version this test reads, as dataset://<name>/<version> — the uri POST /api/v2/datasets returns. The version is required: without it, two runs of the same immutable test version would read different rows while carrying the same specification digest."
             }
           }
         },

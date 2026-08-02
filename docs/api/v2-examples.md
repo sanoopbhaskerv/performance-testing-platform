@@ -12,6 +12,9 @@
 
 ```text
 POST /api/v2/imports/{sourceType}                    # curl | openapi | har | postman
+POST /api/v2/datasets?team={team}&name={name}        # the data a test sends
+GET  /api/v2/datasets
+GET  /api/v2/datasets/{team}/{name}/{version}
 POST /api/v2/test-definitions/validate
 POST /api/v2/test-definitions
 GET  /api/v2/test-definitions
@@ -156,6 +159,94 @@ A source type with no importer deployed is refused by name with `422`, listing t
 
 ---
 
+## Uploading a dataset
+
+A journey can say `path: /orders/${orderId}` and take the next row on each iteration. This is where
+the rows arrive.
+
+```bash
+curl -sS -X POST 'http://localhost:8080/api/v2/datasets?team=local-dev&name=proposal-clients' \
+  -H 'X-API-Key: local-dev-key-not-a-secret' \
+  -H 'Content-Type: text/csv' \
+  --data-binary @clients.csv
+```
+
+The body is the CSV itself, not multipart: there is one file, its media type is known, and
+`--data-binary @file` is how a pipeline sends it. The first line must be the header — those names
+are what `${...}` binds to.
+
+```json
+{
+  "name": "proposal-clients",
+  "version": 1,
+  "uri": "dataset://proposal-clients/1",
+  "columns": ["orderId", "customerId"],
+  "rowCount": 5000,
+  "sizeBytes": 121400,
+  "digest": "sha256:…",
+  "findings": [
+    {
+      "code": "dataset.contents.notInspected",
+      "severity": "INFO",
+      "message": "Only the column names were checked. The platform does not know whether the rows hold real customer data — that remains the uploader's responsibility."
+    }
+  ]
+}
+```
+
+`uri` is what goes into a specification, and it is the only place to learn the version that was
+just allocated:
+
+```yaml
+spec:
+  datasets:
+    - name: client-data
+      source:
+        type: object-storage
+        uri: dataset://proposal-clients/1
+      columns: [orderId, customerId]
+      partitionByShard: true
+```
+
+**No rows are ever returned.** The listing and the get endpoint carry column names, counts and a
+digest — this is business data, and a response that included a sample to "confirm it worked" would
+put customer records into a response body, a browser cache and every log in between.
+
+### Versions are allocated, never chosen
+
+Uploading `proposal-clients` again creates version 2; nothing overwrites version 1. A specification
+pins an exact version, so pointing a test at newer data is an edit to the specification — visible,
+reviewable, and with its own digest. `dataset://proposal-clients` without a version is refused for
+the same reason a floating runner image tag is refused at startup.
+
+### What is refused
+
+| Code | Status | Meaning |
+|---|---|---|
+| `dataset.column.sensitive` | 422 | A column named as a credential or as personal data. **Nothing is stored.** |
+| `dataset.header.missing` | 422 | No header row, so nothing could bind to it |
+| `dataset.column.duplicate` | 422 | Two columns of one name; a `${name}` reference could not say which |
+| `dataset.column.blank` | 422 | A column with no name |
+| `dataset.tooLarge` | 422 | Over `platform.orchestration.datasets.max-size` (16 MiB by default) |
+| `dataset.version.exists` | 409 | Two uploads raced. Retry; the next version number is free |
+| `dataset.notFound` | 404 | The caller's team has no such name or version |
+
+A finding names the offending **column**, never a value — the response is returned over HTTP and
+written to a log. `dataset.column.sensitive` exists because a value check cannot help here:
+nothing about a real password is token-shaped, so the field name is the only thing that can be
+judged.
+
+### At run time
+
+Before a runner starts, the control plane resolves the reference against the team's own datasets,
+compares the file's header against the columns the specification declares, slices it so no two
+shards send the same row, and stores each slice as a `DATASET` artifact of the run. Any failure
+fails the run with `PROVISIONING_FAILED` **before load is generated** — an unfilled `${orderId}` is
+not sent as an empty value, it is sent as those characters, and a run made of 404s reports fast,
+healthy-looking latency for a target that did no work.
+
+---
+
 ## Validating a specification
 
 ```bash
@@ -284,7 +375,11 @@ design: validation answers "is this test well formed", not "are you allowed to r
 | `spec.objective.scope.unresolved` | ERROR | Objective scoped to a workload that is not declared |
 | `spec.governance.maxDuration.exceeded` | ERROR | Stages run longer than the declared ceiling |
 | `spec.scenario.weights.sum` | WARNING | Weights do not sum to 100; treated as relative shares |
+| `spec.dataset.source.uri.unversioned` | ERROR | `dataset://orders` — two runs of one version would read different rows |
+| `spec.dataset.source.uri.unresolvable` | ERROR | Not a `dataset://name/version` reference, so nothing would be delivered |
+| `spec.scenario.dataset.unresolved` | ERROR | `${column}` names no declared column; it would be sent as literal text |
 | `spec.dataset.partition.disabled` | WARNING | A sharded run would replay the same rows on every shard |
+| `spec.dataset.columns.undeclared` | WARNING | Nothing can check that the columns a journey asks for exist |
 | `spec.objective.missing` | WARNING | No objectives, so the test cannot pass or fail |
 
 The finding never echoes a suspected credential value: findings are logged and returned over

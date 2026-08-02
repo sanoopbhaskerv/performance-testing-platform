@@ -63,6 +63,17 @@ final class RunnerFixtures {
     }
 
     private static ProvisionRequest build(int shardIndex, int shardCount, String engine) {
+        return build(shardIndex, shardCount, engine, List.of());
+    }
+
+    /** A request carrying dataset partitions, for the delivery half of the Job contract. */
+    static ProvisionRequest requestWithDatasets(
+            List<com.perfplatform.domain.execution.DatasetDelivery> datasets) {
+        return build(0, 1, "jmeter", datasets);
+    }
+
+    private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
+            List<com.perfplatform.domain.execution.DatasetDelivery> datasets) {
         TestRunId runId = TestRunId.generate();
         return new ProvisionRequest(
                 runId,
@@ -75,6 +86,7 @@ final class RunnerFixtures {
                 SpecificationDigest.ofCanonicalForm("plan-" + runId),
                 "teams/t/runs/" + runId.value() + "/shards/s/shard-0.jmx",
                 List.of("checkout-load/browse"),
+                datasets,
                 DEADLINE);
     }
 }

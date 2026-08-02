@@ -1,6 +1,7 @@
 package com.perfplatform.domain.validation;
 
 import com.perfplatform.domain.dataset.DatasetBinding;
+import com.perfplatform.domain.dataset.DatasetUri;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
@@ -248,6 +249,8 @@ public final class SemanticValidator {
                         "A dataset source requires a type.",
                         "Use object-storage for a stored dataset, or inline for values carried "
                                 + "in the specification."));
+            } else {
+                validateDatasetUri(dataset.source().uri(), path + "/source/uri", findings);
             }
             if (dataset.columns().isEmpty()) {
                 findings.add(ValidationFinding.warning("spec.dataset.columns.undeclared",
@@ -271,6 +274,45 @@ public final class SemanticValidator {
                                 + "distort results and duplicate writes to the target."));
             }
         }
+    }
+
+    /**
+     * Checks that a dataset source names a stored version this platform can actually deliver.
+     *
+     * <p>Two refusals, and they are different mistakes with different fixes.
+     *
+     * <p><b>An unversioned reference.</b> {@code dataset://orders} means "whatever orders holds
+     * today", so two runs of one immutable definition version would read different data while
+     * carrying the same specification digest. That is the same defect as a floating runner image
+     * tag, which the platform already refuses at startup, so it is refused here too rather than
+     * resolved to the newest upload.
+     *
+     * <p><b>Anything else.</b> A bucket URL, a file path, a name — none of them resolve, and an
+     * unresolved dataset is not an empty dataset: every {@code ${orderId}} would be sent as those
+     * literal characters and the run would report fast, healthy-looking latency for a target that
+     * answered 404 to everything. The run is refused before any load is generated, but this catches
+     * it a great deal earlier, at authoring time, where it costs nothing.
+     */
+    private static void validateDatasetUri(String uri, String path,
+            List<ValidationFinding> findings) {
+
+        if (DatasetUri.parse(uri).isPresent()) {
+            return;
+        }
+        if (DatasetUri.isUnversioned(uri)) {
+            findings.add(ValidationFinding.error("spec.dataset.source.uri.unversioned", path,
+                    "A dataset reference must name a version.",
+                    "Use dataset://<name>/<version>, e.g. dataset://orders/3. Without a version, "
+                            + "two runs of this same immutable test version would read different "
+                            + "data."));
+            return;
+        }
+        findings.add(ValidationFinding.error("spec.dataset.source.uri.unresolvable", path,
+                "'" + uri + "' does not name a dataset this platform stores.",
+                "Upload the file to POST /api/v2/datasets and use the dataset://<name>/<version> "
+                        + "uri it returns. An unresolved reference is sent as the literal text "
+                        + "${column}, so every request would fail while the run reported fast, "
+                        + "healthy-looking latency."));
     }
 
     /**

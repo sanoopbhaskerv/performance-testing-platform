@@ -154,6 +154,9 @@ public class FileSystemArtifactStore implements ArtifactStore {
         return switch (type) {
             case EXECUTION_PLAN -> "plan";
             case REPORT -> "report";
+            // Beside the plan rather than with the results: both are inputs to the run, and what a
+            // run was given belongs together with what it executed.
+            case DATASET -> "plan";
             case RESULTS, RUNNER_LOG, RUNNER_MANIFEST -> "analysis";
         };
     }
@@ -195,6 +198,13 @@ public class FileSystemArtifactStore implements ArtifactStore {
         String fileName = objectKey.substring(objectKey.lastIndexOf('/') + 1)
                 .toLowerCase(java.util.Locale.ROOT);
 
+        // Checked before the results rule, and the reason this prefix exists at all: a dataset
+        // partition is a CSV, and a CSV is also how JMeter results are stored. An input adopted as
+        // a result would be parsed as measurements — thousands of rows of order identifiers read as
+        // samples — and could change a verdict without anything looking wrong.
+        if (fileName.startsWith(ArtifactStore.DATASET_OBJECT_PREFIX) && fileName.endsWith(".csv")) {
+            return Optional.of(ArtifactType.DATASET);
+        }
         if (fileName.endsWith(".jtl") || fileName.endsWith(".csv")) {
             return Optional.of(ArtifactType.RESULTS);
         }

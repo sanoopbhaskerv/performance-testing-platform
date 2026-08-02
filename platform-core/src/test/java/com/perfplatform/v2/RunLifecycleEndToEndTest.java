@@ -195,12 +195,12 @@ class RunLifecycleEndToEndTest {
     private TestDefinitionVersionId versionId;
 
     @BeforeEach
-    void seedRegistry() {
+    void seedRegistry() throws Exception {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         jdbc.execute("""
                 TRUNCATE TABLE run_metrics, objective_results, artifacts, run_events, runner_shards,
                     test_runs, execution_plans, test_definition_versions, test_definitions,
-                    applications, teams
+                    datasets, applications, teams
                 RESTART IDENTITY CASCADE
                 """);
 
@@ -231,6 +231,33 @@ class RunLifecycleEndToEndTest {
                 "alice@example.com");
 
         versionId = TestDefinitionVersionId.of(version.getId());
+
+        uploadDataset();
+    }
+
+    /**
+     * The dataset the shipped example declares, uploaded through the real endpoint.
+     *
+     * <p>Not seeded directly into the tables: the point of doing it over HTTP is that this test then
+     * covers the whole of Increment 2h — upload, storage, the catalog row, resolution at
+     * provisioning, slicing, and delivery — rather than only the half after the data exists.
+     *
+     * <p>The example pins {@code dataset://proposal-clients/1}, so this must be the first version
+     * uploaded for that name. It is: the table is truncated above.
+     */
+    private void uploadDataset() throws Exception {
+        mockMvc.perform(post("/api/v2/datasets")
+                        .header("X-API-Key", API_KEY)
+                        .param("team", TEAM_NAME)
+                        .param("name", "proposal-clients")
+                        .contentType("text/csv")
+                        .content("""
+                                clientId,accountId
+                                C-1001,A-5001
+                                C-1002,A-5002
+                                C-1003,A-5003
+                                """))
+                .andExpect(status().isCreated());
     }
 
     private static String shortId() {

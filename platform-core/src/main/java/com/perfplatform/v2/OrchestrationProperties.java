@@ -71,6 +71,30 @@ public class OrchestrationProperties {
     private final Fake fake = new Fake();
     private final RunnerCell runnerCell = new RunnerCell();
     private final Artifacts artifacts = new Artifacts();
+    private final Datasets datasets = new Datasets();
+
+    /**
+     * The data a test sends.
+     *
+     * <p>One setting, and it exists because of a deliberate trade. The control plane reads a whole
+     * dataset in order to slice it per shard, which is what makes each shard's partition an
+     * auditable stored artifact rather than something a runner decided in private. The cost is that
+     * the file has to fit in memory, so the size is capped and the refusal says why.
+     *
+     * <p>16 MiB is a few hundred thousand rows of identifiers — comfortably more than a load test
+     * consumes, and small enough that ten concurrent uploads are unremarkable.
+     */
+    public static class Datasets {
+        private long maxSize = 16L * 1024 * 1024;
+
+        public long getMaxSize() {
+            return maxSize;
+        }
+
+        public void setMaxSize(long maxSize) {
+            this.maxSize = maxSize;
+        }
+    }
 
     /**
      * Where and how production runner Jobs are created (CLAUDE.md §16).
@@ -283,6 +307,10 @@ public class OrchestrationProperties {
 
     public Artifacts getArtifacts() {
         return artifacts;
+    }
+
+    public Datasets getDatasets() {
+        return datasets;
     }
 
     /**

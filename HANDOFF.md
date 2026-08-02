@@ -4,12 +4,12 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 2g. Increments 0–2g are complete and committed.
+**Last updated:** Increment 2h. Increments 0–2h are complete and committed.
 
-**The foundation is complete** (CLAUDE.md §32), with one partial — team authorization is enforced
-against a *development* identity provider until Increment 4 — and **one loose thread**: a dataset can
-be declared, bound to and validated but **not delivered** (§3l). `ROADMAP.md` §0 recommends doing
-Increment 2h and stopping there.
+**The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
+against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
+a dataset is now uploaded, stored per team and per version, verified against the columns a test
+declares, sliced per shard and delivered (§3m). `ROADMAP.md` §0 says where to stop.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -38,11 +38,11 @@ Increment 2h and stopping there.
 | 2e — Postman importer | **Complete** | see §3j |
 | 2f — importing from the console | **Complete** | see §3k |
 | 2g — dataset binding and partitioning | **Complete** | see §3l |
-| **2h — dataset storage and delivery** | **Not started — recommended next** | `ROADMAP.md` §1 |
+| 2h — dataset storage and delivery | **Complete** | see §3m |
 | 3 / 4 / 5 and the rest of 2 | **Not started** | `ROADMAP.md` §§2–5 |
 
-**833 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
-721 at 2c, 760 at 2d, 803 at 2e).
+**898 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
+721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -56,9 +56,11 @@ Further commits on `feature/platform-v2-foundation` land in it automatically.
 **All five importers CLAUDE.md §23 requires now exist** — cURL, OpenAPI/Swagger, HAR, Postman, and
 manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all four document
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
-(§3l) but not yet delivered.
+(§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: `ROADMAP.md` §0**, which recommends Increment 2h and then stopping.
+**Immediate next action: `ROADMAP.md` §0.** Increment 2 is now complete in the sense that mattered —
+a consumer can onboard an API and give it real data without writing JMX. Everything left is a new
+chapter rather than an unfinished one.
 
 ---
 
@@ -828,12 +830,138 @@ group. **`recycle: false`, `stopThread: true`**: recycling would restart the fil
 target would begin answering the same requests from cache, and the run would report excellent latency
 for work it had stopped doing.
 
-### Not done — this is 2h
+### Delivered by 2h
 
-Uploading a dataset; team-scoped storage; slicing at preparation time and storing each shard's
-partition; comparing the file's header against the declared columns; the runner fetching its
-partition (a runner-image change, so it needs another kind run). Until then, **a declared dataset is
-validated but not delivered**.
+Everything listed here as missing — uploading, team-scoped storage, slicing at preparation, header
+verification and delivery — now exists. See §3m.
+
+---
+
+## 3m. Increment 2h — dataset storage and delivery
+
+**A dataset now arrives.** Uploaded per team, stored immutably per version, verified against the
+columns the test declares, sliced so no two shards send the same row, and delivered to the shard
+that sends it. This closes the last half-built thing in the tree.
+
+**Verified with real load, not asserted.** A dataset of 200 rows, a journey whose path is
+`/api/${resource}`, and the demo service: **200 requests, 1 error (0.5%), p95 34 ms, objective
+passed.** That is the decisive check available — an unbound `${resource}` is sent as those literal
+characters, so every request would have 404'd and the error rate would have been 100%. The stored
+`DATASET` artifact downloads as the 200-row partition and the generated JMX names
+`demo-resources.csv`. The refusal path was exercised the same way: a specification pinned to
+`dataset://demo-resources/9`, which was never uploaded, failed with `PROVISIONING_FAILED` **while
+still queued** — before a generator existed.
+
+### The port decision `ROADMAP.md` §1 left open: a sibling, not a widening
+
+`ArtifactStore` is run-scoped to its foundations — `ArtifactDescriptor` *requires* a `TestRunId` and
+every key sits under `runs/{runId}/`. That is what makes a run's evidence retrievable, authorized and
+reclaimable as one unit. A dataset has none of those properties: it exists before any run, is read by
+many, and outlives all of them. Widening would have meant either a nullable run identifier on the
+descriptor — quietly weakening the invariant that every artifact belongs to a run — or a second key
+layout inside a class whose javadoc promises one.
+
+So: **`DatasetStore`** (content) and **`DatasetCatalog`** (the record), the same split as
+`ArtifactStore`/`ResultCatalog`, with the same team-first key layout
+`teams/{teamId}/datasets/{name}/{version}/data.csv`. Filesystem and S3 implementations, chosen by the
+*artifact* store's own setting rather than a switch of their own — a deployment with artifacts in
+object storage and datasets on a pod-local disk would fail in the least obvious way available: runs
+would provision, and every shard would start without the data it was supposed to send.
+
+### `dataset://{name}/{version}`, and the version is not optional
+
+A specification names *which data*, never where it lives — exactly as it names no host. `dataset://`
+resolves against the caller's own team, so a document cannot reach another team's rows.
+
+**The version is required**, and this is the decision to defend. `dataset://orders` reads naturally
+and means "whatever orders holds today", so two runs of one immutable definition version would read
+different rows while carrying the same specification digest. That is the same defect as a floating
+runner image tag, which 1E already refuses at startup. It is refused at validation with the fix
+named, and refused separately from an unparseable reference, because they are different mistakes:
+one needs a version, the other needs an upload.
+
+Consequence: the shipped `api-only.yaml` example changed from `artifact://datasets/proposal-clients.csv`
+to `dataset://proposal-clients/1`, and its digest with it.
+
+### Column names are the guard, because a value check cannot help here
+
+Every other door into this platform is watched — importers refuse credential-shaped values, headers
+named as credentials, bodies with a `password` field. A CSV upload is the remaining one, and it is
+now the *easiest*: a spreadsheet of sign-in data is precisely what somebody reaches for after being
+told the importer would not keep their password.
+
+`SensitiveFieldDetector.scanNames` over the header, and the upload is refused **whole** — nothing
+stored, not a redacted file with a warning on top. Dropping the column silently would leave a test
+bound to `${password}` that resolves to nothing and sends the literal text. The finding names the
+column and **never a value**; a test pins that, as does the controller test, because the response is
+returned over HTTP and written to a log. What this cannot see is said plainly rather than implied
+away: `dataset.contents.notInspected` is emitted on every accepted upload, because `customerId` is an
+ordinary column name and whether the rows are real customers is a governance question, not a parsing
+one.
+
+### Versions are allocated, never chosen — enforced by the database
+
+The uploader names a dataset; the platform picks the version. Immutability rests on
+`uq_datasets_team_name_version`, not on a prior read: two people uploading `orders` at the same moment
+would both see no version 4 and both write, and only the database can decide which wins. The loser is
+told to retry, which is the truthful answer — their rows are not what version 4 holds. PostgreSQL also
+carries a trigger refusing any `UPDATE`, the same shape as `test_definition_versions`; H2 does not, so
+that assertion runs against Testcontainers.
+
+### The declaration became a contract at the moment it could be checked
+
+2g introduced `spec.datasets[].columns` as a declaration, because validation is side-effect-free and
+runs before any file exists. `prepareShard` now compares it against the file's actual header and
+**fails the run** on a mismatch. That is what turns it from a second source of truth into the same
+contract-and-verification shape as the plan digest: a dataset re-exported with `order_id` where the
+test expects `orderId` passes validation — validation ran against the declaration — and would
+otherwise have sent the literal text at full load. Extra columns in the file are fine and deliberately
+unreported: a dataset legitimately serves more than one test.
+
+### Slicing happens in the control plane
+
+`prepareShard` reads the dataset, calls `DatasetPartitioner`, and stores each shard's slice as a
+`DATASET` artifact of the run. A runner taking every *n*th row itself would be untestable without an
+image rebuild, and what each generator sent would exist only inside a pod that no longer exists.
+Storing the slice makes a run's **inputs** as recoverable as its outputs — "which orders did shard 3
+submit?" has an answer. The cost is that the control plane reads the whole file, so
+`platform.orchestration.datasets.max-size` caps it at 16 MiB and the refusal says why the cap exists.
+
+### The collision that would have been silent
+
+A dataset partition is a CSV. So is a JMeter results file. `FileSystemArtifactStore.typeForFileName`
+maps `.csv` to `RESULTS`, and adoption from object storage derives type from the key — so a run's own
+input would have been adopted as its output and thousands of order identifiers parsed as samples,
+contributing to the latency and error figures a verdict is drawn from, with nothing looking wrong.
+Stored objects therefore carry a `dataset-` prefix (`ArtifactStore.DATASET_OBJECT_PREFIX`), checked
+*before* the results rule; the engine still receives the file under its own plain name. Pinned by a
+MinIO test that stores both in one shard prefix and asserts the two types come back distinct.
+
+### Two contracts that could have drifted, and now cannot
+
+- **The delivered file name comes from the engine.** `ExecutionEngineProvider.datasetFileName`
+  defaults to `{name}.csv` and JMeter's implementation delegates to the renderer that writes the name
+  into the plan. A name decided in orchestration and a different one written by a renderer is a run
+  that starts with the file present under a name JMeter never looks for.
+- **`PERF_DATASETS`** carries `fileName=objectKey` pairs to a Kubernetes runner — keys, never content,
+  because a Job manifest is readable by anyone with cluster access and a dataset is business data. The
+  entrypoint fetches each into the workspace, refuses a name containing a separator rather than
+  sanitising it, and treats a failed fetch as fatal. It also now `cd`s to `PERF_WORKSPACE`, since a
+  `CSVDataSet` names a plain file resolved against the working directory.
+
+### Not done
+
+- **The runner-image change is unverified on a cluster.** The entrypoint's dataset fetch is new and
+  the kind procedure in `docs/operations/local-kubernetes-run.md` has not been re-run since. The local
+  provider path *is* verified with real load. **Re-run the kind procedure before trusting the
+  Kubernetes path with a dataset.**
+- **No console UI for uploading.** Datasets are API-only. The import panel is where it belongs, and
+  `platform-ui` still has no test runner (§3k), which is the thing to fix before the UI grows.
+- **Sharding remains at 1**, so the partitioner's multi-shard path is exercised by tests rather than
+  by a real run. Raising the count still waits on calibration.
+- **`inline` dataset sources are still accepted by the schema and not delivered.** Only
+  `object-storage` with a `dataset://` uri resolves; an inline source now fails validation through
+  the uri check rather than through a rule of its own.
 
 ---
 

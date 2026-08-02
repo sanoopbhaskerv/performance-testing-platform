@@ -240,6 +240,10 @@ public final class RunnerJobManifest {
         env.put("PERF_PLAN_DIGEST", request.planDigest().value());
         env.put("PERF_WORKLOAD_KEY", request.workloadKey());
         env.put("PERF_WORKSPACE", WORKSPACE_PATH);
+        // This shard's dataset partitions, as `fileName=objectKey` pairs. Keys, not content: a
+        // dataset is business data and a Job manifest is readable by anyone with cluster access.
+        // Already sliced, so a runner never decides which rows it sends.
+        env.put("PERF_DATASETS", datasetsOf(request));
         // The labels the platform will read results back under. Objectives are scoped by workload
         // and by scenario, so output labelled any other way could not be judged.
         env.put("PERF_OPERATION_LABELS", String.join(",", request.operationLabels()));
@@ -270,6 +274,20 @@ public final class RunnerJobManifest {
                         .withValue(entry.getValue())
                         .build())
                 .toList();
+    }
+
+    /**
+     * This shard's dataset partitions, as {@code fileName=objectKey} separated by commas.
+     *
+     * <p>A flat string because environment is a flat string, and the two characters it uses are
+     * both impossible in either half: a file name is a plain name validated by
+     * {@code DatasetDelivery}, and an object key is built from identifiers and validated names.
+     * Empty when the test declares no dataset, which is the common case.
+     */
+    private static String datasetsOf(ProvisionRequest request) {
+        return request.datasets().stream()
+                .map(dataset -> dataset.fileName() + "=" + dataset.objectKey())
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     private static String shortId(String uuid) {

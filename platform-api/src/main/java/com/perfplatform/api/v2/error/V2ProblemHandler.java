@@ -3,10 +3,12 @@ package com.perfplatform.api.v2.error;
 import com.perfplatform.api.v2.SourceImportController;
 import com.perfplatform.api.v2.TestDefinitionController;
 import com.perfplatform.api.v2.security.CallerContextProvider;
+import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.TestDefinitionRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.run.InvalidRunTransitionException;
 import com.perfplatform.domain.security.CallerContext;
+import com.perfplatform.orchestration.dataset.ManageDatasetsUseCase;
 import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
@@ -202,6 +204,70 @@ public class V2ProblemHandler {
         return problem(HttpStatus.NOT_FOUND, "run.notFound",
                 "No such test run.",
                 request, e);
+    }
+
+    /**
+     * A dataset upload that was not stored.
+     *
+     * <p>422 with every finding, like an invalid specification, and for the same reason: the request
+     * was well formed and its contents are the problem. The findings name a column, never a value —
+     * a rejection saying "the column password contains hunter2" would put the credential it exists
+     * to refuse into a response body and a log.
+     */
+    @ExceptionHandler(ManageDatasetsUseCase.DatasetRejectedException.class)
+    public ProblemDetail handleDatasetRejected(ManageDatasetsUseCase.DatasetRejectedException e,
+            HttpServletRequest request) {
+
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_ENTITY, "dataset.rejected",
+                e.getMessage() + " Nothing was stored.", request, e);
+        problem.setProperty("findings", e.findings().findings().stream()
+                .map(finding -> {
+                    Map<String, String> rendered = new LinkedHashMap<>();
+                    rendered.put("code", finding.code());
+                    rendered.put("severity", finding.severity().name());
+                    rendered.put("path", finding.path());
+                    rendered.put("message", finding.message());
+                    if (finding.remediation() != null) {
+                        rendered.put("remediation", finding.remediation());
+                    }
+                    return rendered;
+                })
+                .toList());
+        return problem;
+    }
+
+    /**
+     * A dataset name or version that does not resolve for the caller's team.
+     *
+     * <p>404, and only after the team check has passed — so it says "your team does not have this",
+     * never "some other team does".
+     */
+    @ExceptionHandler(ManageDatasetsUseCase.UnknownDatasetException.class)
+    public ProblemDetail handleUnknownDataset(ManageDatasetsUseCase.UnknownDatasetException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "dataset.notFound", e.getMessage(), request, e);
+    }
+
+    /** A team name the registry does not know. Echoed because the caller supplied it. */
+    @ExceptionHandler(ManageDatasetsUseCase.UnknownTeamException.class)
+    public ProblemDetail handleUnknownDatasetTeam(ManageDatasetsUseCase.UnknownTeamException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "dataset.team.unknown",
+                e.getMessage(), request, e);
+    }
+
+    /**
+     * An upload racing another upload of the same dataset.
+     *
+     * <p>409, and the answer is to retry: the next version number is now free. Never an overwrite —
+     * a test pinned to version 3 would start sending different rows with nothing in its own history
+     * saying so.
+     */
+    @ExceptionHandler(DatasetCatalog.DatasetVersionExistsException.class)
+    public ProblemDetail handleDatasetVersionExists(DatasetCatalog.DatasetVersionExistsException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "dataset.version.exists",
+                e.getMessage() + " Retry the upload; the next version number is free.", request, e);
     }
 
     /**

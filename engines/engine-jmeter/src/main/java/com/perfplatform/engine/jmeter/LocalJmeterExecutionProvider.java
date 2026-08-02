@@ -1,5 +1,6 @@
 package com.perfplatform.engine.jmeter;
 
+import com.perfplatform.domain.execution.DatasetDelivery;
 import com.perfplatform.domain.execution.ExecutionPhase;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.execution.ProvisionRequest;
@@ -149,6 +150,10 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
 
             Path jmx = directory.resolve("workload.jmx");
             Files.write(jmx, workloadFor(request));
+
+            // Beside the plan, because the process runs with this directory as its working
+            // directory and the plan's CSVDataSet refers to a plain file name.
+            writeDatasets(request, directory);
 
             Path results = directory.resolve("results.jtl");
             Path logFile = directory.resolve("jmeter.log");
@@ -335,6 +340,32 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
         byte[] head = new byte[MAX_CAPTURED_OUTPUT];
         System.arraycopy(content, 0, head, 0, MAX_CAPTURED_OUTPUT);
         return (new String(head, StandardCharsets.UTF_8) + notice).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Places this shard's dataset partitions where the plan expects to find them.
+     *
+     * <p>Read back from the artifact store by key rather than passed as content, so this adapter and
+     * a Kubernetes runner do exactly the same thing: fetch by key, write into the workspace. The
+     * control plane already sliced them, so nothing here decides which rows this shard sends.
+     *
+     * <p>A partition that cannot be read stops the shard from starting. Writing the plan and
+     * omitting the data would produce a run that sends {@code ${orderId}} as literal text and
+     * reports fast, healthy-looking latency for a target that answered 404 to everything.
+     */
+    private void writeDatasets(ProvisionRequest request, Path directory) throws IOException {
+        for (DatasetDelivery delivery : request.datasets()) {
+            byte[] content = artifacts.listForRun(request.runId()).stream()
+                    .filter(reference -> reference.objectKey().equals(delivery.objectKey()))
+                    .findFirst()
+                    .flatMap(artifacts::read)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "The dataset partition " + delivery.objectKey()
+                                    + " is not in the artifact store, so this shard has no data "
+                                    + "to send"));
+
+            Files.write(directory.resolve(delivery.fileName()), content);
+        }
     }
 
     /** The rendered workload this shard executes, read back from the artifact store by key. */

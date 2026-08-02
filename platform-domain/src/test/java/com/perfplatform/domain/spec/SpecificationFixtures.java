@@ -45,7 +45,7 @@ public final class SpecificationFixtures {
                                 "vault://performance/proposal/client")),
                         List.of(new DatasetSpec("client-data",
                                 new DatasetSpec.DataSource("object-storage",
-                                        "artifact://datasets/proposal-clients.csv"),
+                                        "dataset://proposal-clients/1"),
                                 true)),
                         List.of(apiWorkload()),
                         List.of(

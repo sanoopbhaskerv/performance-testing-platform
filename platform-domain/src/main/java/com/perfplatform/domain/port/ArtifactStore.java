@@ -27,6 +27,16 @@ import java.util.Optional;
  */
 public interface ArtifactStore {
 
+    /**
+     * What a stored dataset partition's file name begins with.
+     *
+     * <p>Part of the key contract, not a naming convention. A dataset partition is a CSV, and so is
+     * a JMeter results file — without something in the name to tell them apart, an input would be
+     * adopted as a result and its rows parsed as measurements. The engine still receives the
+     * partition under its own plain name; only the stored object carries this prefix.
+     */
+    String DATASET_OBJECT_PREFIX = "dataset-";
+
     /** What kind of thing an artifact is. Drives retention and what a report links to. */
     enum ArtifactType {
         /** The rendered workload a shard executed — the evidence of what actually ran. */
@@ -37,6 +47,15 @@ public interface ArtifactStore {
         RUNNER_LOG,
         /** The runner's self-description, used to verify identity before results are accepted. */
         RUNNER_MANIFEST,
+        /**
+         * The slice of a dataset one shard sent.
+         *
+         * <p>An input rather than an output, and stored as an artifact for the same reason the
+         * rendered plan is: a result is only reproducible if what produced it is recoverable. It
+         * also answers, months later, which rows a particular shard actually used — a question that
+         * otherwise has no answer once the pod is gone.
+         */
+        DATASET,
         /** A generated human-readable report. */
         REPORT
     }

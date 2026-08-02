@@ -234,6 +234,32 @@ class S3ArtifactStoreMinioTest {
     }
 
     /**
+     * A dataset partition is a CSV. So is a JMeter results file.
+     *
+     * <p>Without something in the stored name to tell them apart, a run's own input would be adopted
+     * as its output: thousands of rows of order identifiers parsed as samples, contributing to the
+     * latency and error figures a verdict is drawn from. Nothing would look wrong — the same class of
+     * failure as a synthetic run reading as a pass. The {@code dataset-} prefix is what prevents it,
+     * which is why it is part of the key contract rather than a naming convention.
+     */
+    @Test
+    @DisplayName("a dataset partition is never mistaken for results, though both are CSV")
+    void datasetPartitionIsNotResults() {
+        TeamId teamId = TeamId.generate();
+        TestRunId runId = TestRunId.generate();
+        RunnerShardId shardId = RunnerShardId.generate();
+        String prefix = "teams/%s/runs/%s/shards/%s/"
+                .formatted(teamId.value(), runId.value(), shardId.value());
+
+        putRaw(prefix + "dataset-client-data.csv", "orderId,customerId\nO-1,C-1\n");
+        putRaw(prefix + "results.jtl", "timeStamp,elapsed,label\n1,2,browse\n");
+
+        assertThat(store.listForRun(runId))
+                .extracting(ArtifactReference::type)
+                .containsExactlyInAnyOrder(ArtifactType.DATASET, ArtifactType.RESULTS);
+    }
+
+    /**
      * Defaulting would be worse than ignoring: an unknown object adopted as {@code RESULTS} would be
      * parsed as measurements and could quietly change a verdict.
      */

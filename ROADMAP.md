@@ -14,51 +14,34 @@ than a surprise.
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
 Increment 4 and needs a decision this project has not been given).
 
-There is exactly **one loose thread**, and it is the only thing that would mislead somebody:
+**The loose thread is closed.** Increment 2h made a dataset arrive: uploaded per team, stored
+immutably per version, verified against the columns a test declares, sliced per shard, and delivered
+(`HANDOFF.md` §3m). A consumer can now onboard an API from a cURL command, an OpenAPI document, a
+HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
-> **A dataset can be declared, bound to and validated, but not delivered** (Increment 2g, `HANDOFF.md`
-> §3l). A specification can reference `${orderId}`, pass validation, and then find no data at run
-> time, because uploading and storing the file is Increment 2h.
+**Recommendation: this is a good place to stop.** Everything below is a new chapter rather than an
+unfinished one. Pick one deliberately, or not at all.
 
-**Recommendation: do 2h, then stop.** It is one increment, it closes Increment 2 completely, and it
-turns the last half-built thing in the tree into a whole one. After that the platform does what it
-says on every path a consumer can reach, and Increment 3 (Playwright) is a clean, large chapter to
-begin — or not — with fresh eyes.
-
-**If you would rather stop now:** that is defensible. Datasets are loudly flagged as undelivered in
-`HANDOFF.md` §3l, in `NEXT-SESSION.md` §2 and in the validator's own findings. Nothing silently
-lies. But move 2h to the top of this file so the next person meets it first.
+**One thing to carry forward, wherever you go next:** 2h changed the runner image's entrypoint, and
+that change has not been run on a cluster. The local path is verified with real load. Re-run
+`docs/operations/local-kubernetes-run.md` before trusting the Kubernetes path with a dataset.
 
 ---
 
-## 1. Increment 2h — dataset storage and delivery
+## 1. Increment 2h — dataset storage and delivery — **done**
 
-**The one recommended piece of work.** Everything else below is optional.
+Kept for the record. All four steps landed:
 
-A dataset is declared and partitioned but never arrives. Four steps, in order:
-
-1. **Decide the port.** `ArtifactStore` is run-scoped to its foundations — `ArtifactDescriptor`
-   *requires* a `TestRunId` — and a dataset outlives any single run. Either widen it with
-   dataset-scoped methods or add a sibling port. `teams/{teamId}/datasets/{name}/{version}` keeps
-   the key layout as the authorization boundary. **Everything else follows from this decision.**
-2. **Upload.** `POST /api/v2/datasets`: team-scoped, size-capped, header row required. Run
-   `SensitiveFieldDetector.scanNames` over the header — a column named `password` is exactly what
-   that class exists to catch, and a CSV of real credentials is now the likeliest way one enters the
-   platform, since every importer refuses them.
-3. **Slice at preparation.** `RunWorkloadService.prepareShard` already stores the rendered JMX per
-   shard; have it call `DatasetPartitioner.partition` and store each shard's slice beside it as
-   `JmeterWorkloadRenderer.partitionFileName(dataset)`. **Compare the file's header against the
-   declared `columns` and fail the run on a mismatch** — that comparison is what makes the
-   declaration a contract rather than a second source of truth.
-4. **Deliver.** The local-jmeter provider writes it next to the JMX. The Kubernetes provider passes
-   the object key in the Job manifest and the runner image fetches it — a runner-image change, so it
-   needs another kind run (`docs/operations/local-kubernetes-run.md`).
-
-The control plane slices rather than the runner taking every Nth row: testable without an image
-rebuild, keeps the runner dumb, and makes each partition an auditable stored artifact. The cost is
-that the control plane reads the whole file, so cap the size and say so.
-
----
+1. **The port.** A sibling rather than a widening: `DatasetStore` for content and `DatasetCatalog`
+   for the record, keyed `teams/{teamId}/datasets/{name}/{version}/`. `ArtifactStore` stayed
+   run-scoped, which is what makes a run's evidence one retrievable, authorized, reclaimable unit.
+2. **Upload.** `POST /api/v2/datasets`, team-scoped, size-capped, header required, column names
+   scanned — a column named as a credential is refused and nothing is stored.
+3. **Slice at preparation.** `prepareShard` partitions and stores each shard's slice as a `DATASET`
+   artifact, after comparing the file's header against the declared columns and failing the run on a
+   mismatch.
+4. **Deliver.** The local provider writes partitions beside the JMX; the Kubernetes provider passes
+   `PERF_DATASETS` as `fileName=objectKey` pairs and the runner fetches them.
 
 ## 2. Increment 2, remaining
 
@@ -114,9 +97,12 @@ it become executable without a person acting.
 
 Each is real, none blocks anything.
 
-- **Sharding is untested.** Everything so far is one shard. `DatasetPartitioner` exists now, so the
-  data half is solved; what remains is 2h wiring plus calibration
-  (`docs/operations/runner-calibration.md`) before the count rises.
+- **Sharding is untested.** Everything so far is one shard. The data half is now fully solved —
+  partitioning, storage and per-shard delivery all exist and are tested — so what remains before the
+  count rises is calibration (`docs/operations/runner-calibration.md`).
+- **The runner image's dataset fetch has not run on a cluster.** Added by 2h and verified only
+  through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
+- **No console UI for datasets.** They are API-only; the import panel is where an upload belongs.
 - **`ConcurrencyThreadGroup` is in the runner image but unused.** The plan generator still emits
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.

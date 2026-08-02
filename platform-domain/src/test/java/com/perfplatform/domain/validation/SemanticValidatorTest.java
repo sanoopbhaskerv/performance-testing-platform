@@ -452,7 +452,64 @@ class SemanticValidatorTest {
                 .isSortedAccordingTo((a, b) -> b.severity().compareTo(a.severity()));
     }
 
+    @Nested
+    @DisplayName("dataset references")
+    class DatasetReferences {
+
+        /**
+         * The one that would be tempting to allow. {@code dataset://orders} reads naturally and
+         * means "whatever orders holds today" — so two runs of one immutable definition version
+         * would read different rows while carrying the same specification digest. Refused for the
+         * same reason a floating runner image tag is refused at startup.
+         */
+        @Test
+        @DisplayName("an unversioned reference is an error, with the fix named")
+        void unversionedIsRefused() {
+            ValidationResult result = SemanticValidator.validate(
+                    withDatasetUri("dataset://proposal-clients"));
+
+            assertThat(result.codes()).contains("spec.dataset.source.uri.unversioned");
+            assertThat(result.isValid()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a bucket URL or file path is an error: it names nothing this platform stores")
+        void unresolvableIsRefused() {
+            ValidationResult result = SemanticValidator.validate(
+                    withDatasetUri("s3://some-bucket/clients.csv"));
+
+            assertThat(result.codes()).contains("spec.dataset.source.uri.unresolvable");
+            assertThat(result.isValid()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a pinned reference is accepted")
+        void pinnedIsAccepted() {
+            ValidationResult result = SemanticValidator.validate(
+                    withDatasetUri("dataset://proposal-clients/4"));
+
+            assertThat(result.codes())
+                    .doesNotContain("spec.dataset.source.uri.unversioned")
+                    .doesNotContain("spec.dataset.source.uri.unresolvable");
+            assertThat(result.errors()).isEmpty();
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
+
+    private static PerformanceTestSpecification withDatasetUri(String uri) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        var dataset = body.datasets().get(0);
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(), body.authentication(),
+                        List.of(new PerformanceTestSpecification.DatasetSpec(dataset.name(),
+                                new PerformanceTestSpecification.DatasetSpec.DataSource(
+                                        "object-storage", uri),
+                                dataset.columns(), dataset.partitionByShard())),
+                        body.workloads(), body.objectives(), body.observability(),
+                        body.governance()));
+    }
 
     private static PerformanceTestSpecification withMetadata(SpecMetadata metadata) {
         PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
