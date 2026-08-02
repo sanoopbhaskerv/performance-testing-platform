@@ -2,12 +2,32 @@
 
 **Read `HANDOFF.md` first** (state, decisions, gotchas), then this. `CLAUDE.md` is the contract.
 
-Branch `feature/platform-v2-foundation`. Working tree clean at `9fcefe1`. **Nothing is pushed** —
-pushing, tagging and opening a PR each need explicit authorization (CLAUDE.md §6).
+Branch `feature/platform-v2-foundation`. **Nothing is pushed** — pushing, tagging and opening a PR
+each need explicit authorization (CLAUDE.md §6).
 
 ---
 
-## 1. Build and run
+## 1. Run it
+
+```bash
+./scripts/start-platform.sh
+```
+
+One command. It starts the **demo service** (:8081), the **control plane** (:8080) and the
+**console** (:5173), clears stale ports first, waits for each to answer, and prints the API key and
+what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was killed.
+
+- `--build` rebuilds the Java modules first. Without it, existing jars are reused.
+- `--fake` forces the non-load-generating provider.
+- It picks **local-jmeter** automatically when `jmeter` is on PATH, and says which it chose. With
+  the fake provider a run ends in **`Failed` / `NO_LOAD_GENERATED`** — correct, not broken: the run
+  measured nothing, so nothing can pass (`HANDOFF.md` §3b). `brew install jmeter` for real load.
+
+Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
+New test → the **Demo service** template runs unedited → Save test → Run this. Or **Import
+journeys** and paste a cURL command, an OpenAPI document, a HAR or a Postman collection.
+
+### Verifying a change
 
 ```bash
 # JAVA_HOME is NOT set in the shell profile. Every mvn call must supply it.
@@ -16,27 +36,14 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **684 tests, 0 failures, 0 skipped** across 11 modules. Docker must be running (Testcontainers
+Expect **833 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
 
 ```bash
-# Run it (terminal 1)
-JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
-  java -jar platform-core/target/platform-core-1.0.0.jar --platform.config-dir=config/teams
-
-# Run the UI (terminal 2)
-cd platform-ui && npm run dev
+cd platform-ui && npm run lint && npm run build     # 10 errors, 3 warnings, all pre-existing
 ```
-
-Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
-New test → the **Demo service** template is pre-selected and runs unedited → Save test → Run this.
-
-**It ends in `Failed` / `NO_LOAD_GENERATED`, and that is correct.** The default provider generates no
-load, so the run measured nothing, so no objective can pass (`HANDOFF.md` §3b). For real load:
-`brew install jmeter`, start the demo service, and add
-`--platform.orchestration.execution-provider=local-jmeter`. Full guide in `README.md`.
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
 
@@ -56,65 +63,55 @@ For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole 
   `PerformanceConsole.tsx`. Verified by linting the committed files. Do not "fix" them as part of
   something else; the count rose from 3 without code changing, because eslint's React rules began
   analysing a file that always had them.
+- **`Tests run: 0` for a class with `@Nested` classes was cosmetic, never lost coverage** — Surefire
+  ≤3.5.2 filed the outer class's own tests into the last nested class's report file. The root pom now
+  pins **Surefire 3.5.3**, which attributes correctly. Mixing top-level and `@Nested` tests is safe.
+  A `Tests run: 0` line is still correct for a class where every test is nested. `HANDOFF.md` §2/§3h.
 
 ---
 
-## 2. Where I stopped, mid-Increment 2
+## 2. What to do next
 
-Increment 2 (CLAUDE.md §28) is large: five importers plus dataset partitioning, dry-run preflight,
-baseline comparisons and Jenkins integration. I split it. **Two parts are done and committed:**
+**`ROADMAP.md` is the full list. Read §0 of it first — it says where to stop.**
 
-- **2a — a specification can express a whole request** (`1b61d0e`). Headers, query parameters and
-  bodies, in the digest, with credential refusals. This was the gap; everything else builds on it.
-- **2b — the cURL importer** (`9fcefe1`). `SourceImporter` port, `platform-importers/importer-curl`,
-  and `POST /api/v2/imports/{sourceType}`.
+The short version: **the foundation is complete** (CLAUDE.md §32, with team authorization enforced
+against a development identity provider until Increment 4). There is **one loose thread**:
 
-**The immediate next step is 2c — the OpenAPI importer.** The scaffolding is all in place:
+> **A dataset can be declared, bound to with `${column}` and validated — but not delivered.**
+> Uploading and storing the file is Increment 2h. A specification can reference `${orderId}`, pass
+> validation, and find no data at run time.
 
-1. New module `platform-importers/importer-openapi`, modelled exactly on `importer-curl` — same pom
-   shape, `platform-domain` only, no Spring. Register it in the root `pom.xml` `<modules>` and
-   `<dependencyManagement>`, add it to `platform-core/pom.xml`, and add a `@Bean` beside
-   `curlImporter()` in `OrchestrationConfiguration`. The controller finds it through the port;
-   nothing enumerates importers.
-2. Add it to `ModuleDependencyRulesTest.importersAreIsolated()` — that test currently names
-   `importer-curl` explicitly and will not cover a new module until you add it.
-3. **It needs a YAML/JSON parser and `platform-domain` has none by design.** Jackson is already a
-   dependency of `platform-api`, not of the domain. Either put the module's parsing behind its own
-   Jackson dependency (fine — an importer is an adapter, and `ModuleDependencyRulesTest` does not
-   forbid `SERIALIZATION` for importers as written), or pass a parsed tree in. Decide deliberately.
-4. CLAUDE.md §23 is specific about OpenAPI: import operations, methods, paths, parameters and
-   schemas; **preserve `operationId`**; allow user mapping of examples to datasets; and
-   **do not invent valid business data silently.** A schema says a field is a string, not which
-   string. Inventing one produces a test that exercises validation-failure paths at scale and reports
-   them as latency — emit a finding and leave it for a person.
+**Recommended: do 2h, then stop.** One increment; it closes Increment 2 and turns the last
+half-built thing in the tree into a whole one. `ROADMAP.md` §1 has the four steps and the one real
+decision (the artifact port is run-scoped; a dataset outlives a run).
 
-Then the rest of Increment 2, in rough order of value: **HAR** (sanitize cookies, auth and sensitive
-query parameters; group into candidate journeys), **Postman** (flag scripts, never execute them),
-**dataset partitioning** (also unblocks sharding — see below), dry-run preflight, baseline
-comparisons, Jenkins shared library.
+Everything else — dry-run preflight, baseline comparisons, correlation and extraction, Playwright,
+enterprise identity, assisted authoring — is in `ROADMAP.md` §§2–5, with a size and a reason. None of
+it is urgent, and none of it should be started because it is next in a list.
 
-### Smaller things still open
+### What is already done — do not rebuild
 
-- **Sharding is untested and unpartitioned.** Everything so far is `PERF_SHARD_COUNT=1`; multiple
-  shards would replay identical work. Dataset partitioning must land before shard count rises, and
-  calibration before that (`docs/operations/runner-calibration.md`).
-- **`ConcurrencyThreadGroup` is in the runner image but unused** — the plan generator still emits
-  stepwise thread groups. A change to `JmeterWorkloadRenderer`.
-- **Not run on EKS**, so IRSA specifically is unexercised; the kind run used a credentials Secret.
-- **A UI path for importing does not exist.** The endpoint works; the console has no button.
-
-### Already delivered — do not rebuild
-
-The report endpoint and UI, artifact download with per-request authorization and digest verification,
-persisted `run_metrics`, synthetic-run marking, the Kubernetes execution provider, the S3 artifact
-store, artifact adoption with plan-digest verification, the JMeter runner image, the request model,
-and the cURL importer. `HANDOFF.md` §3b–§3g.
+Increments 0 through 2g. The canonical specification, durable run orchestration, the JMeter engine
+behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact store, the runner
+image, report and artifact download, synthetic-run marking, **four source importers**, the console's
+import panel, and dataset binding and partitioning. `HANDOFF.md` §3–§3l is the account of each.
 
 ---
 
 ## 3. Rules that do not bend
 
 - **Stop after the increment you were asked for.** Produce the CLAUDE.md §30 completion report.
+- **Finish every increment the same way**, before anything else is started:
+  1. Update `HANDOFF.md` — the status table, the test count, and a new `§3x` section saying what was
+     built, what was decided and *why*, and what was deliberately left undone.
+  2. Update `NEXT-SESSION.md` §2 and `ROADMAP.md` so the next person's first move is obvious.
+  3. **Commit**, code and documents together, with a message in this repo's style: an imperative
+     sentence naming the outcome a consumer gets, not the files touched. `git log` for examples —
+     *"Import a cURL command into draft scenarios"*, *"Let a specification express a whole request"*,
+     *"Prove the Kubernetes path on a real cluster, and fix what that found"*. The body carries the
+     detail: what changed, what was decided, what is verified, what is not.
+  A commit whose documents still describe the previous state is how a fresh context starts by
+  rebuilding something that already exists.
 - Do not push, tag, merge or publish without explicit authorization.
 - V1 must keep working. `/api/v1/**` and the **Legacy (v1)** UI tab are the check.
 - Tests named `KNOWN DEFECT` / `KNOWN GAP` / `KNOWN SECURITY GAP` assert behaviour that is wrong on

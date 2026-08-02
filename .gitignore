@@ -36,3 +36,6 @@ perf-report.html
 # Local Environment / Secrets
 .env
 .env.local
+
+# Local run state from scripts/start-platform.sh
+.local/

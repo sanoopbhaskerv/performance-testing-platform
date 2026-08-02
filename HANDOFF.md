@@ -1,11 +1,19 @@
 # Handoff — live working state
 
 **Purpose:** If the current agent session ends, another agent picks up from here.
-**Read first:** `NEXT-SESSION.md` for the immediate task and build commands, then this file for state.
+**Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
+then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 1E complete and proven on a real Kubernetes cluster (§3d–§3f).
-**Increment 2 is in progress**: the request model and the cURL importer are done (§3g); the OpenAPI
-importer is next. `NEXT-SESSION.md` §2 has the exact next step.
+**Last updated:** Increment 2g. Increments 0–2g are complete and committed.
+
+**The foundation is complete** (CLAUDE.md §32), with one partial — team authorization is enforced
+against a *development* identity provider until Increment 4 — and **one loose thread**: a dataset can
+be declared, bound to and validated but **not delivered** (§3l). `ROADMAP.md` §0 recommends doing
+Increment 2h and stopping there.
+
+```bash
+./scripts/start-platform.sh     # demo service + control plane + console, one command
+```
 
 ---
 
@@ -24,10 +32,17 @@ importer is next. `NEXT-SESSION.md` §2 has the exact next step.
 | 1E — Kubernetes provider and object storage | **Complete** `1556f43` | see §3d |
 | 1E — runner image, proven on kind | **Complete** `cfdec46`, `7cbe93d` | see §3e, §3f |
 | 1F (partial) — V2 UI foundation | **Delivered with 1D**, extended by the report | `platform-ui/src/v2/` |
-| 2 — request model + cURL importer | **In progress** `1b61d0e`, `9fcefe1` | see §3g |
-| 2 — OpenAPI, HAR, Postman, datasets | **Not started** | `NEXT-SESSION.md` §2 |
+| 2a/2b — request model + cURL importer | **Complete** `1b61d0e`, `9fcefe1` | see §3g |
+| 2c — OpenAPI / Swagger importer | **Complete** | see §3h |
+| 2d — HAR importer | **Complete** | see §3i |
+| 2e — Postman importer | **Complete** | see §3j |
+| 2f — importing from the console | **Complete** | see §3k |
+| 2g — dataset binding and partitioning | **Complete** | see §3l |
+| **2h — dataset storage and delivery** | **Not started — recommended next** | `ROADMAP.md` §1 |
+| 3 / 4 / 5 and the rest of 2 | **Not started** | `ROADMAP.md` §§2–5 |
 
-**684 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path).
+**833 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
+721 at 2c, 760 at 2d, 803 at 2e).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -38,16 +53,30 @@ Further commits on `feature/platform-v2-foundation` land in it automatically.
 
 `v1-poc` tag exists on the remote at the baseline commit `9233d96` (created by the user).
 
-**Immediate next action:** the **OpenAPI importer** (Increment 2c). `NEXT-SESSION.md` §2 lists the
-four steps and the one real decision it needs. Everything it depends on is committed and green.
+**All five importers CLAUDE.md §23 requires now exist** — cURL, OpenAPI/Swagger, HAR, Postman, and
+manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all four document
+importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
+(§3l) but not yet delivered.
+
+**Immediate next action: `ROADMAP.md` §0**, which recommends Increment 2h and then stopping.
 
 ---
 
 ## 2. Environment gotchas (these will bite you)
 
 ```bash
+./scripts/start-platform.sh                     # run the whole local stack
 JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home mvn -B -f pom.xml clean verify
 ```
+
+- **`scripts/start-platform.sh` is the supported way to run locally.** It starts the demo service
+  (:8081), the control plane (:8080) and the console (:5173), clears stale ports first, waits for
+  each, and picks `local-jmeter` when `jmeter` is on PATH. `--build`, `--fake`, `--stop`, `--help`.
+  Logs in `.local/logs/` (git-ignored). It exists because starting these by hand went wrong in three
+  different ways, each recorded below.
+- **A readiness probe must not insist on a 2xx.** Every useful V2 endpoint answers **403** without an
+  API key, and unauthenticated calls return 403 rather than 401 anyway (defect D7). The first version
+  of the start script used `curl -f` and declared a perfectly healthy control plane dead.
 
 - **`JAVA_HOME` is not set in the shell profile.** Every `mvn` call must supply it or Maven fails immediately.
 - Only **JDK 21** is installed; the project targets **Java 17**. Building on 21 with `--release 17` is correct. **Do not change `java.version`** — CLAUDE.md §31 pause condition.
@@ -63,6 +92,14 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - **`Map.copyOf` returns an *unordered* map** whose iteration order is randomized per JVM run. It
   silently broke `NormalizedRunResult`'s documented stable ordering and only failed on a later run.
   Use `Collections.unmodifiableMap(new LinkedHashMap<>(…))` where order is part of the contract.
+- **`Tests run: 0` for a class that declares `@Nested` classes was a Surefire *reporting* artefact,
+  never lost coverage — and the root pom now pins Surefire 3.5.3 to stop it.** Up to 3.5.2, Surefire
+  filed the outer class's own `@Test` methods into the report of the last nested class it emitted,
+  then printed `Tests run: 0` for the outer class. The methods always executed: the `<testcase>`
+  entries carry the correct outer `classname`, and injecting a deliberate failure turns the build
+  red. Mixing top-level and `@Nested` tests is safe. A `Tests run: 0` line is still normal and
+  correct for a class where *every* test is nested (18 such classes). To check attribution rather
+  than trust the console, `grep 'classname="<fqcn>"' <module>/target/surefire-reports/*.xml`. See §3h.
 - **`@Scheduled(fixedDelayString=…)` does not accept `10s`.** It takes milliseconds or ISO-8601. `ReconciliationScheduler` registers its task through `SchedulingConfigurer` using the already-parsed `Duration` instead, so the config file keeps one value in one format.
 
 ---
@@ -430,11 +467,373 @@ having looked at it. It returns scenarios rather than a whole specification, bec
 answer what the load model, objectives or journey mix should be, and placeholders would produce a
 test that looks ready and means nothing.
 
+## 3h. Increment 2c — the OpenAPI / Swagger importer
+
+`platform-importers/importer-openapi`, registered exactly as the cURL one is. OpenAPI 3 and Swagger
+2, YAML and JSON, from one parser.
+
+**The decision `NEXT-SESSION.md` left open — how an importer parses — resolved as: the module holds
+its own Jackson.** `jackson-databind` and `jackson-dataformat-yaml` are already dependencies of
+`platform-api` and `platform-core`, so nothing new entered the build and no §31 pause applied. The
+alternative (passing a parsed tree through the port) would have put a serialization concern into
+`SourceImporter`, and therefore into the domain, which 1B deliberately kept Jackson-free. An importer
+is an adapter and a format library is what an adapter is for. `ModuleDependencyRulesTest` forbids
+Spring, persistence, web, Kubernetes and engine types for importers, and now names both modules;
+`SERIALIZATION` is deliberately not on that list, with the reasoning recorded in the test's javadoc.
+
+### It does not invent business data — which is most of what it does
+
+CLAUDE.md §23's hardest rule, and the reason it is hard: a draft full of plausible invented values
+looks finished. It would send requests the target rejects, at full load, and report the rejection
+latency as the API's performance — a wrong answer rather than a failure, which is the mode this
+platform has to be most suspicious of.
+
+`StatedValues` is the whole of the policy. Every value comes from something a person wrote in the
+document — `example`, an `examples` entry, a schema `example`, a `default`, or the first `enum`
+member. Nothing is derived from a type, format, pattern or minimum. Where a value is needed and none
+is stated, the gap stays visible:
+
+- An unfillable **path** parameter leaves `{orderId}` in the path and is an **ERROR**, not a warning.
+  It is the one gap that is not survivable: every request 404s, and a run made of 404s reports fast,
+  healthy-looking latency for a target that did no work. The scenario is still returned so it can be
+  completed — the finding is what says it is not ready.
+- A **request body** described only by a schema is not generated. Warning, with the reason.
+- A **required** query or header parameter with no stated value is reported; an **optional** one is
+  simply omitted, because omitting it is a valid request and a finding for each would be noise.
+- Which values *did* come from the document is reported as a count: they are valid shapes, not
+  necessarily data that exists in the environment the test will run against.
+
+Weights are equal shares summing to 100, and the draft says so. The document describes what an API
+*has*, never how much traffic each operation receives; a fabricated distribution would read as a
+decision somebody made.
+
+### Untrusted input, treated as such
+
+The document arrives over HTTP from whoever uploaded it.
+
+- **An external `$ref` is not followed.** Fetching a URL named by an uploaded document would be a
+  request forgery using the platform's own network position — the test uses a link-local address to
+  say so. Reported and left unresolved. Reference *cycles* terminate rather than looping.
+- Parameters named as credentials are refused by **name**, token-shaped examples by **shape**, and
+  no finding ever echoes what it refused (pinned by a test). Cookie parameters are dropped; a
+  declared `security` requirement is reported so it is replaced rather than discovered as 401s.
+- The host is dropped and reported. The server URL's **path prefix is kept** — `/v1` is part of the
+  request, not part of the address — and a path is never a full URL, so a document cannot name its
+  own host.
+- `TRACE` is skipped (the specification does not support it); a body declared on `GET`/`HEAD` is not
+  imported, because servers and proxies drop it unpredictably and the test would measure a different
+  request than the one written. Over 200 operations the import is truncated and says so.
+
+### operationId is preserved, and now reaches the caller
+
+CLAUDE.md §23 requires it. `ScenarioSpec` already carried the field; **`ImportResponse.ImportedScenario`
+did not**, so it would have stopped at the API boundary. Added — null for cURL, which has no such
+concept. Names cannot carry it: a name reaches artifact object keys and Kubernetes labels and must
+be lowercase-alphanumeric-with-hyphens, so `listOrdersByCustomer` becomes the name
+`list-orders-by-customer` while the operationId survives verbatim. That is what lets a report be
+matched back to the operation in the document.
+
+### One suspected defect found on the way, since investigated and withdrawn
+
+An earlier pass recorded that **a top-level `@Test` in a class that also declares `@Nested` classes
+is silently never executed**, on the evidence that the outer class reports `Tests run: 0`. That
+conclusion was wrong, and the investigation that retired it is worth keeping:
+
+- The JUnit Platform console launcher, run against the same classpath, shows both top-level methods
+  executing (`--details=tree` marks them ✔). The pattern also works in a minimal standalone
+  reproducer, in either declaration order.
+- Surefire's own XML confirms it. `TEST-…RunStateMachineTest$Capacity.xml` contains
+  `testcase name="draftIsNotARunState" classname="…RunStateMachineTest"` — the correct class, filed
+  into the wrong report file.
+- Injecting a deliberate failure into `draftIsNotARunState` turns the build **red**
+  (`Tests run: 29, Failures: 1`). A test that never runs cannot do that.
+
+Every affected method was confirmed present in the reports this way. The real defect is Surefire
+attributing the outer class's tests to the last nested class's report file and then printing
+`Tests run: 0` for the outer class. No coverage was lost and no test source needed to change.
+
+**The audit that accompanied the original claim was also short.** It listed 7 methods in 6 classes;
+there are **8 in 7** — `domain/target/TargetPolicyTest#loopbackIsPermitted` was missed. Grepping for
+the pattern is unreliable; the reliable enumeration is to diff which classes stop reporting
+`Tests run: 0` across Surefire versions.
+
+**Fixed by pinning Surefire 3.5.3** in the root pom (3.1.2, 3.2.5, 3.3.1, 3.5.0 and 3.5.2 all
+misattribute; 3.5.3 does not). Verified across the full reactor: same 803 tests, 0 skipped, BUILD
+SUCCESS, per-module totals byte-identical, and the 7 affected classes now report their own counts
+with no class newly reporting 0. The 18 classes where *every* test is nested still report
+`Tests run: 0` for the outer container, which is correct. `importer-openapi`'s all-`@Nested`
+convention is fine as a style but is not load-bearing.
+
+---
+
+## 3i. Increment 2d — the HAR importer
+
+`platform-importers/importer-har`, registered like the other two. Jackson databind only — a HAR is
+JSON by definition, so no YAML dataformat.
+
+**A HAR is the best and the most dangerous source this platform accepts**, and both halves shaped
+the implementation.
+
+### Best: it is the only source that knows how often each request was made
+
+An OpenAPI document lists every operation and says nothing about which matter — hence 2c's equal
+weights. A capture answers that question with evidence, so **scenario weights come from observed
+frequency**: repeats of the same call are collapsed and each repeat raises that scenario's weight
+instead of adding a scenario. Largest-remainder apportionment to exactly 100, with every scenario
+guaranteed at least 1 (a zero weight means the scenario never runs, which the specification refuses).
+A finding states the caveat that matters: one capture is one person's session, not production
+traffic.
+
+### Dangerous: it is a verbatim recording of a live session
+
+Every removal below is counted and reported, because CLAUDE.md §23 requires review before load
+execution and a person can only review what they have been told. **`import.har.reviewRequired` is
+emitted unconditionally**, including on an import that produced nothing.
+
+**The case `SecretValueDetector` cannot reach.** It asks whether a *value* looks like a credential,
+which catches a bearer token. It cannot catch `{"username":"a.smith","password":"Sunflower2019!"}` —
+nothing about that password is token-shaped, it is simply a real person's real password, and the
+sign-in request is the single most likely entry in a capture to be worth load-testing. So
+`CapturedBody` tests the **field name** instead, walking JSON at any depth and form-encoded
+parameters, with a pattern fallback for XML and plain text. A body with a credential field is
+refused **whole**, not redacted: partial redaction of a structure the class only partly understands
+is a guess, and a wrong guess here discloses a credential. Personal data (`ssn`, `cardNumber`,
+`dateOfBirth`, …) is refused on the same reasoning — it is a real customer's, and unlike a password
+it will still be valid next year. The scenario survives; only its body is dropped, and the finding
+names the field, never the value.
+
+**The filter that has to exist.** A capture calls analytics, CDNs and payment widgets. This platform
+drops the host from every request and sends every scenario to the one registered target — so an
+unfiltered capture would have aimed Google Analytics' `/collect` at the team's own service and
+reported the result as their latency. The **dominant host** (by request count, taken after assets
+and failures are filtered) is kept and every other host is dropped and named. Frequency rather than
+first-seen, because the first entry of a session is often a redirect from an identity provider.
+
+Also removed: cookies (counted, never read); `Authorization` and friends via `SecretValueDetector`;
+CSRF and session headers by name — not credentials in that class's sense, but minted for one session
+and rejected on replay; credential-shaped query parameters; static assets (extension or response
+content type); requests that **failed when captured**, since replaying a known failure adds it to
+the run's error rate; multipart bodies, which captures store truncated so what was recorded is not
+what was sent; and HTTP/2 pseudo-headers and browser negotiation headers.
+
+**The subtle one is conditional headers.** Replaying `If-None-Match` makes the target answer 304
+without doing any work, and the run reports excellent latency for a service that did nothing. Same
+family as the synthetic-run problem: a wrong answer rather than a failure.
+
+### Journeys: grouped, and honest about what that means
+
+Entries are grouped by the capture's own `pages`, and scenarios are named `<journey>-<call>` —
+`checkout-api-basket`, `checkout-post-api-orders`. That is the most this model can carry: **a
+`ScenarioSpec` is one request**, and the load model runs scenarios independently in weighted
+proportion, so a captured sequence does not survive as a sequence. `import.har.journeys.notOrdered`
+says so plainly, as a warning: order and correlation are not preserved, and a request needing an id
+from an earlier response will not have one. Multi-step scenarios would be a change to the
+specification model, and inventing the appearance of one here would describe a test that does not
+exist.
+
+### Verified over HTTP
+
+A capture containing a live cookie, a JWT, a password and a beacon produced three scenarios and
+eleven findings, and **grep found no byte of the password, the token or the cookie anywhere in the
+response**.
+
+---
+
+## 3j. Increment 2e — the Postman importer
+
+`platform-importers/importer-postman`. Collection **v2.0 and v2.1**; a v1 export is refused by name
+with the way out, because Postman itself converts them and maintaining a second reader for a format
+nothing has exported since 2016 is the wrong trade.
+
+**With this, every importer CLAUDE.md §23 lists exists** — OpenAPI, Postman, HAR, cURL and manual
+entry. (Playwright import is Increment 3, and is a source *reference* rather than a document.)
+
+### A collection is the friendliest source, and it hides two things
+
+It is the closest thing to a test that already exists: somebody curated these requests, **named them
+in words a person chose**, and arranged them into folders that usually correspond to real journeys.
+So names come from the author — folder path plus request name, kebab-cased — rather than being
+derived from paths as the other importers must. That is the single biggest quality difference in the
+drafts this produces.
+
+**It is the only source that carries executable code.** Pre-request and test scripts are flagged and
+never evaluated: the control plane does not run code that arrived in a document. It does not
+*summarise* them either — a description of an unevaluated script would be a guess presented as fact.
+One finding per script naming what it belongs to, at collection, folder and request level, plus a
+summary spelling out the failure this exists to prevent: **a collection whose scripts perform the
+sign-in imports perfectly and then fails on every request.** Someone who is told that checks; someone
+who is not loses an afternoon. A test asserts no script's text reaches a scenario or a finding.
+
+**It leaks credentials more quietly than a HAR does.** Everyone knows a capture is sensitive. Nobody
+thinks that about a collection they send a teammate — yet an export ships its variable values, and a
+variable named `accessToken` usually holds a working one. `CollectionVariables` substitutes a
+placeholder only when it passes both tests the platform already applies: the **name** is not one
+`SensitiveFieldDetector` recognises, and the **value** is not one `SecretValueDetector` recognises.
+A variable failing either is left as its placeholder and named in a finding that recommends rotation.
+
+### Three ways a placeholder fails to resolve, and they are different problems
+
+Refused (the collection states a credential), unknown (the value lives in a Postman *environment*,
+which exports separately and was not uploaded), and dynamic (`{{$guid}}` — the platform does not
+evaluate them, and a dataset is the equivalent). Each gets its own finding, because the remedy
+differs. In a **path** any of them is an **error**, on the same reasoning as the OpenAPI importer:
+`/orders/{{orderId}}` sent literally 404s on every request, and a run made of 404s reports fast,
+healthy-looking latency for a target that did no work. Postman's `:name` path syntax resolves from
+the request's own `url.variable` list and is treated identically when it does not.
+
+All five body modes are handled: `raw` (media type from the declared language), `urlencoded`
+(assembled from enabled fields, credential-checked **on the names before encoding**, since
+percent-encoding would hide `client_secret` from a scan of the serialized body), `graphql`
+(assembled into the JSON body a server actually receives), and `formdata`/`file` refused — a
+collection stores a path on the author's machine, not the contents, so there is nothing to send.
+
+### One refactor, at the moment the second consumer appeared
+
+2d's `CapturedBody` — the field-name policy that catches a plain-text password no value check could
+recognise — moved into `platform-domain` as **`SensitiveFieldDetector`**, beside `SecretValueDetector`
+where it belongs: it is a rule about what a specification may contain, not about HAR. The domain
+holds no serialization library, so JSON keys are matched with a regular expression rather than
+walked with Jackson; only field *names* are ever needed, it cannot be defeated by nesting depth or by
+a document that does not quite parse, and over-matching is the safe direction. HAR's 39 tests passed
+unchanged across the move, which is what says it was behaviour-preserving.
+
+### Verified over HTTP
+
+A collection with a bearer auth block, a credential variable, an `Authorization` header, an
+unresolved `{{orderId}}` in a path, a pre-request script and a saved sign-in body produced three
+scenarios and ten findings — and **grep found no byte of the password, the token or the script text
+anywhere in the response**.
+
+---
+
+## 3k. Increment 2f — importing from the console
+
+Four importers existed and were reachable only over HTTP, which is no use to the people they were
+built for. `platform-ui/src/v2/ImportPanel.tsx` and `scenarioYaml.ts`, opened from a button inside
+the test editor — importing is a step in describing a test, not a destination of its own.
+
+Paste or choose a file → **Read it** → the journeys as a table, and the findings in full underneath.
+
+### The findings get more room than the journeys
+
+Deliberate, and the whole reason the panel is shaped this way. Every importer removes far more than
+it keeps, and what it *could not* import is what stands between a draft and a test that measures
+something. They render with severity, message **and remediation**, sorted errors-first, and they
+**stay on screen after the journeys are inserted** — the alternative to reading them is a wall of
+401s at run time.
+
+### The splice validates itself against the server
+
+"Use these journeys" replaces the document's `scenarios:` block. Replacing part of a YAML document by
+manipulating text is only safe when it is checked — so `spliceScenarios` refuses unless there is
+exactly **one** `scenarios:` key, and the result is then **posted to `/validate` before it is
+accepted**. An edit that does not round-trip is discarded, not handed back looking fine. The platform
+already owns a validator; using it here turns an operation that could not otherwise be trusted into
+one that is proven every time.
+
+That safety net immediately earned itself. **The demo template cannot be imported into**, because its
+objectives are scoped to individual journeys (`demo-load/browse-users`) and replacing the journeys
+leaves them pointing at names that no longer exist. The validator refuses, nothing changes, and the
+message says so specifically — telling someone to paste the journeys manually would have been wrong,
+since that hits the identical wall. The **Blank starter**, whose objectives cover the whole workload,
+splices cleanly. That is not a defect in either template: an objective about a journey that is not in
+the test is a question nobody can answer, and only a person can decide what it should say instead.
+
+### Verified in a browser, not asserted
+
+cURL with an `Authorization` header and a cookie → one journey, credentials stripped and reported.
+HAR with a live cookie, a plain-text password, a CDN script and an analytics beacon → two journeys,
+ten findings. Splice into the Blank starter → correct indentation, quoted values, headers and query
+maps → **Save test** → `Created "checkout-baseline" version 1`. Console clean apart from V1's
+pre-existing `Error fetching teams: 403`.
+
 ### Not done
 
-The OpenAPI, HAR and Postman importers; dataset partitioning; dry-run preflight; baseline
-comparisons; Jenkins shared library. **No UI path for importing** — the endpoint works, the console
-has no button. `NEXT-SESSION.md` §2 has the exact next step and the one decision it needs.
+Dataset partitioning; dry-run preflight; baseline comparisons; Jenkins shared library.
+`NEXT-SESSION.md` §2 has the next step.
+
+### The gap worth knowing about
+
+**`platform-ui` has no test runner at all** — no vitest, no jest, nothing in `package.json`. So
+`scenarioYaml.ts`, the one piece of this increment with real logic worth pinning (indentation
+detection, block extent, YAML escaping), is covered only by the browser walkthrough above and by the
+server-side validation round-trip. Adding vitest is a CLAUDE.md §31 pause condition and was not taken
+unilaterally. It is the single most valuable thing to add before the UI grows further.
+
+---
+
+## 3l. Increment 2g — dataset binding and partitioning
+
+**This is half of datasets, deliberately.** A dataset can now be declared, bound to by a journey, and
+split so no two generators send the same row. What it cannot yet do is *arrive*: uploading a file,
+storing it team-scoped and delivering each shard its partition is 2h, and until that lands a
+specification can declare a dataset the platform will not find. The split was made because the
+storage half needs a team-scoped artifact port that does not exist — `ArtifactStore` is run-scoped
+all the way down to `ArtifactDescriptor` — and bolting that on alongside the domain work would have
+produced a half-built production path.
+
+### `DatasetPartitioner` — the piece that gates sharding
+
+`platform-domain/dataset/`. Round-robin, not contiguous blocks: datasets arrive sorted far more often
+than anyone intends — by created date, by customer, by region — and contiguous slices would hand
+shard 0 every January record and shard 9 every December one, so a per-shard latency difference would
+say more about the data than about the system. Every partition keeps the header, so each is a valid
+CSV in its own right. Deterministic, so a run is reproducible from its stored inputs. With fewer rows
+than shards the later shards get **nothing** rather than everyone getting a duplicate of row 1 — a
+duplicate is a generator sending traffic somebody else is already sending.
+
+This is what CLAUDE.md §15 requires of every shard and why shard count is pinned at 1. It is now
+implemented and tested; raising the count still waits on calibration and on 2h.
+
+### `${column}` binding, and why an unresolved one is an error
+
+A journey says `path: /orders/${orderId}` and each iteration takes the next row. `DatasetBinding`
+finds every reference across path, query, headers and body; `SemanticValidator` checks each against
+the columns the datasets declare.
+
+**Unresolved is an ERROR, not a warning**, and it is the same failure mode the platform keeps
+guarding against from a new direction: an unfilled reference is not left empty, it is sent
+*literally*. `/orders/${orderId}` goes out with those characters in the path, every request 404s, and
+the run reports fast healthy-looking latency for a target that did no work. A misspelled column name
+is a far easier mistake than a missing import — **verified live: `${orderID}` against a dataset
+declaring `orderId` is refused before any load is generated.** Where no dataset declares columns at
+all, references are reported as *unverifiable* (warning) rather than wrong.
+
+`${name}` is JMeter's own variable syntax, so a bound value passes through the renderer untouched.
+That is a convenience the JMeter engine happens to give, not a contract — and every reference is
+still resolved against declared columns rather than passed through unread, so a specification cannot
+smuggle in engine functions. **A test caught that this was not true**: `${__threadNum}` matched the
+first pattern, because it allowed a leading underscore. Every JMeter function begins with a double
+underscore, so that is now the line drawn.
+
+### Columns are declared *and* verified
+
+`DatasetSpec.columns` is new, and in the canonical form — so it is in the digest, and two versions
+expecting different columns are different tests. It is a declaration rather than a second source of
+truth: validation is side-effect-free and has to work before any file exists, so it checks against
+what the test *expects*, and 2h compares the file's actual header against it before the run starts.
+The same contract-and-verification shape as the plan digest.
+
+**Consequence worth knowing:** the canonical form changed, so a specification containing a dataset
+digests differently than it did before this increment. Stored versions keep their stored digest and
+nothing recomputes one, so nothing breaks — but a document re-validated today will not match a digest
+recorded yesterday.
+
+### JMeter rendering
+
+One plan-level `CSVDataSet` per dataset, reading `{name}.csv` from the runner's working directory —
+a plain file name, never an absolute path, because a path made on the control plane means nothing
+inside a runner Pod. `shareMode.all` so a row is used once per shard rather than once per thread
+group. **`recycle: false`, `stopThread: true`**: recycling would restart the file under load, the
+target would begin answering the same requests from cache, and the run would report excellent latency
+for work it had stopped doing.
+
+### Not done — this is 2h
+
+Uploading a dataset; team-scoped storage; slicing at preparation time and storing each shard's
+partition; comparing the file's header against the declared columns; the runner fetching its
+partition (a runner-image change, so it needs another kind run). Until then, **a declared dataset is
+validated but not delivered**.
 
 ---
 
