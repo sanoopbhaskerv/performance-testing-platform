@@ -64,11 +64,13 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | 2h — dataset storage and delivery | **Complete** | see §3m |
 | **S1 — the studio: shell, sources, refine, load, objectives, review** | **Complete** | see §3n |
 | **S2 — the report a novice can read, and run progress** | **Complete** | see §3o |
-| **S3–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S3 — journeys and correlation (engine half)** | **Complete** | see §3p |
+| **S3 — HAR ordered steps, studio Rules screen** | **Not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S4–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**898 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
+**931 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g).
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
@@ -1148,6 +1150,85 @@ moment they are looking at one.
 - **The Browser pane's screenshot capture stopped responding** during verification. Every claim above
   is from reading the rendered DOM, which is stronger evidence anyway; there are no screenshots of
   the final report.
+
+---
+
+## 3p. S3 — journeys and correlation
+
+**A test can now sign in.** A scenario used to be one request, so there was nowhere to put the second
+call and no way to hand it what the first returned. `ScenarioSpec` now carries ordered `steps`, each
+with its own request, extractions, expectations and think time.
+
+### Proven with real load, both ways round
+
+Two journeys against the demo service, identical except for one JSON path:
+
+| | Samples | Errors | Outcome |
+|---|---|---|---|
+| `$.status` — matches | 108 | 0 (0%) | **COMPLETED** |
+| `$.noSuchField` — never matches | 106 | 53, **100% of the extracting step** | **FAILED**, `OBJECTIVE_BREACHED` |
+
+The second is the one that matters. Without the sentinel guard it would have reported **0% errors
+and 30 ms p95** — the demo service answers 200 to `/api/users?echo=PERF_NOT_EXTRACTED_token` exactly
+as happily as to a real value. A perfectly healthy-looking test of a system that was never
+authenticated. Note where the failure lands: on `sign-in`, the step that failed to extract, not on
+the downstream step that received the garbage.
+
+### The sentinel is not optional and not configurable
+
+When a pattern does not match, JMeter substitutes the post-processor's default and **sends the next
+request anyway**. So every extraction renders two elements, never one: the post-processor with a
+sentinel default (`PERF_NOT_EXTRACTED_{name}`), and a `ResponseAssertion` in variable scope with
+`test_type` 12 — EQUALS plus NOT — that fails the sample when the sentinel survived. An extraction
+whose failure is silent is worse than no extraction at all, because the run still produces numbers.
+
+### Two defects found by using it rather than by testing it
+
+1. **Every journey rule was dead code.** An early return for journeys sat *above* the call that ran
+   them, so a journey validated clean whatever it contained — including a step carrying an
+   `Authorization` header. Found by validating a document that should have been refused and watching
+   it pass. Steps were a new way to write a request, and a new way to write a request is a new way
+   past a guard that only knew about the old one. Now pinned by `JourneyValidationTest`.
+2. **The credential guard made correlation useless for its main purpose.** `Authorization` is refused
+   by name whatever its value — but `Bearer ${session}` stores no secret. It is a placeholder for a
+   value extracted during the run, and the document is exactly as safe to store with it as without.
+   The guard now permits a credential-named header whose value is a reference to something the
+   platform supplies, and only that: the reference must resolve (enforced separately), and the text
+   around it is still scanned, so `Bearer eyJ…${session}` is still refused. A reference does not
+   launder a secret beside it.
+
+### The rules
+
+- A step may use only what an **earlier** step extracted, or a dataset column. A forward reference is
+  an ERROR, verified live: removing an extraction makes the later `${basketId}` refuse with
+  *"This step uses ${basketId}, which nothing has provided yet."*
+- An extraction name colliding with a dataset column is an ERROR — two sources for one reference
+  would make which value a request used depend on evaluation order.
+- A body pattern must capture **exactly one** group. Zero extracts nothing; two is ambiguous and the
+  engine would silently pick one.
+- A scenario stating both a single request and steps is refused rather than resolved by precedence.
+
+### Digests are preserved
+
+Steps are written to the canonical form **only when present**, a deliberate departure from the
+`.count`-always convention. There is no ambiguity to guard against here, and the payoff is that every
+specification written before journeys existed keeps its digest — unlike 2g, which changed all of
+them. Two documents differing only by a step digest differently, verified.
+
+### Not done, and still S3
+
+- **The HAR importer still emits sibling scenarios, not ordered steps.** Its
+  `import.har.journeys.notOrdered` warning therefore stands and must not be retired yet.
+- **No studio Rules screen.** Journeys are expressible in YAML and through the API, not yet by
+  clicking. The studio's Sources/Refine screens still produce single-request scenarios.
+
+### A gap this uncovered, pre-existing and not fixed here
+
+`SecretValueDetector`'s credential-name list is header-shaped: `x-api-key` is refused but `api_key`,
+`access_token` and `token` are not, so `?api_key=short-value` passes as a query parameter. A query
+string reaches every access log between the runner and the target, so the list arguably wants the
+query forms too. Left alone deliberately — widening it is a change to what every existing document
+validates as, not a side effect of adding journeys.
 
 ---
 

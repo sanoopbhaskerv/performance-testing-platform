@@ -5,6 +5,10 @@ import com.perfplatform.domain.dataset.DatasetUri;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AssertionOperator;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AssertionSubject;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ExtractionSource;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.SourceSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
 import com.perfplatform.domain.spec.SourceType;
@@ -14,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -538,6 +543,26 @@ public final class SemanticValidator {
         boolean hasPath = scenario.path() != null && !scenario.path().isBlank();
         boolean hasOperation = scenario.operationId() != null && !scenario.operationId().isBlank();
 
+        // A journey states its requests in its steps, so none of the single-request checks below
+        // apply to it. Its own rules run first and unconditionally: an early return that skipped
+        // them would leave a journey's headers un-scanned for credentials, which is exactly the
+        // guard this increment had to avoid weakening.
+        if (scenario.isJourney()) {
+            validateSteps(scenario, scenarioPath, datasetColumns, findings);
+
+            // Both forms at once is refused rather than resolved by a precedence rule. A rule would
+            // silently ignore whichever half the author actually meant, and the one it ignored is
+            // the one they would go looking for when the results made no sense.
+            if (hasPath || hasOperation) {
+                findings.add(ValidationFinding.error("spec.scenario.request.ambiguous",
+                        scenarioPath,
+                        "A scenario states both a single request and a list of steps.",
+                        "Keep one. A journey's requests belong in 'steps'; remove the scenario's "
+                                + "own method, path and operationId."));
+            }
+            return;
+        }
+
         if (!hasPath && !hasOperation) {
             findings.add(ValidationFinding.error("spec.scenario.request.missing",
                     scenarioPath,
@@ -574,9 +599,9 @@ public final class SemanticValidator {
                     "Supported methods are " + SUPPORTED_METHODS.stream().sorted().toList() + "."));
         }
 
-        validateHeaders(scenario, scenarioPath, findings);
-        validateQuery(scenario, scenarioPath, findings);
-        validateBody(scenario, scenarioPath, findings);
+        validateHeaders(scenario.headers(), scenarioPath, findings);
+        validateQuery(scenario.query(), scenarioPath, findings);
+        validateBody(scenario.body(), scenario.method(), scenarioPath, findings);
         validateDatasetReferences(scenario, scenarioPath, datasetColumns, findings);
     }
 
@@ -594,10 +619,35 @@ public final class SemanticValidator {
      * committed to Git and returned by the validate endpoint — a finding quoting the secret would
      * spread it further than the document did.
      */
-    private static void validateHeaders(ScenarioSpec scenario, String scenarioPath,
+    private static void validateHeaders(Map<String, String> headers, String scenarioPath,
             List<ValidationFinding> findings) {
+        validateHeaders(headers, scenarioPath, Set.of(), findings);
+    }
 
-        scenario.headers().forEach((name, value) -> {
+    /**
+     * The same checks, but aware of values the platform will supply at run time.
+     *
+     * <p>{@code supplied} holds names a dataset column or an earlier extraction provides. A header
+     * named as a credential whose value is <em>only</em> such a reference is permitted, and this is
+     * the one place the guard bends — for a reason that keeps its purpose intact rather than
+     * weakening it.
+     *
+     * <p>The guard exists so a <b>secret value</b> is never written into a document that is stored,
+     * digested, committed to Git and echoed back by the validate endpoint. {@code Bearer ${session}}
+     * contains no secret: it is a placeholder for something extracted during the run, and the
+     * document is exactly as safe to store with it as without. Refusing it would make correlation
+     * useless for the case it exists to serve — carrying a session forward — and the workaround
+     * people would find is worse than the rule.
+     *
+     * <p>Two things keep this narrow. The reference must resolve, which the unresolved-reference
+     * check enforces separately, so a header cannot smuggle in a name nothing provides. And the text
+     * around the reference is still scanned: {@code Bearer abc123…${x}} is refused on the literal
+     * part, because a reference next to a secret does not launder it.
+     */
+    private static void validateHeaders(Map<String, String> headers, String scenarioPath,
+            Set<String> supplied, List<ValidationFinding> findings) {
+
+        headers.forEach((name, value) -> {
             String path = scenarioPath + "/headers/" + name;
 
             if (isBlank(name)) {
@@ -606,6 +656,10 @@ public final class SemanticValidator {
                 return;
             }
 
+            if (SecretValueDetector.isCredentialHeader(name) && suppliedAtRunTime(value, supplied)) {
+                // A placeholder for a value the run produces, not a secret in the document.
+                return;
+            }
             if (SecretValueDetector.isCredentialHeader(name)) {
                 findings.add(ValidationFinding.error("spec.scenario.header.credential", path,
                         "Header '" + name + "' carries credentials and cannot be set in a "
@@ -626,16 +680,37 @@ public final class SemanticValidator {
     }
 
     /**
+     * Whether a value is a reference to something the platform supplies, and nothing sensitive else.
+     *
+     * <p>Requires at least one reference, requires every reference to be a name the run will
+     * actually provide, and requires whatever text surrounds them to be innocuous. "Bearer " is
+     * innocuous; a token sitting beside a reference is not.
+     */
+    private static boolean suppliedAtRunTime(String value, Set<String> supplied) {
+        if (value == null || !DatasetBinding.hasReference(value)) {
+            return false;
+        }
+        Set<String> referenced = DatasetBinding.referencesIn(Map.of("v", value));
+        if (referenced.isEmpty() || !supplied.containsAll(referenced)) {
+            return false;
+        }
+        // What is left once the placeholders are removed. A reference does not launder the text
+        // beside it.
+        String literal = value.replaceAll("\\$\\{[^}]*}", " ").trim();
+        return !SecretValueDetector.looksLikeCredential(literal);
+    }
+
+    /**
      * Query parameters must not carry credentials either — and for a sharper reason than headers.
      *
      * <p>A query string is recorded by every proxy, load balancer and access log between the runner
      * and the target, and lands in browser history and referrer headers besides. A credential in one
      * is disclosed to systems nobody enumerated (CLAUDE.md §20).
      */
-    private static void validateQuery(ScenarioSpec scenario, String scenarioPath,
+    private static void validateQuery(Map<String, String> query, String scenarioPath,
             List<ValidationFinding> findings) {
 
-        scenario.query().forEach((name, value) -> {
+        query.forEach((name, value) -> {
             if (isBlank(name)) {
                 findings.add(ValidationFinding.error("spec.scenario.query.name.missing",
                         scenarioPath + "/query", "A query parameter name must not be blank.", null));
@@ -660,27 +735,263 @@ public final class SemanticValidator {
      * blocking on — many servers and proxies silently drop it, so the test would measure a request
      * the author did not write.
      */
-    private static void validateBody(ScenarioSpec scenario, String scenarioPath,
-            List<ValidationFinding> findings) {
+    private static void validateBody(ScenarioSpec.RequestBody body, String method,
+            String scenarioPath, List<ValidationFinding> findings) {
 
-        if (!scenario.hasBody()) {
+        if (body == null || body.isEmpty()) {
             return;
         }
 
-        if ("GET".equals(scenario.methodOrDefault()) || "HEAD".equals(scenario.methodOrDefault())) {
+        String effectiveMethod = method == null || method.isBlank()
+                ? "GET" : method.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("GET".equals(effectiveMethod) || "HEAD".equals(effectiveMethod)) {
             findings.add(ValidationFinding.error("spec.scenario.body.notAllowed",
                     scenarioPath + "/body",
-                    "A " + scenario.methodOrDefault() + " request cannot carry a body.",
+                    "A " + effectiveMethod + " request cannot carry a body.",
                     "Many servers and proxies drop it silently, so the test would measure a "
                             + "different request than the one written. Use query parameters, or a "
                             + "method that carries a body."));
         }
 
-        if (SecretValueDetector.looksLikeCredential(scenario.body().content())) {
+        if (SecretValueDetector.looksLikeCredential(body.content())) {
             findings.add(ValidationFinding.error("spec.scenario.body.inline-secret",
                     scenarioPath + "/body/content",
                     "The request body appears to contain a credential value.",
                     "Specifications hold secret references, never secret values."));
+        }
+    }
+
+    /**
+     * A journey's steps, and the values that flow between them.
+     *
+     * <p>Three classes of rule, and the first is the one that must not be forgotten: <b>every step's
+     * headers, query and body go through exactly the same credential checks a single-request
+     * scenario does.</b> Steps were a new way to write a request, and a new way to write a request
+     * is a new way to smuggle an {@code Authorization} header past a guard that only knew about the
+     * old one.
+     *
+     * <p>Then the shape of each step, then the {@code ${...}} namespace: a reference resolves
+     * against the dataset columns plus whatever an <em>earlier</em> step extracted. Later is not
+     * good enough — an unfilled reference is sent as literal text, every request fails, and the run
+     * reports fast, healthy-looking latency for a target that did no work.
+     */
+    private static void validateSteps(ScenarioSpec scenario, String scenarioPath,
+            Set<String> datasetColumns, List<ValidationFinding> findings) {
+
+        List<StepSpec> steps = scenario.steps();
+        if (steps.isEmpty()) {
+            return;
+        }
+
+        Set<String> namesSoFar = new java.util.LinkedHashSet<>(datasetColumns);
+        Set<String> extractedNames = new java.util.LinkedHashSet<>();
+
+        for (int i = 0; i < steps.size(); i++) {
+            StepSpec step = steps.get(i);
+            String stepPath = scenarioPath + "/steps/" + i;
+
+            if (isBlank(step.name())) {
+                findings.add(ValidationFinding.error("spec.step.name.missing", stepPath + "/name",
+                        "Every step needs a name.",
+                        "It identifies the step in results and findings, so 'sign-in' beats 'step 2'."));
+            }
+
+            if (isBlank(step.path())) {
+                findings.add(ValidationFinding.error("spec.step.path.missing", stepPath + "/path",
+                        "A step must declare a path.", "For example 'path: /api/orders'."));
+            } else {
+                String requestPath = step.path().trim();
+                if (!requestPath.startsWith("/")) {
+                    findings.add(ValidationFinding.error("spec.step.path.invalid", stepPath + "/path",
+                            "A step path must begin with '/'.",
+                            "Paths are relative to the base URL the platform resolves for this "
+                                    + "application. Write '/api/users', not a full URL."));
+                } else if (requestPath.contains("://")) {
+                    findings.add(ValidationFinding.error("spec.step.path.absolute", stepPath + "/path",
+                            "A step path must not be a full URL.",
+                            "Where a run's traffic goes is resolved from the team's registered "
+                                    + "targets. A specification cannot name its own host."));
+                }
+            }
+
+            if (step.method() != null && !step.method().isBlank()
+                    && !SUPPORTED_METHODS.contains(
+                            step.method().trim().toUpperCase(java.util.Locale.ROOT))) {
+                findings.add(ValidationFinding.error("spec.step.method.unsupported",
+                        stepPath + "/method",
+                        "HTTP method '" + step.method() + "' is not supported.",
+                        "Supported methods are " + SUPPORTED_METHODS.stream().sorted().toList() + "."));
+            }
+
+            // The same guards, on the same terms — plus the names the run will have supplied by
+            // the time this step executes, so a session carried in an Authorization header is
+            // recognised as a placeholder rather than as a secret. See validateHeaders' javadoc.
+            validateHeaders(step.headers(), stepPath, namesSoFar, findings);
+            validateQuery(step.query(), stepPath, findings);
+            validateBody(step.body(), step.method(), stepPath, findings);
+
+            validateStepReferences(step, stepPath, namesSoFar, datasetColumns, findings);
+            validateExtractions(step, stepPath, datasetColumns, extractedNames, findings);
+            validateAssertions(step, stepPath, findings);
+
+            step.extract().forEach(extraction -> namesSoFar.add(extraction.name()));
+        }
+    }
+
+    /**
+     * Every {@code ${...}} a step uses must already exist when the step runs.
+     *
+     * <p>"Already" is the whole rule. A reference to a value a <em>later</em> step extracts is not a
+     * timing subtlety — it is a request sent with the characters {@code ${session}} in its header.
+     */
+    private static void validateStepReferences(StepSpec step, String stepPath,
+            Set<String> available, Set<String> datasetColumns, List<ValidationFinding> findings) {
+
+        for (String reference : DatasetBinding.referencesIn(step)) {
+            if (available.contains(reference)) {
+                continue;
+            }
+            findings.add(ValidationFinding.error("spec.step.reference.unresolved",
+                    stepPath,
+                    "This step uses ${" + reference + "}, which nothing has provided yet.",
+                    datasetColumns.isEmpty()
+                            ? "Extract it in an earlier step, or declare a dataset column named '"
+                                    + reference + "'."
+                            : "Extract it in an earlier step, or add it to the dataset. Declared "
+                                    + "columns are " + datasetColumns.stream().sorted().toList()
+                                    + ". An unfilled reference is sent as the literal text "
+                                    + "${" + reference + "}, so every request would fail."));
+        }
+    }
+
+    private static void validateExtractions(StepSpec step, String stepPath,
+            Set<String> datasetColumns, Set<String> alreadyExtracted,
+            List<ValidationFinding> findings) {
+
+        for (int e = 0; e < step.extract().size(); e++) {
+            var extraction = step.extract().get(e);
+            String path = stepPath + "/extract/" + e;
+
+            if (isBlank(extraction.name())) {
+                findings.add(ValidationFinding.error("spec.extract.name.missing", path + "/name",
+                        "An extracted value needs a name.",
+                        "Later steps refer to it as ${name}."));
+                continue;
+            }
+
+            // A name that is both a column and an extraction has two sources, and which one wins
+            // would depend on evaluation order — a test whose behaviour nobody can predict from
+            // reading it.
+            if (datasetColumns.contains(extraction.name())) {
+                findings.add(ValidationFinding.error("spec.extract.name.collides-with-dataset",
+                        path + "/name",
+                        "'" + extraction.name() + "' is already a dataset column, so ${"
+                                + extraction.name() + "} would have two sources.",
+                        "Rename one of them. Which value a request used would otherwise depend on "
+                                + "evaluation order rather than on anything the document says."));
+            }
+            if (!alreadyExtracted.add(extraction.name())) {
+                findings.add(ValidationFinding.error("spec.extract.name.duplicate", path + "/name",
+                        "'" + extraction.name() + "' is extracted more than once in this journey.",
+                        "Rename one of them, so a step's ${" + extraction.name() + "} refers to "
+                                + "exactly one thing."));
+            }
+
+            if (extraction.from() == null) {
+                findings.add(ValidationFinding.error("spec.extract.from.missing", path + "/from",
+                        "An extracted value must say where to look.",
+                        "One of json-body, regex-body, header, set-cookie or status."));
+                continue;
+            }
+
+            boolean needsExpression = extraction.from() != ExtractionSource.STATUS;
+            if (needsExpression && isBlank(extraction.expression())) {
+                findings.add(ValidationFinding.error("spec.extract.expression.missing",
+                        path + "/expression",
+                        "Extracting from " + extraction.from().name().toLowerCase(java.util.Locale.ROOT).replace('_', '-') + " needs an expression.",
+                        switch (extraction.from()) {
+                            case JSON_BODY -> "A JSON path, such as '$.token'.";
+                            case REGEX_BODY -> "A regular expression with one capturing group.";
+                            case HEADER -> "The header's name.";
+                            case SET_COOKIE -> "The cookie's name.";
+                            case STATUS -> null;
+                        }));
+            }
+
+            if (extraction.from() == ExtractionSource.REGEX_BODY
+                    && !isBlank(extraction.expression())) {
+                validateCapturingGroup(extraction.expression(), path + "/expression", findings);
+            }
+        }
+    }
+
+    /**
+     * A body regular expression must compile, and must capture exactly one group.
+     *
+     * <p>Zero groups extracts nothing and every request afterwards carries an empty value. Two
+     * groups is ambiguous, and the engine would pick one — silently, and not necessarily the one
+     * that was meant.
+     */
+    private static void validateCapturingGroup(String expression, String path,
+            List<ValidationFinding> findings) {
+        try {
+            int groups = java.util.regex.Pattern.compile(expression).matcher("").groupCount();
+            if (groups != 1) {
+                findings.add(ValidationFinding.error("spec.extract.expression.groups", path,
+                        "A body pattern must have exactly one capturing group; this has "
+                                + groups + ".",
+                        "Wrap the part to extract in parentheses, and use (?:...) for any other "
+                                + "grouping."));
+            }
+        } catch (java.util.regex.PatternSyntaxException e) {
+            // The message is the engine's own and names the position, which is what makes a broken
+            // pattern fixable. It quotes the pattern, never a response.
+            findings.add(ValidationFinding.error("spec.extract.expression.invalid", path,
+                    "This is not a valid regular expression.", e.getDescription()));
+        }
+    }
+
+    private static void validateAssertions(StepSpec step, String stepPath,
+            List<ValidationFinding> findings) {
+
+        for (int a = 0; a < step.expect().size(); a++) {
+            var assertion = step.expect().get(a);
+            String path = stepPath + "/expect/" + a;
+
+            if (assertion.subject() == null || assertion.operator() == null) {
+                findings.add(ValidationFinding.error("spec.expect.incomplete", path,
+                        "An expectation needs both a subject and an operator.",
+                        "For example: subject: status, operator: equals, value: '200'."));
+                continue;
+            }
+            if (isBlank(assertion.value())) {
+                findings.add(ValidationFinding.error("spec.expect.value.missing", path + "/value",
+                        "An expectation needs a value to compare against.", null));
+                continue;
+            }
+            if (assertion.subject() == AssertionSubject.STATUS
+                    && assertion.operator() == AssertionOperator.EQUALS) {
+                try {
+                    int code = Integer.parseInt(assertion.value().trim());
+                    if (code < 100 || code > 599) {
+                        throw new NumberFormatException();
+                    }
+                } catch (NumberFormatException e) {
+                    findings.add(ValidationFinding.error("spec.expect.status.invalid",
+                            path + "/value",
+                            "'" + assertion.value() + "' is not an HTTP status code.",
+                            "Use a number between 100 and 599, such as 200 or 201."));
+                }
+            }
+            if (assertion.operator() == AssertionOperator.MATCHES) {
+                try {
+                    java.util.regex.Pattern.compile(assertion.value());
+                } catch (java.util.regex.PatternSyntaxException e) {
+                    findings.add(ValidationFinding.error("spec.expect.pattern.invalid",
+                            path + "/value",
+                            "This is not a valid regular expression.", e.getDescription()));
+                }
+            }
         }
     }
 

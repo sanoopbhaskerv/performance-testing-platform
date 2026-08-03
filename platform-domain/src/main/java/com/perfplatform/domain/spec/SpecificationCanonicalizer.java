@@ -7,6 +7,7 @@ import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObservabilitySpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.SourceSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
 
@@ -220,6 +221,8 @@ public final class SpecificationCanonicalizer {
                     field(out, scenarioPrefix + ".body.contentType", body.contentType());
                     field(out, scenarioPrefix + ".body.content", body.content());
                 }
+
+                canonicalizeSteps(out, scenarioPrefix, scenario.steps());
             }
 
             var startWhen = workload.startWhen();
@@ -232,6 +235,76 @@ public final class SpecificationCanonicalizer {
 
             field(out, prefix + ".browserUsers", number(workload.browserUsers()));
             field(out, prefix + ".iterationsPerUser", number(workload.iterationsPerUser()));
+        }
+    }
+
+    /**
+     * A journey's steps, and nothing at all when it has none.
+     *
+     * <p>Written only when steps exist, which is a deliberate departure from the {@code .count}
+     * convention used for headers and query parameters. Those emit a count even when empty so that
+     * "no headers" cannot be confused with "headers absent". Here there is nothing to confuse: a
+     * scenario with no steps is a single request stated through {@code method} and {@code path}, and
+     * a scenario with steps writes keys that no single-request scenario can produce.
+     *
+     * <p>The payoff is that <b>every specification written before journeys existed keeps its
+     * digest</b>. Increment 2g changed the canonical form and every stored digest with it — harmless,
+     * because nothing recomputes a stored digest, but it meant a document re-validated afterwards no
+     * longer matched what was recorded for it. Avoiding that here costs one conditional.
+     *
+     * <p>Order is preserved and never sorted: steps run in sequence, a later one may depend on a
+     * value an earlier one extracted, and reordering them is a different test.
+     */
+    private static void canonicalizeSteps(StringBuilder out, String scenarioPrefix,
+            List<StepSpec> steps) {
+
+        if (steps.isEmpty()) {
+            return;
+        }
+
+        field(out, scenarioPrefix + ".steps.count", String.valueOf(steps.size()));
+        for (int i = 0; i < steps.size(); i++) {
+            StepSpec step = steps.get(i);
+            String prefix = scenarioPrefix + ".steps[" + i + "]";
+
+            field(out, prefix + ".name", step.name());
+            field(out, prefix + ".method", step.method());
+            field(out, prefix + ".path", step.path());
+            // Sorted, as elsewhere: two documents differing only in the order they list headers
+            // describe the same request.
+            canonicalMap(out, prefix + ".headers", step.headers());
+            canonicalMap(out, prefix + ".query", step.query());
+
+            var body = step.body();
+            if (body == null) {
+                field(out, prefix + ".body", null);
+            } else {
+                field(out, prefix + ".body.contentType", body.contentType());
+                field(out, prefix + ".body.content", body.content());
+            }
+
+            field(out, prefix + ".thinkTime", duration(step.thinkTime()));
+
+            // Extractions are ordered because a later one may match against text an earlier one
+            // shortened, and because the order is what the author wrote.
+            field(out, prefix + ".extract.count", String.valueOf(step.extract().size()));
+            for (int e = 0; e < step.extract().size(); e++) {
+                var extraction = step.extract().get(e);
+                String ePrefix = prefix + ".extract[" + e + "]";
+                field(out, ePrefix + ".name", extraction.name());
+                field(out, ePrefix + ".from", name(extraction.from()));
+                field(out, ePrefix + ".expression", extraction.expression());
+                field(out, ePrefix + ".required", String.valueOf(extraction.required()));
+            }
+
+            field(out, prefix + ".expect.count", String.valueOf(step.expect().size()));
+            for (int a = 0; a < step.expect().size(); a++) {
+                var assertion = step.expect().get(a);
+                String aPrefix = prefix + ".expect[" + a + "]";
+                field(out, aPrefix + ".subject", name(assertion.subject()));
+                field(out, aPrefix + ".operator", name(assertion.operator()));
+                field(out, aPrefix + ".value", assertion.value());
+            }
         }
     }
 

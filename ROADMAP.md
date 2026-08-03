@@ -60,7 +60,7 @@ Worth doing, in this order, none urgent.
 | **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. | Medium |
 | **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. | Medium |
 | **Jenkins shared library** | CLAUDE.md §20 wants CI to use a scoped service identity, not a person's key. Blocked on Increment 4's identity work to be done properly; a thin version using an API key is possible sooner. | Small–Medium |
-| **Manual correlation and extraction** | Pull a value out of one response and use it in the next. The specification cannot express it, so any journey needing a session token is currently out of reach. **This is the largest functional gap left in protocol testing.** | Large |
+| ~~**Manual correlation and extraction**~~ | **Done in `PLAN.md` S3** — scenarios carry ordered steps, values are extracted and carried forward, and a failed extraction fails the sample rather than reporting good latency. `HANDOFF.md` §3p. | — |
 
 ---
 
@@ -122,6 +122,10 @@ Each is real, none blocks anything.
 - **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload belongs.
 - **The studio asks for the team name.** Nothing reports the caller's own team: `TeamDirectory` maps
   name to id and not back, and no endpoint exposes it. Owned by `PLAN.md` S5.
+- **The credential-name list is header-shaped.** `x-api-key` is refused as a query parameter but
+  `api_key`, `access_token` and `token` are not, so `?api_key=short-value` passes. A query string
+  reaches every access log between the runner and the target. Uncovered during S3 and deliberately
+  not widened there: it changes what every existing document validates as.
 - **`ConcurrencyThreadGroup` is in the runner image but unused.** The plan generator still emits
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.

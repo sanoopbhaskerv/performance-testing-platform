@@ -1,6 +1,7 @@
 package com.perfplatform.domain.dataset;
 
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -59,17 +60,51 @@ public final class DatasetBinding {
      */
     public static Set<String> referencesIn(ScenarioSpec scenario) {
         Set<String> names = new LinkedHashSet<>();
-        collect(scenario.path(), names);
-        scenario.query().forEach((key, value) -> {
+        // Every step, whichever form the scenario was written in. `asSteps` gives a single-request
+        // scenario back as a journey of one, so there is no branch here and no second code path to
+        // forget when a field is added.
+        for (StepSpec step : scenario.asSteps()) {
+            names.addAll(referencesIn(step));
+        }
+        return names;
+    }
+
+    /**
+     * Every name this step refers to, across its path, query, headers and body.
+     *
+     * <p>The names may be dataset columns or values an earlier step extracted — this cannot tell
+     * them apart and deliberately does not try. Both are filled in the same way at run time, and
+     * which source supplies a name is a question for the validator, which knows the whole journey.
+     */
+    public static Set<String> referencesIn(StepSpec step) {
+        Set<String> names = new LinkedHashSet<>();
+        collect(step.path(), names);
+        step.query().forEach((key, value) -> {
             collect(key, names);
             collect(value, names);
         });
-        scenario.headers().forEach((key, value) -> {
+        step.headers().forEach((key, value) -> {
             collect(key, names);
             collect(value, names);
         });
-        if (scenario.body() != null) {
-            collect(scenario.body().content(), names);
+        if (step.body() != null) {
+            collect(step.body().content(), names);
+        }
+        return names;
+    }
+
+    /**
+     * The names a journey supplies itself, in the order they become available.
+     *
+     * <p>A step may only use what an <em>earlier</em> step extracted. Returning them in order is what
+     * lets the validator refuse a reference to a value that does not exist yet — which otherwise
+     * fails at run time as an unfilled {@code ${...}} sent as literal text, and reports as fast,
+     * healthy-looking latency for a target that did no work.
+     */
+    public static Set<String> extractedBefore(java.util.List<StepSpec> steps, int stepIndex) {
+        Set<String> names = new LinkedHashSet<>();
+        for (int i = 0; i < stepIndex && i < steps.size(); i++) {
+            steps.get(i).extract().forEach(extraction -> names.add(extraction.name()));
         }
         return names;
     }

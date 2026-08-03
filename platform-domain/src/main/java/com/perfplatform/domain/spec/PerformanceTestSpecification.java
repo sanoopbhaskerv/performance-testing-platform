@@ -1,5 +1,7 @@
 package com.perfplatform.domain.spec;
 
+import com.perfplatform.domain.spec.support.SpecEnums;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -278,7 +280,8 @@ public record PerformanceTestSpecification(
             String path,
             Map<String, String> headers,
             Map<String, String> query,
-            RequestBody body) {
+            RequestBody body,
+            List<StepSpec> steps) {
 
         /**
          * A request body.
@@ -306,6 +309,39 @@ public record PerformanceTestSpecification(
         public ScenarioSpec {
             headers = immutableMap(headers);
             query = immutableMap(query);
+            steps = immutable(steps);
+        }
+
+        /** A scenario stating one request directly, with no steps. The form that predates journeys. */
+        public ScenarioSpec(String name, int weight, String operationId, String method, String path,
+                Map<String, String> headers, Map<String, String> query, RequestBody body) {
+            this(name, weight, operationId, method, path, headers, query, body, List.of());
+        }
+
+        /**
+         * Whether this scenario is a sequence rather than a single request.
+         *
+         * <p>The two forms are exclusive in practice: a scenario either states one request through
+         * {@code method}/{@code path} or lists {@code steps}. Both being present is refused at
+         * validation rather than resolved by a precedence rule, because a rule would silently ignore
+         * whichever half the author actually meant.
+         */
+        public boolean isJourney() {
+            return !steps.isEmpty();
+        }
+
+        /**
+         * This scenario as an ordered list of steps, whichever form it was written in.
+         *
+         * <p>What every consumer downstream of validation actually wants: a renderer, an analyzer and
+         * a dataset binder all treat a single request as a journey of one, and asking each of them to
+         * branch on the form is how the two paths drift apart.
+         */
+        public List<StepSpec> asSteps() {
+            return isJourney()
+                    ? steps
+                    : List.of(new StepSpec(name, method, path, headers, query, body,
+                            List.of(), List.of(), null));
         }
 
         /**
@@ -337,6 +373,148 @@ public record PerformanceTestSpecification(
         /** Whether this scenario sends a body. */
         public boolean hasBody() {
             return body != null && !body.isEmpty();
+        }
+    }
+
+    /**
+     * One request within a journey.
+     *
+     * <p>A {@link ScenarioSpec} used to be a single request, which meant no test could sign in: there
+     * was nowhere to put the second call, and no way to carry a session from the first to it. A
+     * scenario is now an ordered list of these.
+     *
+     * <p>Shares the request fields with {@code ScenarioSpec} rather than reusing it, because a step
+     * has no weight and no operationId — traffic is apportioned between journeys, not between the
+     * requests inside one — and a record carrying fields that are meaningless for half its uses
+     * teaches the wrong model to everyone who reads it.
+     *
+     * @param name      identifies this step in results and findings, e.g. {@code sign-in}
+     * @param extract   values pulled out of the response for later steps to use
+     * @param expect    what must be true of the response, checked at run time
+     * @param thinkTime how long a user pauses after this step before the next. Null means no pause,
+     *                  which is realistic only for a machine
+     */
+    public record StepSpec(
+            String name,
+            String method,
+            String path,
+            Map<String, String> headers,
+            Map<String, String> query,
+            ScenarioSpec.RequestBody body,
+            List<ExtractionSpec> extract,
+            List<AssertionSpec> expect,
+            Duration thinkTime) {
+
+        public StepSpec {
+            headers = immutableMap(headers);
+            query = immutableMap(query);
+            extract = immutable(extract);
+            expect = immutable(expect);
+        }
+
+        /** A step stating a bare method and path. */
+        public StepSpec(String name, String method, String path) {
+            this(name, method, path, Map.of(), Map.of(), null, List.of(), List.of(), null);
+        }
+
+        /** The method to use, defaulting to {@code GET} when the step does not state one. */
+        public String methodOrDefault() {
+            return method == null || method.isBlank() ? "GET" : method.trim().toUpperCase(Locale.ROOT);
+        }
+
+        /** Whether this step sends a body. */
+        public boolean hasBody() {
+            return body != null && !body.isEmpty();
+        }
+    }
+
+    /**
+     * A value taken out of one response so a later step can use it.
+     *
+     * <p>This is correlation, and it is what makes an authenticated journey possible: sign in, take
+     * the session out of the response, send it with everything after. The extracted value enters the
+     * same {@code ${name}} namespace as a dataset column, so a step refers to it exactly as it refers
+     * to test data and nothing downstream has to know which it was.
+     *
+     * <h2>Why a failed extraction cannot be tolerated</h2>
+     * When a pattern does not match, the engine substitutes its default and sends the request
+     * anyway. The target answers 4xx in a couple of milliseconds, and the run reports its best
+     * latency ever for a system that did no work. That is the failure mode this platform guards
+     * against in five other places, arriving from a new direction — so the renderer emits a sentinel
+     * default and an assertion that fails the sample when the sentinel survives. A broken
+     * correlation shows up as an error rate, never as good latency.
+     *
+     * @param name       the {@code ${name}} later steps will use
+     * @param from       where in the response to look
+     * @param expression a JSON path, a regular expression with one capturing group, a header name,
+     *                   or a cookie name — whichever {@code from} calls for
+     * @param required   whether the journey can continue without it. False is rare and deliberate:
+     *                   an optional value still produces its sentinel, but no assertion fails on it
+     */
+    public record ExtractionSpec(String name, ExtractionSource from, String expression, boolean required) {
+
+        /** A required extraction, which is almost always what is meant. */
+        public ExtractionSpec(String name, ExtractionSource from, String expression) {
+            this(name, from, expression, true);
+        }
+    }
+
+    /** Where in a response an {@link ExtractionSpec} looks. */
+    public enum ExtractionSource {
+        /** A JSON path into the response body, e.g. {@code $.token}. */
+        JSON_BODY,
+        /** A regular expression over the response body, with exactly one capturing group. */
+        REGEX_BODY,
+        /** A response header, by name. */
+        HEADER,
+        /** A cookie from {@code Set-Cookie}, by name. */
+        SET_COOKIE,
+        /** The response status code. Takes no expression. */
+        STATUS;
+
+        public static ExtractionSource from(String raw) {
+            return SpecEnums.parse(ExtractionSource.class, raw, "extraction source");
+        }
+    }
+
+    /**
+     * What must be true of a response.
+     *
+     * <p>On by default in the studio, as it is in every comparable tool, and for a blunt reason: a
+     * load test of a broken deployment reports beautiful numbers for a wall of 500s. Latency without
+     * a correctness check is a measurement of how fast a system can refuse to work.
+     *
+     * @param subject what to look at
+     * @param value   the status code, the text, or the pattern — whichever {@code operator} calls for
+     */
+    public record AssertionSpec(AssertionSubject subject, AssertionOperator operator, String value) {
+
+        /** The commonest assertion: the response status is what the recording saw. */
+        public static AssertionSpec status(int code) {
+            return new AssertionSpec(AssertionSubject.STATUS, AssertionOperator.EQUALS,
+                    String.valueOf(code));
+        }
+    }
+
+    /** What an {@link AssertionSpec} looks at. */
+    public enum AssertionSubject {
+        STATUS,
+        BODY;
+
+        public static AssertionSubject from(String raw) {
+            return SpecEnums.parse(AssertionSubject.class, raw, "assertion subject");
+        }
+    }
+
+    /** How an {@link AssertionSpec} compares. */
+    public enum AssertionOperator {
+        EQUALS,
+        CONTAINS,
+        /** A regular expression the subject must match. */
+        MATCHES;
+
+        public static AssertionOperator from(String raw) {
+            return SpecEnums.parse(AssertionOperator.class, raw, "assertion operator");
         }
     }
 

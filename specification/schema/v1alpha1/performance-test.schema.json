@@ -329,7 +329,7 @@
               "type": "string",
               "minLength": 1,
               "pattern": "^dataset://[a-z0-9]([-a-z0-9]*[a-z0-9])?/[1-9][0-9]*$",
-              "description": "The stored dataset version this test reads, as dataset://<name>/<version> — the uri POST /api/v2/datasets returns. The version is required: without it, two runs of the same immutable test version would read different rows while carrying the same specification digest."
+              "description": "The stored dataset version this test reads, as dataset://<name>/<version> \u2014 the uri POST /api/v2/datasets returns. The version is required: without it, two runs of the same immutable test version would read different rows while carrying the same specification digest."
             }
           }
         },
@@ -573,6 +573,13 @@
               }
             }
           ]
+        },
+        "steps": {
+          "description": "The ordered requests this journey makes. A scenario states either one request, through method and path, or a list of steps -- never both. Steps are what let a journey sign in and carry the session forward.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       },
       "anyOf": [
@@ -668,6 +675,167 @@
         },
         "retention": {
           "$ref": "#/$defs/duration"
+        }
+      }
+    },
+    "step": {
+      "description": "One request within a journey.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "description": "Identifies this step in results and findings.",
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "description": "HTTP method. Defaults to GET when omitted."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Request path, relative to the base URL the platform resolves for this application. Never a full URL: where a run's traffic goes is decided by the team's registered targets, not by the specification."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers. Never credentials: Authorization, Cookie, X-Api-Key and similar are refused outright, and any value shaped like a token is rejected. Authentication belongs in spec.authentication as a reference the runner resolves at execution time.",
+          "propertyNames": {
+            "not": {
+              "pattern": "^(?i)(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-amz-security-token)$"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Query parameters appended to the path. Never credentials: a query string is written to every access log between the runner and the target."
+        },
+        "body": {
+          "description": "The request body, for methods that carry one. A bare string is shorthand for {content: \"...\"}.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "content"
+              ],
+              "properties": {
+                "contentType": {
+                  "type": "string",
+                  "description": "Media type sent. Defaults to application/json, and is written as a Content-Type header so the target does not reject the request."
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "extract": {
+          "description": "Values taken out of the response for later steps to use. A failed extraction is never silent: the engine substitutes a sentinel and an assertion fails the sample, because an unfilled reference is sent as literal text and the run would otherwise report fast, healthy-looking latency for a target that did no work.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/extraction"
+          }
+        },
+        "expect": {
+          "description": "What must be true of the response. Without a correctness check, a load test of a broken deployment reports excellent numbers for a wall of 500s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "thinkTime": {
+          "description": "How long a user pauses after this step, e.g. '2s'.",
+          "type": "string",
+          "pattern": "^\\d+(ms|s|m|h)$"
+        }
+      }
+    },
+    "extraction": {
+      "description": "A value pulled out of a response, referred to later as ${name}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "from"
+      ],
+      "properties": {
+        "name": {
+          "description": "The ${name} later steps use. Must not collide with a dataset column, or the reference would have two sources.",
+          "type": "string"
+        },
+        "from": {
+          "description": "Where in the response to look.",
+          "enum": [
+            "json-body",
+            "regex-body",
+            "header",
+            "set-cookie",
+            "status"
+          ]
+        },
+        "expression": {
+          "description": "A JSON path, a regular expression with exactly one capturing group, a header name, or a cookie name -- whichever 'from' calls for. Not needed for 'status'.",
+          "type": "string"
+        },
+        "required": {
+          "description": "Whether the journey can continue without it. True by default, and rarely worth changing: an optional extraction still produces its sentinel, but nothing fails when it does not match.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "assertion": {
+      "description": "What must be true of a response.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "operator",
+        "value"
+      ],
+      "properties": {
+        "subject": {
+          "enum": [
+            "status",
+            "body"
+          ]
+        },
+        "operator": {
+          "enum": [
+            "equals",
+            "contains",
+            "matches"
+          ]
+        },
+        "value": {
+          "description": "The status code, the text, or the pattern.",
+          "type": [
+            "string",
+            "integer"
+          ]
         }
       }
     }

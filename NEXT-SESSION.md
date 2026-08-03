@@ -38,7 +38,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **898 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
+Expect **931 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
@@ -102,9 +102,16 @@ end to end in a browser against a running control plane. **88 UI tests.**
 **S2 is complete** (`HANDOFF.md` §3o). The report opens with the answer in a sentence, every metric
 explains itself where it appears, and a running test shows where it is in its plan. **130 UI tests.**
 
-**The next increment is S3 — journeys and rules: multi-step scenarios, correlation, verification and
-think time.** It is the largest single gap left: a journey is one request today, so nothing can sign
-in and carry a session forward. `PLAN.md` §11.
+**S3's engine half is complete** (`HANDOFF.md` §3p). A test can sign in: scenarios carry ordered
+steps, values are extracted and carried forward, and a broken correlation fails loudly instead of
+reporting excellent latency. Proven with two real runs differing only by one JSON path.
+
+**Next: finish S3's surfaces**, then S4.
+1. **The HAR importer should emit ordered steps** rather than sibling scenarios, retiring its
+   `import.har.journeys.notOrdered` warning (invert the test in place, never delete it).
+2. **The studio needs a Rules screen** — correlation suggestions with evidence, verification and
+   think time. Journeys are expressible in YAML and over the API today, not yet by clicking.
+3. Then **S4, the Validator**: one iteration against the real target before a load slot is booked.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

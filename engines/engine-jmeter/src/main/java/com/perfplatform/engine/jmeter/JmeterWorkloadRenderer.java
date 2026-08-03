@@ -5,6 +5,10 @@ import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AssertionSubject;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AssertionSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ExtractionSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec;
 import com.perfplatform.domain.target.TargetAddress;
 import com.perfplatform.engine.spi.RenderedWorkload;
@@ -181,46 +185,225 @@ final class JmeterWorkloadRenderer {
                         """.formatted(scenario.weight()))
                 .endWithChildren();
 
-        writeSampler(jmx, workload, scenario, target);
+        // Every scenario is a sequence, and a single-request one is a sequence of length one.
+        // Branching here instead would mean two rendering paths that drift apart.
+        List<StepSpec> steps = scenario.asSteps();
+        for (StepSpec step : steps) {
+            // The label a single-request scenario has always had is preserved exactly:
+            // {workload}/{scenario}. Only a real journey adds the step, because objectives are
+            // scoped by these labels and renaming them would silently re-scope every stored
+            // objective in every existing test.
+            String label = scenario.isJourney()
+                    ? workload.name() + "/" + scenario.name() + "/" + step.name()
+                    : workload.name() + "/" + scenario.name();
+            // Resolved here, not in the domain: falling back to /{operationId} for an unresolved
+            // import is a rendering convention — deliberately obvious rather than plausible — and
+            // only a single-request scenario has an operationId to fall back to.
+            String path = scenario.isJourney() ? stepPath(step) : operationPath(scenario);
+            writeStep(jmx, step, label, path, target);
+        }
 
         jmx.endChildren();
     }
 
-    private static void writeSampler(JmxWriter jmx, WorkloadSpec workload, ScenarioSpec scenario,
+    /**
+     * One request, with whatever it extracts, asserts and waits for.
+     *
+     * <p>The label is what JMeter writes into the results and the platform reads back. Objectives
+     * are scoped by these labels, so the caller decides it: a single-request scenario keeps the
+     * {@code {workload}/{scenario}} it has always had, and only a journey adds the step.
+     */
+    private static void writeStep(JmxWriter jmx, StepSpec step, String label, String path,
             TargetAddress target) {
 
-        boolean hasBody = scenario.hasBody();
+        boolean hasBody = step.hasBody();
 
-        // Named {workload}/{scenario}, because that is the label JMeter writes into the results and
-        // the platform reads back. Objectives are scoped by workload and by scenario, so both parts
-        // have to be in the name for either kind of objective to be evaluable. V1 wrote neither.
-        jmx.element("HTTPSamplerProxy", attributes("HttpTestSampleGui", "HTTPSamplerProxy",
-                        workload.name() + "/" + scenario.name()))
-                .raw(argumentsFor(scenario))
+        jmx.element("HTTPSamplerProxy", attributes("HttpTestSampleGui", "HTTPSamplerProxy", label))
+                .raw(argumentsFor(step))
                 .stringProp("HTTPSampler.domain", target.host())
                 .stringProp("HTTPSampler.protocol", target.scheme())
                 .longProp("HTTPSampler.port", target.port())
-                .stringProp("HTTPSampler.path", operationPath(scenario))
-                // The scenario's own method where it states one, GET otherwise. A POST rendered as a
-                // GET would measure a different endpoint than the one the test names.
-                .stringProp("HTTPSampler.method", scenario.methodOrDefault())
+                .stringProp("HTTPSampler.path", path)
+                // The step's own method where it states one, GET otherwise. A POST rendered as a GET
+                // would measure a different endpoint than the one the test names.
+                .stringProp("HTTPSampler.method", step.methodOrDefault())
                 .boolProp("HTTPSampler.follow_redirects", true)
                 .boolProp("HTTPSampler.use_keepalive", true)
                 // Tells JMeter the arguments collection is a raw body rather than form fields.
                 // Without it a JSON body is sent as an encoded form and the target sees nonsense.
                 .boolProp("HTTPSampler.postBodyRaw", hasBody);
 
-        // A body needs a HeaderManager even with no headers of its own, to carry its content type.
-        if (scenario.headers().isEmpty() && !hasBody) {
+        boolean needsHeaders = !step.headers().isEmpty() || hasBody;
+        boolean needsChildren = needsHeaders
+                || !step.extract().isEmpty() || !step.expect().isEmpty() || step.thinkTime() != null;
+
+        if (!needsChildren) {
             jmx.endLeaf();
             return;
         }
 
-        // A per-sampler HeaderManager, so one scenario's headers do not leak into another's. The
-        // plan-level manager carries the run correlation id and applies to everything.
         jmx.endWithChildren();
-        writeScenarioHeaders(jmx, scenario);
+        if (needsHeaders) {
+            // A per-sampler HeaderManager, so one step's headers do not leak into another's. The
+            // plan-level manager carries the run correlation id and applies to everything.
+            writeStepHeaders(jmx, step);
+        }
+        step.extract().forEach(extraction -> writeExtraction(jmx, extraction));
+        step.expect().forEach(assertion -> writeAssertion(jmx, assertion));
+        // Placed after the request, because think time is what a person spends reading the response.
+        if (step.thinkTime() != null && !step.thinkTime().isZero()) {
+            writeThinkTime(jmx, step.thinkTime());
+        }
         jmx.endChildren();
+    }
+
+    /**
+     * A value pulled out of the response, and the guard that makes a failure visible.
+     *
+     * <p>This is the part that matters. When a pattern does not match, JMeter substitutes the
+     * post-processor's default and <b>sends the next request anyway</b>. The target answers 4xx in a
+     * couple of milliseconds, the run finishes early with a beautiful latency curve, and the report
+     * describes a system that did no work. It is the same failure the platform already refuses in
+     * five other places, reached from a new direction.
+     *
+     * <p>So every extraction renders two elements, never one: the post-processor with a
+     * <b>sentinel</b> default, and a {@code ResponseAssertion} scoped to the variable that fails the
+     * sample when the sentinel survived. Not optional and not configurable — an extraction whose
+     * failure is silent is worse than no extraction at all, because the run still produces numbers.
+     *
+     * <p>An extraction marked {@code required: false} skips the assertion but keeps the sentinel, so
+     * an unmatched optional value is still distinguishable from an empty one when someone reads the
+     * request afterwards.
+     */
+    private static void writeExtraction(JmxWriter jmx, ExtractionSpec extraction) {
+        String sentinel = sentinelFor(extraction.name());
+
+        switch (extraction.from()) {
+            case JSON_BODY -> jmx.element("JSONPostProcessor",
+                            attributes("JSONPostProcessorGui", "JSONPostProcessor",
+                                    "extract " + extraction.name()))
+                    .stringProp("JSONPostProcessor.referenceNames", extraction.name())
+                    .stringProp("JSONPostProcessor.jsonPathExprs", extraction.expression())
+                    .stringProp("JSONPostProcessor.match_numbers", "1")
+                    .stringProp("JSONPostProcessor.defaultValues", sentinel)
+                    .endLeaf();
+
+            case REGEX_BODY -> writeRegexExtractor(jmx, extraction, sentinel, "false", "body");
+            // JMeter's field-to-check for headers, and for Set-Cookie specifically. Both are regular
+            // expressions over the raw header block, which is why the cookie name is escaped into a
+            // pattern rather than used directly.
+            case HEADER -> writeRegexExtractor(jmx, extraction, sentinel, "true", "response_headers");
+            case SET_COOKIE -> writeRegexExtractor(jmx, extraction, sentinel, "true",
+                    "response_headers");
+            case STATUS -> writeRegexExtractor(jmx, extraction, sentinel, "true", "response_code");
+        }
+
+        if (extraction.required()) {
+            writeSentinelAssertion(jmx, extraction.name(), sentinel);
+        }
+    }
+
+    /**
+     * The sentinel a failed extraction leaves behind.
+     *
+     * <p>Deliberately unmistakable and deliberately not empty. An empty default is
+     * indistinguishable from a value that was genuinely blank, and it produces a request that looks
+     * merely odd rather than obviously wrong when somebody reads it back from the results.
+     */
+    static String sentinelFor(String name) {
+        return "PERF_NOT_EXTRACTED_" + name;
+    }
+
+    private static void writeRegexExtractor(JmxWriter jmx, ExtractionSpec extraction,
+            String sentinel, String useHeaders, String field) {
+
+        String pattern = switch (extraction.from()) {
+            case HEADER -> java.util.regex.Pattern.quote(extraction.expression()) + ":\\s*(.+)";
+            case SET_COOKIE -> java.util.regex.Pattern.quote(extraction.expression()) + "=([^;]+)";
+            case STATUS -> "(\\d+)";
+            default -> extraction.expression();
+        };
+
+        jmx.element("RegexExtractor", attributes("RegexExtractorGui", "RegexExtractor",
+                        "extract " + extraction.name()))
+                .stringProp("RegexExtractor.useHeaders", useHeaders.equals("true") ? field : "false")
+                .stringProp("RegexExtractor.refname", extraction.name())
+                .stringProp("RegexExtractor.regex", pattern)
+                .stringProp("RegexExtractor.template", "$1$")
+                .stringProp("RegexExtractor.default", sentinel)
+                .stringProp("RegexExtractor.match_number", "1")
+                .endLeaf();
+    }
+
+    /**
+     * Fails the sample when an extraction did not match.
+     *
+     * <p>A {@code ResponseAssertion} in variable scope, testing the extracted variable rather than
+     * the response. {@code test_type} 12 is EQUALS (8) plus NOT (4) — the sample fails when the
+     * variable equals the sentinel, which is exactly when nothing was extracted.
+     */
+    private static void writeSentinelAssertion(JmxWriter jmx, String name, String sentinel) {
+        jmx.element("ResponseAssertion", attributes("AssertionGui", "ResponseAssertion",
+                        name + " was extracted"))
+                .stringProp("Assertion.scope", "variable")
+                .stringProp("Scope.variable", name)
+                .stringProp("Assertion.test_field", "Assertion.response_data")
+                .boolProp("Assertion.assume_success", false)
+                .intProp("Assertion.test_type", 12)
+                .stringProp("Assertion.custom_message",
+                        "Nothing was extracted for ${" + name + "}, so every request after this one "
+                                + "would have been sent with an unfilled value.")
+                .raw("""
+                        <collectionProp name="Asserion.test_strings">
+                        <stringProp name="0">%s</stringProp>
+                        </collectionProp>
+                        """.formatted(JmxWriter.escape(sentinel)))
+                .endLeaf();
+    }
+
+    /** What must be true of the response, checked at run time. */
+    private static void writeAssertion(JmxWriter jmx, AssertionSpec assertion) {
+        // EQUALS 8, CONTAINS(substring) 16, MATCHES(regex) 1.
+        int testType = switch (assertion.operator()) {
+            case EQUALS -> 8;
+            case CONTAINS -> 16;
+            case MATCHES -> 1;
+        };
+        String field = assertion.subject() == AssertionSubject.STATUS
+                ? "Assertion.response_code"
+                : "Assertion.response_data";
+
+        jmx.element("ResponseAssertion", attributes("AssertionGui", "ResponseAssertion",
+                        "expect " + assertion.subject().name().toLowerCase(java.util.Locale.ROOT)))
+                .stringProp("Assertion.test_field", field)
+                .boolProp("Assertion.assume_success", false)
+                .intProp("Assertion.test_type", testType)
+                .raw("""
+                        <collectionProp name="Asserion.test_strings">
+                        <stringProp name="0">%s</stringProp>
+                        </collectionProp>
+                        """.formatted(JmxWriter.escape(assertion.value())))
+                .endLeaf();
+    }
+
+    /**
+     * The pause after a step.
+     *
+     * <p>A uniform random spread around the stated value rather than a fixed wait. Every virtual
+     * user pausing for exactly the same time produces synchronised waves of traffic — a pattern no
+     * real population makes, and one that measures the target's behaviour under a rhythm nobody
+     * asked about.
+     */
+    private static void writeThinkTime(JmxWriter jmx, java.time.Duration thinkTime) {
+        long millis = thinkTime.toMillis();
+        // A tenth either side. Enough to break up the waves without making the stated pause a lie.
+        long spread = Math.max(1, millis / 5);
+
+        jmx.element("UniformRandomTimer", attributes("UniformRandomTimerGui", "UniformRandomTimer",
+                        "think " + millis + "ms"))
+                .stringProp("ConstantTimer.delay", String.valueOf(Math.max(0, millis - spread / 2)))
+                .stringProp("RandomTimer.range", String.valueOf(spread))
+                .endLeaf();
     }
 
     /**
@@ -230,7 +413,7 @@ final class JmeterWorkloadRenderer {
      * A body and a query string together would need the query in the path instead — worth doing when
      * something asks for it, and not worth guessing at now.
      */
-    private static String argumentsFor(ScenarioSpec scenario) {
+    private static String argumentsFor(StepSpec scenario) {
         StringBuilder arguments = new StringBuilder(256);
         arguments.append("<elementProp name=\"HTTPsampler.Arguments\" elementType=\"Arguments\" ")
                 .append("guiclass=\"HTTPArgumentsPanel\" testclass=\"Arguments\">\n")
@@ -275,7 +458,7 @@ final class JmeterWorkloadRenderer {
      * <p>A scenario that states its own {@code Content-Type} keeps it — the author was more specific
      * than the default, and overriding them would be the tool second-guessing the test.
      */
-    private static void writeScenarioHeaders(JmxWriter jmx, ScenarioSpec scenario) {
+    private static void writeStepHeaders(JmxWriter jmx, StepSpec scenario) {
         StringBuilder headers = new StringBuilder(256);
         headers.append("<collectionProp name=\"HeaderManager.headers\">\n");
 
@@ -429,6 +612,15 @@ final class JmeterWorkloadRenderer {
      * target the platform resolved, never from the document — which is what makes the target policy
      * an actual control rather than a suggestion.
      */
+    /** A journey step's path, which validation has already required to begin with '/'. */
+    private static String stepPath(StepSpec step) {
+        if (step.path() == null || step.path().isBlank()) {
+            return "/";
+        }
+        String path = step.path().trim();
+        return path.startsWith("/") ? path : "/" + path;
+    }
+
     private static String operationPath(ScenarioSpec scenario) {
         if (scenario.hasExplicitRequest()) {
             String path = scenario.path().trim();

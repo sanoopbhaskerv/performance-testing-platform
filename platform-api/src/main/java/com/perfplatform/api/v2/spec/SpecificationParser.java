@@ -358,7 +358,7 @@ public final class SpecificationParser {
     private ScenarioSpec scenario(JsonNode node, String path, List<ValidationFinding> findings) {
         rejectUnknownFields(node, path,
                 Set.of("name", "weight", "operationId", "method", "path",
-                        "headers", "query", "body"),
+                        "headers", "query", "body", "steps"),
                 findings);
 
         Integer weight = integer(node, "weight", path + "/weight", findings);
@@ -370,8 +370,85 @@ public final class SpecificationParser {
                 text(node, "path", path + "/path", findings),
                 stringMap(node, "headers", path + "/headers", findings),
                 stringMap(node, "query", path + "/query", findings),
-                requestBody(node.get("body"), path + "/body", findings));
+                requestBody(node.get("body"), path + "/body", findings),
+                each(node.get("steps"), path + "/steps", this::step, findings));
     }
+
+    /**
+     * One request within a journey.
+     *
+     * <p>Unknown fields are rejected here as everywhere else: a typo in {@code extract} would
+     * otherwise be silently dropped, and a journey that quietly stopped correlating would send every
+     * later request with an unfilled reference — the failure this whole increment exists to prevent.
+     */
+    private PerformanceTestSpecification.StepSpec step(JsonNode node, String path,
+            List<ValidationFinding> findings) {
+
+        rejectUnknownFields(node, path,
+                Set.of("name", "method", "path", "headers", "query", "body",
+                        "extract", "expect", "thinkTime"),
+                findings);
+
+        return new PerformanceTestSpecification.StepSpec(
+                text(node, "name", path + "/name", findings),
+                text(node, "method", path + "/method", findings),
+                text(node, "path", path + "/path", findings),
+                stringMap(node, "headers", path + "/headers", findings),
+                stringMap(node, "query", path + "/query", findings),
+                requestBody(node.get("body"), path + "/body", findings),
+                each(node.get("extract"), path + "/extract", this::extraction, findings),
+                each(node.get("expect"), path + "/expect", this::assertion, findings),
+                duration(node, "thinkTime", path + "/thinkTime", findings));
+    }
+
+    /** A value taken out of a response for later steps to use. */
+    private PerformanceTestSpecification.ExtractionSpec extraction(JsonNode node, String path,
+            List<ValidationFinding> findings) {
+
+        rejectUnknownFields(node, path, Set.of("name", "from", "expression", "required"), findings);
+
+        JsonNode required = node.get("required");
+        return new PerformanceTestSpecification.ExtractionSpec(
+                text(node, "name", path + "/name", findings),
+                enumValue(node, "from", path + "/from",
+                        PerformanceTestSpecification.ExtractionSource::from, findings),
+                text(node, "expression", path + "/expression", findings),
+                // Required unless explicitly turned off. An extraction that silently became optional
+                // because a field was missing would remove the guard that makes a broken correlation
+                // visible.
+                required == null || required.isNull() || !required.isBoolean() || required.asBoolean());
+    }
+
+    /** What must be true of a response. */
+    private PerformanceTestSpecification.AssertionSpec assertion(JsonNode node, String path,
+            List<ValidationFinding> findings) {
+
+        rejectUnknownFields(node, path, Set.of("subject", "operator", "value"), findings);
+
+        return new PerformanceTestSpecification.AssertionSpec(
+                enumValue(node, "subject", path + "/subject",
+                        PerformanceTestSpecification.AssertionSubject::from, findings),
+                enumValue(node, "operator", path + "/operator",
+                        PerformanceTestSpecification.AssertionOperator::from, findings),
+                textOrNumber(node, "value", path + "/value", findings));
+    }
+
+    /**
+     * A value that may be written as a number or a string.
+     *
+     * <p>{@code value: 200} and {@code value: "200"} are the same expectation, and demanding quotes
+     * around a status code is the kind of friction that teaches people the tool is fussy rather than
+     * careful.
+     */
+    private String textOrNumber(JsonNode parent, String field, String path,
+            List<ValidationFinding> findings) {
+        JsonNode node = parent.get(field);
+        if (node != null && node.isNumber()) {
+            return node.asText();
+        }
+        return text(parent, field, path, findings);
+    }
+
 
     /**
      * A body, or null when the scenario sends none.
