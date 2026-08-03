@@ -12,8 +12,9 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1, S2 and S3's engine half are built.** See §11 for the per-increment state and
-`HANDOFF.md` §3n–§3p for what each delivered. Everything from S3's surfaces onward is still a plan.
+**Status: S1, S2 and most of S3 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3q for what each delivered. The studio's Rules screen is the last of S3; everything after it is
+still a plan.
 
 ---
 
@@ -111,7 +112,7 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 
 | Studio capability | Here today |
 |---|---|
-| HAR import | ✅ built — `HANDOFF.md` §3i |
+| HAR import | ✅ built — §3i, and **imports ordered journeys** since S3 — §3q |
 | Noise filtering (assets, analytics, third-party, failed requests) | ✅ built — dominant-host filter, asset filter, failure filter |
 | Credential stripping on import | ✅ built, and stronger than either reference tool |
 | Weights from observed frequency | ✅ built — largest-remainder apportionment |
@@ -121,7 +122,7 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | Thresholds | ✅ built — objectives with verdicts |
 | Generated-plan preview | ✅ built |
 | Durable runs, cancel, quotas, authorization | ✅ built — and neither reference tool has any of it |
-| **Correlation rules** | ✅ **built in S3** — §3p. Not yet offered as suggestions in the UI |
+| **Correlation rules** | ✅ **built in S3** — §3p. Not yet offered as suggestions in the UI, which is the last of S3 |
 | **Verification rules (assertions)** | ✅ built in S3 — expressible in a document, not yet in the studio |
 | **Think time** | ✅ built in S3 |
 | **Studio shell** | ✅ built in S1 — §3n |
@@ -730,7 +731,7 @@ does. So web performance costs S8 alone, not S7 + S8.
 |---|---|---|---|---|---|
 | **S1** | Studio shell, and the API path end to end | 1 Start, 2 Sources, 3 Refine, 6 Load, 7 Objectives, 9 Status, 10 Report | Large | ✅ | **done** — `HANDOFF.md` §3n |
 | **S2** | The report a novice can read | 10 Report | Medium | ✅ | **done** — §3o |
-| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **engine done** — §3p. HAR ordered steps and the Rules screen remain |
+| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **engine + importer done** — §3p, §3q. The Rules screen remains |
 | **S4** | The Validator | 8 Validate | Medium | ✅ | next |
 | **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | |
