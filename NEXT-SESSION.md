@@ -24,8 +24,10 @@ what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was k
   measured nothing, so nothing can pass (`HANDOFF.md` §3b). `brew install jmeter` for real load.
 
 Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
-New test → the **Demo service** template runs unedited → Save test → Run this. Or **Import
-journeys** and paste a cURL command, an OpenAPI document, a HAR or a Postman collection.
+**New test** opens the **studio**: choose *Test an API*, bring a source (a cURL command, an OpenAPI
+document, a HAR or a Postman collection), review the journeys, set the load and the objectives, and
+save. **Write it as YAML** is the expert path and still carries the Demo service template, which
+runs unedited.
 
 ### Verifying a change
 

@@ -126,9 +126,8 @@ Each is real, none blocks anything.
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
-- **`platform-ui` has no test runner** — no vitest, no jest, so `scenarioYaml.ts` (YAML escaping,
-  indentation detection, block extent) is pinned only by a browser walkthrough. **Resolved: vitest is
-  approved** and lands in `PLAN.md` S1. The §31 pause is cleared.
+- ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library, with
+  88 tests covering `scenarioYaml.ts`, the design tokens and the studio's specification emitter.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).
 - **UI lint reports 10 errors, 3 warnings**, all pre-existing in `App.tsx` and the pre-1D parts of
