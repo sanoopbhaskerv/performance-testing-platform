@@ -1,7 +1,9 @@
 package com.perfplatform.engine.jmeter;
 
 import com.perfplatform.domain.plan.ExecutionPlan;
+import com.perfplatform.domain.execution.RuntimeCredential;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AuthenticationSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
@@ -15,6 +17,8 @@ import com.perfplatform.engine.spi.RenderedWorkload;
 import com.perfplatform.engine.spi.ShardAssignment;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Renders the JMX one shard executes.
@@ -59,6 +63,9 @@ final class JmeterWorkloadRenderer {
     /** Percent-execution mode for {@code ThroughputController}. */
     private static final int PERCENT_EXECUTION = 1;
 
+    private static final String SESSION_DATASET_FILE_NAME = "sessions.csv";
+    private static final String SESSION_VALUE_VARIABLE = "session_value";
+
     private JmeterWorkloadRenderer() {
     }
 
@@ -74,6 +81,7 @@ final class JmeterWorkloadRenderer {
         if (workloads.isEmpty()) {
             throw new IllegalArgumentException("No protocol workload to render");
         }
+        Map<String, AuthenticationSpec> authByName = authenticationsByName(specification);
 
         JmxWriter jmx = new JmxWriter();
         jmx.element("TestPlan", attributes("TestPlanGui", "TestPlan",
@@ -95,9 +103,10 @@ final class JmeterWorkloadRenderer {
         writeHeaderManager(jmx, assignment);
         writeHttpDefaults(jmx, target);
         writeDatasets(jmx, specification);
+        writeSessionDataset(jmx, specification);
 
         for (WorkloadSpec workload : workloads) {
-            writeWorkload(jmx, workload, assignment, target);
+            writeWorkload(jmx, workload, assignment, target, authByName.get(workload.authRef()));
         }
 
         jmx.endChildren();
@@ -109,7 +118,7 @@ final class JmeterWorkloadRenderer {
     }
 
     private static void writeWorkload(JmxWriter jmx, WorkloadSpec workload,
-            ShardAssignment assignment, TargetAddress target) {
+            ShardAssignment assignment, TargetAddress target, AuthenticationSpec authentication) {
 
         List<LoadStage> stages = JmeterPlanCompiler.stages(workload);
         if (stages.isEmpty()) {
@@ -125,7 +134,7 @@ final class JmeterWorkloadRenderer {
             // one with no threads would produce a group JMeter starts and immediately ends.
             if (stage.targetUsers() > 0) {
                 writeStageThreadGroup(jmx, workload, stage, index, offsetSeconds, durationSeconds,
-                        assignment, target);
+                        assignment, target, authentication);
             }
             offsetSeconds += durationSeconds;
         }
@@ -133,7 +142,7 @@ final class JmeterWorkloadRenderer {
 
     private static void writeStageThreadGroup(JmxWriter jmx, WorkloadSpec workload, LoadStage stage,
             int stageIndex, long delaySeconds, long durationSeconds, ShardAssignment assignment,
-            TargetAddress target) {
+            TargetAddress target, AuthenticationSpec authentication) {
 
         jmx.element("ThreadGroup", attributes("ThreadGroupGui", "ThreadGroup",
                         "%s / stage %d".formatted(workload.name(), stageIndex + 1)))
@@ -156,7 +165,7 @@ final class JmeterWorkloadRenderer {
                 .endWithChildren();
 
         for (ScenarioSpec scenario : JmeterPlanCompiler.sortedScenarios(workload)) {
-            writeScenario(jmx, workload, scenario, target);
+            writeScenario(jmx, workload, scenario, target, authentication);
         }
 
         jmx.endChildren();
@@ -170,7 +179,7 @@ final class JmeterWorkloadRenderer {
      * realistic journey mix could not be expressed.
      */
     private static void writeScenario(JmxWriter jmx, WorkloadSpec workload, ScenarioSpec scenario,
-            TargetAddress target) {
+            TargetAddress target, AuthenticationSpec authentication) {
         jmx.element("ThroughputController", attributes("ThroughputControllerGui",
                         "ThroughputController", scenario.name()))
                 .intProp("ThroughputController.style", PERCENT_EXECUTION)
@@ -200,7 +209,7 @@ final class JmeterWorkloadRenderer {
             // import is a rendering convention — deliberately obvious rather than plausible — and
             // only a single-request scenario has an operationId to fall back to.
             String path = scenario.isJourney() ? stepPath(step) : operationPath(scenario);
-            writeStep(jmx, step, label, path, target);
+            writeStep(jmx, step, label, path, target, authentication);
         }
 
         jmx.endChildren();
@@ -214,7 +223,7 @@ final class JmeterWorkloadRenderer {
      * {@code {workload}/{scenario}} it has always had, and only a journey adds the step.
      */
     private static void writeStep(JmxWriter jmx, StepSpec step, String label, String path,
-            TargetAddress target) {
+            TargetAddress target, AuthenticationSpec authentication) {
 
         boolean hasBody = step.hasBody();
 
@@ -233,7 +242,8 @@ final class JmeterWorkloadRenderer {
                 // Without it a JSON body is sent as an encoded form and the target sees nonsense.
                 .boolProp("HTTPSampler.postBodyRaw", hasBody);
 
-        boolean needsHeaders = !step.headers().isEmpty() || hasBody;
+        boolean needsHeaders = authentication != null
+                || !step.headers().isEmpty() || hasBody;
         boolean needsChildren = needsHeaders
                 || !step.extract().isEmpty() || !step.expect().isEmpty() || step.thinkTime() != null;
 
@@ -246,7 +256,7 @@ final class JmeterWorkloadRenderer {
         if (needsHeaders) {
             // A per-sampler HeaderManager, so one step's headers do not leak into another's. The
             // plan-level manager carries the run correlation id and applies to everything.
-            writeStepHeaders(jmx, step);
+            writeStepHeaders(jmx, step, authentication);
         }
         step.extract().forEach(extraction -> writeExtraction(jmx, extraction));
         step.expect().forEach(assertion -> writeAssertion(jmx, assertion));
@@ -458,12 +468,24 @@ final class JmeterWorkloadRenderer {
      * <p>A scenario that states its own {@code Content-Type} keeps it — the author was more specific
      * than the default, and overriding them would be the tool second-guessing the test.
      */
-    private static void writeStepHeaders(JmxWriter jmx, StepSpec scenario) {
+    private static void writeStepHeaders(JmxWriter jmx, StepSpec scenario,
+            AuthenticationSpec authentication) {
         StringBuilder headers = new StringBuilder(256);
         headers.append("<collectionProp name=\"HeaderManager.headers\">\n");
 
         boolean declaresContentType = scenario.headers().keySet().stream()
                 .anyMatch(name -> "content-type".equalsIgnoreCase(name.trim()));
+
+        if (authentication != null) {
+            headers.append("<elementProp name=\"\" elementType=\"Header\">\n")
+                    .append("<stringProp name=\"Header.name\">")
+                    .append(JmxWriter.escape(authentication.injectAs()))
+                    .append("</stringProp>\n")
+                    .append("<stringProp name=\"Header.value\">")
+                    .append(JmxWriter.escape(authenticationValue(authentication)))
+                    .append("</stringProp>\n")
+                    .append("</elementProp>\n");
+        }
 
         scenario.headers().forEach((name, value) -> headers
                 .append("<elementProp name=\"\" elementType=\"Header\">\n")
@@ -488,6 +510,30 @@ final class JmeterWorkloadRenderer {
                         scenario.name() + " headers"))
                 .raw(headers.toString())
                 .endLeaf();
+    }
+
+    private static Map<String, AuthenticationSpec> authenticationsByName(
+            PerformanceTestSpecification specification) {
+        if (specification.spec() == null) {
+            return Map.of();
+        }
+        Map<String, AuthenticationSpec> byName = new LinkedHashMap<>();
+        specification.spec().authentication().stream()
+                .filter(auth -> auth.name() != null && !auth.name().isBlank())
+                .forEach(auth -> byName.putIfAbsent(auth.name(), auth));
+        return byName;
+    }
+
+    private static String authenticationValue(AuthenticationSpec authentication) {
+        if (isRunSessionAuth(authentication)) {
+            return "${" + SESSION_VALUE_VARIABLE + "}";
+        }
+        return "${__env(" + RuntimeCredential.environmentVariableFor(authentication.name()) + ")}";
+    }
+
+    private static boolean isRunSessionAuth(AuthenticationSpec authentication) {
+        return authentication.secretRef() != null
+                && "run://session".equalsIgnoreCase(authentication.secretRef().trim());
     }
 
     private static void writeHeaderManager(JmxWriter jmx, ShardAssignment assignment) {
@@ -554,6 +600,37 @@ final class JmeterWorkloadRenderer {
                     .stringProp("shareMode", "shareMode.all")
                     .endLeaf();
         }
+    }
+
+    private static void writeSessionDataset(JmxWriter jmx,
+            PerformanceTestSpecification specification) {
+        if (specification.spec() == null) {
+            return;
+        }
+
+        Map<String, AuthenticationSpec> authByName = authenticationsByName(specification);
+        boolean usesPooledSession = specification.spec().workloads().stream()
+                .map(WorkloadSpec::authRef)
+                .filter(ref -> ref != null && !ref.isBlank())
+                .map(authByName::get)
+                .anyMatch(auth -> auth != null && isRunSessionAuth(auth));
+
+        if (!usesPooledSession) {
+            return;
+        }
+
+        jmx.element("CSVDataSet", attributes("TestBeanGUI", "CSVDataSet",
+                        "Runtime sessions"))
+                .stringProp("filename", SESSION_DATASET_FILE_NAME)
+                .stringProp("fileEncoding", "UTF-8")
+                .stringProp("variableNames", "")
+                .boolProp("ignoreFirstLine", true)
+                .stringProp("delimiter", ",")
+                .boolProp("quotedData", true)
+                .boolProp("recycle", false)
+                .boolProp("stopThread", true)
+                .stringProp("shareMode", "shareMode.all")
+                .endLeaf();
     }
 
     private static void writeHttpDefaults(JmxWriter jmx, TargetAddress target) {

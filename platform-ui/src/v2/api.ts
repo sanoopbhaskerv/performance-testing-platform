@@ -120,6 +120,25 @@ export interface Artifact {
   storedAt: string;
 }
 
+export interface TargetRegistrationRequest {
+  team: string;
+  application: string;
+  environment: string;
+  baseUrl: string;
+  targetClass?: 'NON_PRODUCTION' | 'PRODUCTION';
+}
+
+export interface Target {
+  teamId: string;
+  applicationId: string;
+  application: string;
+  environment: string;
+  targetClass: 'NON_PRODUCTION' | 'PRODUCTION';
+  baseUrl: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 /**
  * A run's report.
  *
@@ -442,13 +461,29 @@ export class V2Client {
    * *same* click — a dropped response, a double-submit — reuses the key and returns the original run
    * rather than starting a second load test.
    */
-  triggerRun(definitionVersionId: string, idempotencyKey: string) {
+  triggerRun(
+    definitionVersionId: string,
+    idempotencyKey: string,
+    credentials: Record<string, string> = {},
+  ) {
     return axios
       .post<TestRun>(
         '/api/v2/test-runs',
-        { definitionVersionId },
+        { definitionVersionId, credentials },
         { headers: { ...this.headers, 'Idempotency-Key': idempotencyKey } },
       )
+      .then((r) => r.data);
+  }
+
+  registerTarget(request: TargetRegistrationRequest) {
+    return axios
+      .post<Target>('/api/v2/targets', request, { headers: this.headers })
+      .then((r) => r.data);
+  }
+
+  listTargets() {
+    return axios
+      .get<Target[]>('/api/v2/targets', { headers: this.headers })
       .then((r) => r.data);
   }
 

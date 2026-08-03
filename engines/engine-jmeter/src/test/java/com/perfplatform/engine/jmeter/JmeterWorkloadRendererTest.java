@@ -203,6 +203,31 @@ class JmeterWorkloadRendererTest {
         }
 
         @Test
+        @DisplayName("pooled runtime session authentication reads the session dataset, never a value")
+        void sessionAuthenticationUsesDatasetLookup() {
+            String jmx = renderDefault(credentialed("session", "run://session"));
+
+            assertThat(jmx)
+                    .contains("<stringProp name=\"Header.name\">Authorization</stringProp>")
+                    .contains("<stringProp name=\"Header.value\">${session_value}</stringProp>")
+                    .contains("<stringProp name=\"filename\">sessions.csv</stringProp>")
+                    .doesNotContain("run://session")
+                    .doesNotContain("Bearer ");
+        }
+
+        @Test
+        @DisplayName("non-session runtime authentication still uses environment lookup")
+        void nonSessionAuthenticationUsesEnvironmentLookup() {
+            String jmx = renderDefault(credentialed("api-key", "run://apiKey"));
+
+            assertThat(jmx)
+                    .contains("<stringProp name=\"Header.name\">Authorization</stringProp>")
+                    .contains("<stringProp name=\"Header.value\">${__env(PERF_AUTH_API_KEY)}</stringProp>")
+                    .doesNotContain("<stringProp name=\"filename\">sessions.csv</stringProp>")
+                    .doesNotContain("run://apiKey");
+        }
+
+        @Test
         @DisplayName("a method is normalized to upper case rather than passed through as written")
         void methodIsNormalized() {
             String jmx = renderDefault(withScenarios(java.util.List.of(
@@ -332,6 +357,30 @@ class JmeterWorkloadRendererTest {
             assertThat(jmx).contains("<stringProp name=\"HTTPSampler.path\">/searchClient</stringProp>");
             assertThat(jmx).contains("<stringProp name=\"HTTPSampler.method\">GET</stringProp>");
         }
+    }
+
+    private static PerformanceTestSpecification credentialed(String authName, String secretRef) {
+        PerformanceTestSpecification base = JmeterFixtures.specification(java.util.List.of(
+                JmeterFixtures.workload("api-load",
+                        java.util.List.of(new PerformanceTestSpecification.LoadStage(
+                                java.time.Duration.ofMinutes(1), 10)),
+                        java.util.List.of(new PerformanceTestSpecification.ScenarioSpec(
+                                "browse-users", 100, null, "GET", "/api/users")))));
+        var body = base.spec();
+        var workload = body.workloads().get(0);
+        return new PerformanceTestSpecification(
+                base.apiVersion(), base.kind(), base.metadata(),
+                new PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(),
+                        java.util.List.of(new PerformanceTestSpecification.AuthenticationSpec(
+                                authName, "bearer", "Authorization", secretRef)),
+                        body.datasets(),
+                        java.util.List.of(new PerformanceTestSpecification.WorkloadSpec(
+                                workload.name(), workload.type(), workload.engine(),
+                                workload.sourceRef(), authName, workload.model(),
+                                workload.scenarios(), workload.startWhen(),
+                                workload.browserUsers(), workload.iterationsPerUser())),
+                        body.objectives(), body.observability(), body.governance()));
     }
 
     @Nested

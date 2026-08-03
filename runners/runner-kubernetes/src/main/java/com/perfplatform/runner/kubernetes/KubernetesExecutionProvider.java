@@ -8,13 +8,16 @@ import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobCondition;
 import io.fabric8.kubernetes.api.model.batch.v1.JobStatus;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -103,6 +106,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
                 return ProvisioningResult.accepted(handleFor(existing, name));
             }
 
+            createRuntimeCredentialSecret(request);
             Job created = client.batch().v1().jobs()
                     .inNamespace(settings.namespace())
                     .resource(RunnerJobManifest.build(request, settings))
@@ -164,7 +168,11 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
             return ExecutionStatus.of(ExecutionPhase.NOT_FOUND);
         }
 
-        return statusOf(job);
+        ExecutionStatus status = statusOf(job);
+        if (status.phase() == ExecutionPhase.SUCCEEDED || status.phase() == ExecutionPhase.FAILED) {
+            deleteRuntimeCredentialSecret(handle.name());
+        }
+        return status;
     }
 
     /**
@@ -186,12 +194,16 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
             if (jobs.get() == null) {
                 // Already gone. Cancellation is retried by design and a second attempt must not
                 // fail, or a run could never reach a terminal state.
+                deleteRuntimeCredentialSecret(handle.name());
                 return CancellationResult.terminated("No such runner Job; already terminated");
             }
 
             jobs.withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
 
             boolean gone = jobs.get() == null;
+            if (gone) {
+                deleteRuntimeCredentialSecret(handle.name());
+            }
             log.info("Runner Job deletion requested job={} cascade={} observedGone={}",
                     handle.name(), CASCADE_FOREGROUND, gone);
 
@@ -260,6 +272,42 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
         // The UID, not the name. Names are reusable; a UID identifies this exact Job, which is what
         // stops a recreated Job from being mistaken for the original.
         return new ExecutionHandle(PROVIDER_ID, name, uidOf(job));
+    }
+
+    private void createRuntimeCredentialSecret(ProvisionRequest request) {
+        if (request.runtimeCredentials().isEmpty()) {
+            return;
+        }
+
+        Map<String, String> values = new LinkedHashMap<>();
+        request.runtimeCredentials().forEach(credential ->
+                values.put(credential.environmentVariable(), credential.value()));
+
+        client.secrets()
+                .inNamespace(settings.namespace())
+                .resource(new SecretBuilder()
+                        .withNewMetadata()
+                            .withName(RunnerJobManifest.runtimeCredentialSecretNameFor(request))
+                            .withNamespace(settings.namespace())
+                            .withLabels(RunnerJobManifest.selectorForRun(
+                                    request.runId().value().toString()))
+                        .endMetadata()
+                        .withType("Opaque")
+                        .withStringData(values)
+                        .build())
+                .createOrReplace();
+    }
+
+    private void deleteRuntimeCredentialSecret(String jobName) {
+        try {
+            client.secrets()
+                    .inNamespace(settings.namespace())
+                    .withName(jobName + "-auth")
+                    .delete();
+        } catch (KubernetesClientException e) {
+            log.warn("Could not delete runtime credential Secret for runner Job job={} status={}",
+                    jobName, e.getCode());
+        }
     }
 
     private static String uidOf(Job job) {

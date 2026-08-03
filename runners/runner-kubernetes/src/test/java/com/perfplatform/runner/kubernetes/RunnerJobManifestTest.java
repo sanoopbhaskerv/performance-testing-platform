@@ -360,6 +360,27 @@ class RunnerJobManifestTest {
                     .as("the manifest names the Secret and never carries its contents")
                     .doesNotContain("AWS_SECRET_ACCESS_KEY");
         }
+
+        @Test
+        @DisplayName("runtime credentials are referenced through a per-shard Secret")
+        void runtimeCredentialsUseSecretKeyRefs() {
+            ProvisionRequest request = RunnerFixtures.requestWithCredentials(java.util.List.of(
+                    new com.perfplatform.domain.execution.RuntimeCredential(
+                            "session", "Bearer super-secret-token")));
+
+            Job job = build(request);
+            EnvVar credentialEnv = container(job).getEnv().stream()
+                    .filter(env -> "PERF_AUTH_SESSION".equals(env.getName()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertThat(credentialEnv.getValue()).isNull();
+            assertThat(credentialEnv.getValueFrom().getSecretKeyRef().getName())
+                    .isEqualTo(RunnerJobManifest.runtimeCredentialSecretNameFor(request));
+            assertThat(credentialEnv.getValueFrom().getSecretKeyRef().getKey())
+                    .isEqualTo("PERF_AUTH_SESSION");
+            assertThat(job.toString()).doesNotContain("super-secret-token");
+        }
     }
 
     @Nested

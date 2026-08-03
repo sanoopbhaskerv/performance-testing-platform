@@ -198,6 +198,30 @@
   padding: 0.6rem 0;
 }
 
+.v2 .runtime-credential {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.v2 .runtime-credential label {
+  font-size: 0.78rem;
+  font-weight: var(--pf-weight-strong);
+  color: var(--pf-text-strong);
+}
+
+.v2 .runtime-credential input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--pf-radius-sm);
+  border: 1px solid var(--pf-border-field);
+  background: var(--pf-surface-input);
+  color: inherit;
+}
+
 .v2 .definition-head {
   display: flex;
   justify-content: space-between;

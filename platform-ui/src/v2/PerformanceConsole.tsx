@@ -286,6 +286,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [document, setDocument] = useState(TEMPLATES[0].document);
   const [validation, setValidation] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [sessionCredential, setSessionCredential] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -417,7 +418,12 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
       // A fresh key per click: two clicks are two intentional runs, but a retry of one click —
       // a dropped response, a double submit — returns the original rather than doubling the load.
       const key = `ui-${version.id}-${Date.now()}`;
-      const run = await client.triggerRun(version.id, key);
+      const run = await client.triggerRun(
+        version.id,
+        key,
+        sessionCredential.trim() ? { session: sessionCredential } : {},
+      );
+      setSessionCredential('');
       setNotice(`Run requested. It will start when your team has a free slot.`);
       setRuns((previous) => [run, ...previous]);
       setSelectedRunId(run.id);
@@ -623,40 +629,53 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
             No tests yet. Choose <strong>New test</strong> to describe one.
           </p>
         ) : (
-          <ul className="definitions">
-            {definitions.map((definition) => (
-              <li key={definition.id}>
-                <div className="definition-head">
-                  <strong>{definition.name}</strong>
-                  <span className="muted">
-                    {definition.latestVersion} version
-                    {definition.latestVersion === 1 ? '' : 's'}
-                  </span>
-                </div>
-                <ul className="versions">
-                  {(versions[definition.id] ?? []).map((version) => (
-                    <li key={version.id}>
-                      <span className="muted">v{version.versionNumber}</span>
-                      <code className="digest">{version.digest.slice(7, 19)}</code>
-                      {version.executable ? (
-                        <button
-                          className="btn btn-small"
-                          onClick={() => triggerRun(version)}
-                          disabled={busy}
-                        >
-                          <Play size={12} /> Run this
-                        </button>
-                      ) : (
-                        <span className="tone-bad" title="This version failed validation.">
-                          not runnable
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="runtime-credential">
+              <label htmlFor="session-credential">Session credential</label>
+              <input
+                id="session-credential"
+                type="password"
+                value={sessionCredential}
+                onChange={(event) => setSessionCredential(event.target.value)}
+                placeholder="Used for run://session"
+                autoComplete="off"
+              />
+            </div>
+            <ul className="definitions">
+              {definitions.map((definition) => (
+                <li key={definition.id}>
+                  <div className="definition-head">
+                    <strong>{definition.name}</strong>
+                    <span className="muted">
+                      {definition.latestVersion} version
+                      {definition.latestVersion === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <ul className="versions">
+                    {(versions[definition.id] ?? []).map((version) => (
+                      <li key={version.id}>
+                        <span className="muted">v{version.versionNumber}</span>
+                        <code className="digest">{version.digest.slice(7, 19)}</code>
+                        {version.executable ? (
+                          <button
+                            className="btn btn-small"
+                            onClick={() => triggerRun(version)}
+                            disabled={busy}
+                          >
+                            <Play size={12} /> Run this
+                          </button>
+                        ) : (
+                          <span className="tone-bad" title="This version failed validation.">
+                            not runnable
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
 

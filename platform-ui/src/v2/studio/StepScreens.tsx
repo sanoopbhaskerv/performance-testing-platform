@@ -688,6 +688,10 @@ export function ReviewStep({
     findings: ValidationFinding[] | null;
     error: string | null;
   } | null>(null);
+  const [targetBaseUrl, setTargetBaseUrl] = useState('');
+  const [targetStatus, setTargetStatus] = useState<string | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetBusy, setTargetBusy] = useState(false);
 
   const document = useMemo(() => {
     try {
@@ -740,6 +744,27 @@ export function ReviewStep({
   const validatorPassed = validatorCurrent?.valid === true;
   const ready = document.text !== null && errors.length === 0 && !checking && validatorPassed;
 
+  async function registerTarget() {
+    if (!targetBaseUrl.trim()) return;
+    setTargetBusy(true);
+    setTargetStatus(null);
+    setTargetError(null);
+    try {
+      const target = await client.registerTarget({
+        team: draft.team,
+        application: draft.application,
+        environment: draft.environment,
+        baseUrl: targetBaseUrl,
+        targetClass: 'NON_PRODUCTION',
+      });
+      setTargetStatus(`Registered ${target.application} ${target.environment}: ${target.baseUrl}`);
+    } catch (err) {
+      setTargetError(describeError(err));
+    } finally {
+      setTargetBusy(false);
+    }
+  }
+
   return (
     <>
       <div className="studio-grid">
@@ -791,7 +816,56 @@ export function ReviewStep({
             address — that is what stops it being pointed somewhere it should not go.
           </p>
         </div>
+
+        <div className="studio-field">
+          <label htmlFor="environment">Environment</label>
+          <input
+            id="environment"
+            type="text"
+            value={draft.environment}
+            placeholder="performance"
+            onChange={(e) => onChange({ ...draft, environment: e.target.value })}
+          />
+        </div>
       </div>
+
+      <section className="studio-section">
+        <h3>Target</h3>
+        <div className="studio-grid">
+          <div className="studio-field">
+            <label htmlFor="target-base-url">Base URL</label>
+            <input
+              id="target-base-url"
+              type="text"
+              value={targetBaseUrl}
+              placeholder="https://demo-service.perf.internal"
+              onChange={(e) => setTargetBaseUrl(e.target.value)}
+            />
+          </div>
+          <div className="studio-field studio-action-field">
+            <label aria-hidden="true">&nbsp;</label>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={targetBusy || !targetBaseUrl.trim()}
+              onClick={registerTarget}
+            >
+              {targetBusy ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
+              {targetBusy ? 'Registering...' : 'Register target'}
+            </button>
+          </div>
+        </div>
+        {targetStatus && (
+          <div className="banner banner-info" role="status">
+            <CheckCircle2 size={16} /> {targetStatus}
+          </div>
+        )}
+        {targetError && (
+          <div className="banner banner-bad" role="alert">
+            <AlertCircle size={16} /> {targetError}
+          </div>
+        )}
+      </section>
 
       <p className="studio-summary">
         {includedJourneys(draft).length} journey

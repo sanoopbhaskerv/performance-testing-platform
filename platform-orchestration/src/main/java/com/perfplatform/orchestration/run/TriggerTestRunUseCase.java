@@ -2,8 +2,10 @@ package com.perfplatform.orchestration.run;
 
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
+import com.perfplatform.domain.execution.RuntimeCredential;
 import com.perfplatform.domain.port.DefinitionVersionCatalog;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
+import com.perfplatform.domain.port.RuntimeCredentialStore;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
@@ -22,6 +24,9 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -48,11 +53,14 @@ public final class TriggerTestRunUseCase {
 
     private final TestRunRepository runs;
     private final DefinitionVersionCatalog versions;
+    private final RuntimeCredentialStore runtimeCredentials;
     private final Clock clock;
 
-    public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions, Clock clock) {
+    public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
+            RuntimeCredentialStore runtimeCredentials, Clock clock) {
         this.runs = Objects.requireNonNull(runs, "runs");
         this.versions = Objects.requireNonNull(versions, "versions");
+        this.runtimeCredentials = Objects.requireNonNull(runtimeCredentials, "runtimeCredentials");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -60,7 +68,8 @@ public final class TriggerTestRunUseCase {
      * @param definitionVersionId the immutable version to execute
      * @param idempotencyKey      caller-supplied, unique within the team
      */
-    public record TriggerCommand(TestDefinitionVersionId definitionVersionId, String idempotencyKey) {
+    public record TriggerCommand(TestDefinitionVersionId definitionVersionId, String idempotencyKey,
+            Map<String, String> credentials) {
         public TriggerCommand {
             Objects.requireNonNull(definitionVersionId, "definitionVersionId");
             if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -70,6 +79,12 @@ public final class TriggerTestRunUseCase {
             if (idempotencyKey.length() > 200) {
                 throw new IllegalArgumentException("Idempotency key must be at most 200 characters");
             }
+            credentials = credentials == null ? Map.of() : Map.copyOf(credentials);
+        }
+
+        /** The shape that predates runtime credentials. */
+        public TriggerCommand(TestDefinitionVersionId definitionVersionId, String idempotencyKey) {
+            this(definitionVersionId, idempotencyKey, Map.of());
         }
     }
 
@@ -96,6 +111,13 @@ public final class TriggerTestRunUseCase {
         }
     }
 
+    /** Raised when a version requires a runtime credential the trigger did not supply. */
+    public static class RuntimeCredentialMissingException extends RuntimeException {
+        public RuntimeCredentialMissingException(String name) {
+            super("Runtime credential '" + name + "' was required but not supplied");
+        }
+    }
+
     public TriggerResult trigger(TriggerCommand command, CallerContext caller) {
         DefinitionVersion version = versions.find(command.definitionVersionId())
                 .orElseThrow(() -> new UnknownDefinitionVersionException(command.definitionVersionId()));
@@ -108,16 +130,19 @@ public final class TriggerTestRunUseCase {
             throw new VersionNotExecutableException(version.id());
         }
 
+        List<RuntimeCredential> material = resolveRuntimeCredentials(
+                version.specification(), command.credentials());
+
         String fingerprint = fingerprint(command);
         Instant now = clock.instant();
 
         return runs.findByIdempotencyKey(version.teamId(), command.idempotencyKey())
-                .map(existing -> replay(existing, command, fingerprint, caller, now))
-                .orElseGet(() -> create(command, version, fingerprint, caller, now));
+                .map(existing -> replay(existing, command, fingerprint, material, caller, now))
+                .orElseGet(() -> create(command, version, fingerprint, material, caller, now));
     }
 
     private TriggerResult replay(TestRun existing, TriggerCommand command, String fingerprint,
-            CallerContext caller, Instant now) {
+            List<RuntimeCredential> material, CallerContext caller, Instant now) {
 
         if (!existing.trigger().requestDigest().equals(fingerprint)) {
             throw new TestRunRepository.IdempotencyConflictException(
@@ -129,6 +154,7 @@ public final class TriggerTestRunUseCase {
         // polling uses a read endpoint and appends nothing.
         runs.appendEvent(RunEvent.of(existing.id(), RunEventType.IDEMPOTENT_REPLAY,
                 caller.subject(), RunEvent.detail("idempotencyKey", command.idempotencyKey()), now));
+        runtimeCredentials.put(existing.id(), material);
 
         log.info("Idempotent replay of trigger runId={} teamId={} definitionVersionId={} subject={}",
                 existing.id(), existing.teamId(), command.definitionVersionId(), caller.subject());
@@ -137,7 +163,7 @@ public final class TriggerTestRunUseCase {
     }
 
     private TriggerResult create(TriggerCommand command, DefinitionVersion version,
-            String fingerprint, CallerContext caller, Instant now) {
+            String fingerprint, List<RuntimeCredential> material, CallerContext caller, Instant now) {
 
         RunTransition requested = TestRun.request(
                 TestRunId.generate(),
@@ -148,6 +174,7 @@ public final class TriggerTestRunUseCase {
                 now);
 
         TestRun created = runs.create(requested);
+        runtimeCredentials.put(created.id(), material);
 
         // A concurrent replica may have won the constraint race, in which case create() returned
         // the run it made. That is a replay, not a new run, and reporting it as new would tell the
@@ -180,6 +207,50 @@ public final class TriggerTestRunUseCase {
         return specification.spec().environment().name();
     }
 
+    private static List<RuntimeCredential> resolveRuntimeCredentials(
+            PerformanceTestSpecification specification, Map<String, String> supplied) {
+        if (specification.spec() == null) {
+            return List.of();
+        }
+
+        Map<String, PerformanceTestSpecification.AuthenticationSpec> authByName =
+                specification.spec().authentication().stream()
+                        .filter(auth -> auth.name() != null)
+                        .collect(java.util.stream.Collectors.toMap(
+                                PerformanceTestSpecification.AuthenticationSpec::name,
+                                java.util.function.Function.identity(),
+                                (left, right) -> left,
+                                LinkedHashMap::new));
+
+        Map<String, RuntimeCredential> material = new LinkedHashMap<>();
+        for (var workload : specification.spec().workloads()) {
+            if (workload.authRef() == null || workload.authRef().isBlank()) {
+                continue;
+            }
+            var auth = authByName.get(workload.authRef());
+            if (auth == null || auth.secretRef() == null) {
+                continue;
+            }
+            String ref = auth.secretRef().trim();
+            if (ref.regionMatches(true, 0, "run://", 0, "run://".length())) {
+                String key = ref.substring("run://".length());
+                String value = supplied.get(key);
+                if (value == null || value.isBlank()) {
+                    throw new RuntimeCredentialMissingException(key);
+                }
+                material.put(auth.name(), new RuntimeCredential(auth.name(), value));
+            } else if (ref.regionMatches(true, 0, "env://", 0, "env://".length())) {
+                String key = ref.substring("env://".length());
+                String value = System.getenv(key);
+                if (value == null || value.isBlank()) {
+                    throw new RuntimeCredentialMissingException(key);
+                }
+                material.put(auth.name(), new RuntimeCredential(auth.name(), value));
+            }
+        }
+        return List.copyOf(material.values());
+    }
+
     /**
      * Identifies what a trigger asked for, so a reused key can be told apart from a genuine retry.
      *
@@ -190,7 +261,8 @@ public final class TriggerTestRunUseCase {
     private static String fingerprint(TriggerCommand command) {
         String canonical = "v1\n"
                 + "definitionVersionId=" + command.definitionVersionId() + "\n"
-                + "idempotencyKey=" + command.idempotencyKey();
+                + "idempotencyKey=" + command.idempotencyKey() + "\n"
+                + "credentialNames=" + command.credentials().keySet().stream().sorted().toList();
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")
                     .digest(canonical.getBytes(StandardCharsets.UTF_8));

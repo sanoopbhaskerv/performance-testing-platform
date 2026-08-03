@@ -28,7 +28,8 @@ public final class SecretValueDetector {
             "awssecrets://",
             "azurekeyvault://",
             "k8s://",
-            "env://");
+            "env://",
+            "run://");
 
     /**
      * Shapes that indicate a literal credential rather than a reference. Used to give a more

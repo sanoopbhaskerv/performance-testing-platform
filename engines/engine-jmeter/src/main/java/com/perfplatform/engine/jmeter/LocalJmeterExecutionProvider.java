@@ -174,11 +174,13 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
                     "-Jjmeter.save.saveservice.time=true",
                     "-Jjmeter.save.saveservice.timestamp_format=ms");
 
-            Process process = new ProcessBuilder(command)
+            ProcessBuilder builder = new ProcessBuilder(command)
                     .directory(directory.toFile())
                     .redirectErrorStream(true)
-                    .redirectOutput(directory.resolve("runner-stdout.log").toFile())
-                    .start();
+                    .redirectOutput(directory.resolve("runner-stdout.log").toFile());
+            request.runtimeCredentials().forEach(credential ->
+                    builder.environment().put(credential.environmentVariable(), credential.value()));
+            Process process = builder.start();
 
             running.put(uid, new LocalRun(process, request, directory, now,
                     now.plus(request.deadline()), false));

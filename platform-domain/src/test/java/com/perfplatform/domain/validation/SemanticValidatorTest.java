@@ -424,6 +424,28 @@ class SemanticValidatorTest {
         }
 
         @Test
+        @DisplayName("a run-scoped credential reference is accepted")
+        void acceptsRunScopedReference() {
+            assertThat(SemanticValidator.validate(
+                    withAuthentication("run://session")).codes())
+                    .doesNotContain("spec.secret.inline-value");
+        }
+
+        @Test
+        @DisplayName("a workload authRef must resolve to an authentication entry")
+        void rejectsUnresolvedAuthRef() {
+            assertThat(SemanticValidator.validate(withWorkloadAuthRef("missing-auth")).codes())
+                    .contains("spec.workload.authRef.unresolved");
+        }
+
+        @Test
+        @DisplayName("an authentication entry used by a workload must declare how it is injected")
+        void rejectsMissingInjectionTarget() {
+            assertThat(SemanticValidator.validate(withReferencedAuthentication(null)).codes())
+                    .contains("spec.authentication.injectAs.missing");
+        }
+
+        @Test
         @DisplayName("stages running past maxDuration are rejected rather than silently truncated")
         void rejectsStagesExceedingMaxDuration() {
             PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
@@ -555,6 +577,31 @@ class SemanticValidatorTest {
                                 "test-user", "oauth2-client-credentials", secretRef)),
                         body.datasets(), body.workloads(), body.objectives(), body.observability(),
                         body.governance()));
+    }
+
+    private static PerformanceTestSpecification withWorkloadAuthRef(String authRef) {
+        PerformanceTestSpecification base = SpecificationFixtures.apiOnly();
+        var body = base.spec();
+        WorkloadSpec workload = body.workloads().get(0);
+        WorkloadSpec changed = new WorkloadSpec(workload.name(), workload.type(),
+                workload.engine(), workload.sourceRef(), authRef, workload.model(),
+                workload.scenarios(), workload.startWhen(), workload.browserUsers(),
+                workload.iterationsPerUser());
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(), body.authentication(),
+                        body.datasets(), List.of(changed), body.objectives(),
+                        body.observability(), body.governance()));
+    }
+
+    private static PerformanceTestSpecification withReferencedAuthentication(String injectAs) {
+        PerformanceTestSpecification base = withWorkloadAuthRef("session");
+        var body = base.spec();
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new TestSpec(body.environment(), body.sources(),
+                        List.of(new PerformanceTestSpecification.AuthenticationSpec(
+                                "session", "bearer", injectAs, "run://session")),
+                        body.datasets(), body.workloads(), body.objectives(),
+                        body.observability(), body.governance()));
     }
 
     private static WorkloadSpec workloadWithScenarios(List<ScenarioSpec> scenarios) {

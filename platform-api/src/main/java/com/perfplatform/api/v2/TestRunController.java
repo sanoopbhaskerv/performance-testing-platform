@@ -113,7 +113,8 @@ public class TestRunController {
         TriggerResult result = triggerRun.trigger(
                 new TriggerCommand(
                         TestDefinitionVersionId.of(request.definitionVersionId()),
-                        idempotencyKey),
+                        idempotencyKey,
+                        request.credentials()),
                 caller);
 
         return ResponseEntity

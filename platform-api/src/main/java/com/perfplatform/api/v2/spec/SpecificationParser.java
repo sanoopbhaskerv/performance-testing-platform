@@ -247,10 +247,11 @@ public final class SpecificationParser {
 
     private AuthenticationSpec authentication(JsonNode node, String path,
             List<ValidationFinding> findings) {
-        rejectUnknownFields(node, path, Set.of("name", "type", "secretRef"), findings);
+        rejectUnknownFields(node, path, Set.of("name", "type", "injectAs", "secretRef"), findings);
         return new AuthenticationSpec(
                 text(node, "name", path + "/name", findings),
                 text(node, "type", path + "/type", findings),
+                text(node, "injectAs", path + "/injectAs", findings),
                 text(node, "secretRef", path + "/secretRef", findings));
     }
 
@@ -290,8 +291,8 @@ public final class SpecificationParser {
 
     private WorkloadSpec workload(JsonNode node, String path, List<ValidationFinding> findings) {
         rejectUnknownFields(node, path,
-                Set.of("name", "type", "engine", "sourceRef", "model", "scenarios", "startWhen",
-                        "browserUsers", "iterationsPerUser"),
+                Set.of("name", "type", "engine", "sourceRef", "authRef", "model", "scenarios",
+                        "startWhen", "browserUsers", "iterationsPerUser"),
                 findings);
 
         StartCondition startWhen = null;
@@ -313,6 +314,7 @@ public final class SpecificationParser {
                 enumValue(node, "type", path + "/type", WorkloadType::from, findings),
                 text(node, "engine", path + "/engine", findings),
                 text(node, "sourceRef", path + "/sourceRef", findings),
+                text(node, "authRef", path + "/authRef", findings),
                 loadModel(node.get("model"), path + "/model", findings),
                 each(node.get("scenarios"), path + "/scenarios", this::scenario, findings),
                 startWhen,

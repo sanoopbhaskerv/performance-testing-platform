@@ -3,6 +3,7 @@ package com.perfplatform.orchestration.run;
 import com.perfplatform.domain.dataset.DatasetPartitioner;
 import com.perfplatform.domain.dataset.DatasetUri;
 import com.perfplatform.domain.execution.DatasetDelivery;
+import com.perfplatform.domain.execution.RuntimeCredential;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.port.ArtifactStore;
@@ -15,6 +16,7 @@ import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
+import com.perfplatform.domain.port.SessionPoolProvider;
 import com.perfplatform.domain.port.TargetResolver;
 import com.perfplatform.domain.results.SampleSet;
 import com.perfplatform.domain.run.RunnerShard;
@@ -31,8 +33,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -75,6 +81,12 @@ public final class RunWorkloadService {
     private static final Pattern PLAN_DIGEST =
             Pattern.compile("\"planDigest\"\\s*:\\s*\"([^\"]+)\"");
 
+    /** The runner workspace file JMeter reads pooled session rows from. */
+    public static final String SESSION_DATASET_FILE_NAME = "sessions.csv";
+
+    private static final String SESSION_DATASET_OBJECT_NAME =
+            ArtifactStore.DATASET_OBJECT_PREFIX + "sessions.csv";
+
     private final EngineRegistry engines;
     private final ArtifactStore artifacts;
     private final ResultCatalog results;
@@ -82,10 +94,11 @@ public final class RunWorkloadService {
     private final TargetResolver targets;
     private final DatasetCatalog datasetCatalog;
     private final DatasetStore datasetStore;
+    private final SessionPoolProvider sessionPools;
 
     public RunWorkloadService(EngineRegistry engines, ArtifactStore artifacts, ResultCatalog results,
             RunAnalyzer analyzer, TargetResolver targets, DatasetCatalog datasetCatalog,
-            DatasetStore datasetStore) {
+            DatasetStore datasetStore, SessionPoolProvider sessionPools) {
         this.engines = Objects.requireNonNull(engines, "engines");
         this.artifacts = Objects.requireNonNull(artifacts, "artifacts");
         this.results = Objects.requireNonNull(results, "results");
@@ -93,6 +106,7 @@ public final class RunWorkloadService {
         this.targets = Objects.requireNonNull(targets, "targets");
         this.datasetCatalog = Objects.requireNonNull(datasetCatalog, "datasetCatalog");
         this.datasetStore = Objects.requireNonNull(datasetStore, "datasetStore");
+        this.sessionPools = Objects.requireNonNull(sessionPools, "sessionPools");
     }
 
     /** Raised when a run cannot be pointed at a permitted target. */
@@ -115,6 +129,13 @@ public final class RunWorkloadService {
      */
     public static class DatasetUnavailableException extends RuntimeException {
         public DatasetUnavailableException(String message) {
+            super(message);
+        }
+    }
+
+    /** Raised when pooled application sessions cannot safely cover the run window. */
+    public static class SessionUnavailableException extends RuntimeException {
+        public SessionUnavailableException(String message) {
             super(message);
         }
     }
@@ -145,7 +166,8 @@ public final class RunWorkloadService {
      *                                    carry the columns the specification says it has
      */
     public PreparedShard prepareShard(TestRun run, ExecutionPlan plan, DefinitionVersion version,
-            RunnerShard shard) {
+            RunnerShard shard, List<RuntimeCredential> runtimeCredentials, Duration deadline,
+            Instant now) {
 
         PerformanceTestSpecification specification = version.specification();
         ExecutionEngineProvider engine = engines.require(plan.engine());
@@ -164,7 +186,10 @@ public final class RunWorkloadService {
                 rendered.bytes());
         results.recordArtifact(stored);
 
-        List<DatasetDelivery> datasets = prepareDatasets(run, specification, engine, shard);
+        List<DatasetDelivery> datasets = new ArrayList<>(
+                prepareDatasets(run, specification, engine, shard));
+        prepareSessionDataset(run, specification, shard, runtimeCredentials, deadline, now)
+                .ifPresent(datasets::add);
 
         log.info("Workload prepared runId={} shardIndex={} engine={} target={} artifact={} bytes={} "
                         + "datasets={}",
@@ -172,6 +197,13 @@ public final class RunWorkloadService {
                 stored.objectKey(), stored.sizeBytes(), datasets.size());
 
         return new PreparedShard(stored, datasets);
+    }
+
+    /** The shape that predates runtime session delivery. */
+    public PreparedShard prepareShard(TestRun run, ExecutionPlan plan, DefinitionVersion version,
+            RunnerShard shard) {
+        return prepareShard(run, plan, version, shard, List.of(), Duration.ofHours(1),
+                Instant.EPOCH);
     }
 
     /**
@@ -267,6 +299,101 @@ public final class RunWorkloadService {
         results.recordArtifact(stored);
 
         return new DatasetDelivery(engine.datasetFileName(declared.name()), stored.objectKey());
+    }
+
+    private Optional<DatasetDelivery> prepareSessionDataset(TestRun run,
+            PerformanceTestSpecification specification, RunnerShard shard,
+            List<RuntimeCredential> runtimeCredentials, Duration deadline, Instant now) {
+
+        Optional<PerformanceTestSpecification.AuthenticationSpec> sessionAuth =
+                sessionAuthentication(specification);
+        if (sessionAuth.isEmpty()) {
+            return Optional.empty();
+        }
+
+        PerformanceTestSpecification.AuthenticationSpec auth = sessionAuth.get();
+        RuntimeCredential seed = runtimeCredentials.stream()
+                .filter(credential -> credential.name().equals(auth.name()))
+                .findFirst()
+                .orElseThrow(() -> new SessionUnavailableException(
+                        "A session credential required by the test definition was not available "
+                                + "for pooling"));
+
+        SessionPoolProvider.SessionPool pool = sessionPools.acquire(
+                new SessionPoolProvider.SessionPoolRequest(run.id(), auth.name(), seed,
+                        specification.peakProtocolUsers(), deadline, now));
+
+        Instant mustRemainValidUntil = now.plus(deadline);
+        if (pool.earliestExpiry().isBefore(mustRemainValidUntil)) {
+            throw new SessionUnavailableException(
+                    "Acquired sessions expire before this run's execution deadline. Refresh or "
+                            + "supply a longer-lived session credential before starting the run.");
+        }
+
+        StringBuilder csv = new StringBuilder(sessionCsvHeader());
+        for (SessionPoolProvider.SessionLease lease : partition(pool.leases(), shard)) {
+            csv.append("%s,%s,%s%n".formatted(
+                    csvEscape(lease.sessionId()), csvEscape(lease.value()), lease.expiresAt()));
+        }
+
+        ArtifactReference stored = artifacts.store(
+                new ArtifactDescriptor(run.teamId(), run.id(), Optional.of(shard.id()),
+                        ArtifactType.DATASET, SESSION_DATASET_OBJECT_NAME, "text/csv"),
+                csv.toString().getBytes(StandardCharsets.UTF_8));
+
+        return Optional.of(new DatasetDelivery(SESSION_DATASET_FILE_NAME, stored.objectKey()));
+    }
+
+    private static Optional<PerformanceTestSpecification.AuthenticationSpec> sessionAuthentication(
+            PerformanceTestSpecification specification) {
+        if (specification.spec() == null) {
+            return Optional.empty();
+        }
+
+        Map<String, PerformanceTestSpecification.AuthenticationSpec> authByName =
+                specification.spec().authentication().stream()
+                        .filter(auth -> auth.name() != null)
+                        .collect(Collectors.toMap(
+                                PerformanceTestSpecification.AuthenticationSpec::name,
+                                java.util.function.Function.identity(),
+                                (left, right) -> left,
+                                LinkedHashMap::new));
+
+        return specification.spec().workloads().stream()
+                .map(PerformanceTestSpecification.WorkloadSpec::authRef)
+                .filter(ref -> ref != null && !ref.isBlank())
+                .map(authByName::get)
+                .filter(Objects::nonNull)
+                .filter(RunWorkloadService::isRunSessionAuth)
+                .findFirst();
+    }
+
+    public static boolean isRunSessionAuth(
+            PerformanceTestSpecification.AuthenticationSpec authentication) {
+        if (authentication == null || authentication.secretRef() == null) {
+            return false;
+        }
+        return "run://session".equalsIgnoreCase(authentication.secretRef().trim());
+    }
+
+    private static List<SessionPoolProvider.SessionLease> partition(
+            List<SessionPoolProvider.SessionLease> leases, RunnerShard shard) {
+        List<SessionPoolProvider.SessionLease> partition = new ArrayList<>();
+        for (int index = 0; index < leases.size(); index++) {
+            if (index % shard.shardCount() == shard.shardIndex()) {
+                partition.add(leases.get(index));
+            }
+        }
+        return partition;
+    }
+
+    private static String sessionCsvHeader() {
+        return "session_id,session_value,session_expires_at\n";
+    }
+
+    private static String csvEscape(String value) {
+        String escaped = value.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
     }
 
     /**
@@ -413,6 +540,9 @@ public final class RunWorkloadService {
         int adopted = 0;
         for (ArtifactReference reference : uploaded) {
             if (known.contains(reference.objectKey())) {
+                continue;
+            }
+            if (reference.type() == ArtifactType.DATASET) {
                 continue;
             }
             results.recordArtifact(reference);

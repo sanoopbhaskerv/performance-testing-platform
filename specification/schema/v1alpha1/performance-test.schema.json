@@ -61,7 +61,7 @@
     },
     "secretRef": {
       "type": "string",
-      "pattern": "^(vault|awssecrets|azurekeyvault|k8s|env)://.+",
+      "pattern": "^(vault|awssecrets|azurekeyvault|k8s|env|run)://.+",
       "description": "A reference to a credential held in the approved secret manager. Never the credential itself: this document is stored, rendered, returned by the validate endpoint and often committed to Git, so an inline value is a disclosure.",
       "examples": [
         "vault://performance/proposal/client"
@@ -294,6 +294,11 @@
             "bearer"
           ]
         },
+        "injectAs": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The request header name the runner injects when a workload references this authentication entry, for example Authorization or X-Api-Key."
+        },
         "secretRef": {
           "$ref": "#/$defs/secretRef"
         }
@@ -378,6 +383,10 @@
         "sourceRef": {
           "type": "string",
           "description": "Name of a source declared under spec.sources."
+        },
+        "authRef": {
+          "type": "string",
+          "description": "Name of an authentication entry to inject for this workload."
         },
         "model": {
           "$ref": "#/$defs/loadModel"

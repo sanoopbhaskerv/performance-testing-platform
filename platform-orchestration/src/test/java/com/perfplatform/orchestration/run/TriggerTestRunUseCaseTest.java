@@ -8,6 +8,7 @@ import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunState;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase.TriggerCommand;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase.TriggerResult;
 import com.perfplatform.orchestration.support.InMemoryTestRunRepository;
@@ -21,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +43,8 @@ class TriggerTestRunUseCaseTest {
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final InMemoryTestRunRepository runs = new InMemoryTestRunRepository();
     private final StubDefinitionVersionCatalog versions = new StubDefinitionVersionCatalog();
+    private final InMemoryRuntimeCredentialStore runtimeCredentials =
+            new InMemoryRuntimeCredentialStore();
 
     private TriggerTestRunUseCase useCase;
     private TeamId team;
@@ -48,7 +53,7 @@ class TriggerTestRunUseCaseTest {
 
     @BeforeEach
     void setUp() {
-        useCase = new TriggerTestRunUseCase(runs, versions, clock);
+        useCase = new TriggerTestRunUseCase(runs, versions, runtimeCredentials, clock);
         team = TeamId.generate();
         version = versions.add(team);
         caller = OrchestrationFixtures.caller(team);
@@ -94,6 +99,50 @@ class TriggerTestRunUseCaseTest {
         @DisplayName("does not provision anything — the trigger returns before any load exists")
         void doesNotProvision() {
             assertThat(trigger("nightly-baseline").run().executionPlanId()).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("runtime credentials")
+    class RuntimeCredentials {
+
+        @Test
+        @DisplayName("run-scoped credentials are held for provisioning and not fingerprinted by value")
+        void credentialsAreStoredForTheRun() {
+            PerformanceTestSpecification specification = specificationWithRunCredential();
+            DefinitionVersion credentialed = versions.add(team, specification, true);
+
+            TriggerResult result = useCase.trigger(new TriggerCommand(
+                    credentialed.id(), "credentialed", Map.of("session", "Bearer token-1")),
+                    caller);
+
+            assertThat(runtimeCredentials.find(result.run().id()))
+                    .singleElement()
+                    .satisfies(credential -> {
+                        assertThat(credential.name()).isEqualTo("session");
+                        assertThat(credential.environmentVariable()).isEqualTo("PERF_AUTH_SESSION");
+                        assertThat(credential.toString()).doesNotContain("token-1");
+                    });
+
+            TriggerResult replay = useCase.trigger(new TriggerCommand(
+                    credentialed.id(), "credentialed", Map.of("session", "Bearer token-2")),
+                    caller);
+            assertThat(replay.replayed()).isTrue();
+            assertThat(runtimeCredentials.find(result.run().id()).get(0).value())
+                    .isEqualTo("Bearer token-2");
+        }
+
+        @Test
+        @DisplayName("a missing run-scoped credential is rejected before any run is created")
+        void missingCredentialIsRejected() {
+            DefinitionVersion credentialed =
+                    versions.add(team, specificationWithRunCredential(), true);
+
+            assertThatThrownBy(() -> useCase.trigger(new TriggerCommand(
+                    credentialed.id(), "credentialed", Map.of()), caller))
+                    .isInstanceOf(TriggerTestRunUseCase.RuntimeCredentialMissingException.class);
+
+            assertThat(runs.allRuns()).isEmpty();
         }
     }
 
@@ -235,5 +284,22 @@ class TriggerTestRunUseCaseTest {
 
             assertThat(runs.allRuns()).isEmpty();
         }
+    }
+
+    private static PerformanceTestSpecification specificationWithRunCredential() {
+        PerformanceTestSpecification base = OrchestrationFixtures.apiSpecification();
+        var body = base.spec();
+        var workload = body.workloads().get(0);
+        var credentialed = new PerformanceTestSpecification.WorkloadSpec(
+                workload.name(), workload.type(), workload.engine(), workload.sourceRef(),
+                "session", workload.model(), workload.scenarios(), workload.startWhen(),
+                workload.browserUsers(), workload.iterationsPerUser());
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(),
+                        List.of(new PerformanceTestSpecification.AuthenticationSpec(
+                                "session", "bearer", "Authorization", "run://session")),
+                        body.datasets(), List.of(credentialed), body.objectives(),
+                        body.observability(), body.governance()));
     }
 }

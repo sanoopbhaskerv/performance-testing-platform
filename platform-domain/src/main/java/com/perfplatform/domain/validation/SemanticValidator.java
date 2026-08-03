@@ -3,6 +3,7 @@ package com.perfplatform.domain.validation;
 import com.perfplatform.domain.dataset.DatasetBinding;
 import com.perfplatform.domain.dataset.DatasetUri;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.AuthenticationSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.AssertionOperator;
@@ -223,11 +224,18 @@ public final class SemanticValidator {
     private static void validateAuthentication(PerformanceTestSpecification spec,
             List<ValidationFinding> findings) {
         var authentications = spec.spec().authentication();
+        Set<String> seen = new HashSet<>();
         for (int i = 0; i < authentications.size(); i++) {
             var authentication = authentications.get(i);
             String path = "/spec/authentication/" + i;
 
             requireName(authentication.name(), path + "/name", "authentication name", findings);
+            if (authentication.name() != null && !seen.add(authentication.name())) {
+                findings.add(ValidationFinding.error("spec.authentication.name.duplicate",
+                        path + "/name",
+                        "Duplicate authentication name '" + authentication.name() + "'.",
+                        "Authentication names must be unique so workloads can reference them."));
+            }
             if (isBlank(authentication.type())) {
                 findings.add(ValidationFinding.error("spec.authentication.type.missing",
                         path + "/type", "An authentication type is required.", null));
@@ -397,6 +405,12 @@ public final class SemanticValidator {
                 .filter(name -> name != null)
                 .collect(java.util.stream.Collectors.toSet());
         Set<String> workloadNames = new HashSet<>();
+        Map<String, AuthenticationSpec> authenticationsByName = spec.spec().authentication().stream()
+                .filter(authentication -> authentication.name() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        AuthenticationSpec::name,
+                        java.util.function.Function.identity(),
+                        (left, right) -> left));
 
         for (int i = 0; i < workloads.size(); i++) {
             WorkloadSpec workload = workloads.get(i);
@@ -423,6 +437,8 @@ public final class SemanticValidator {
                         "Declare the source under spec.sources, or correct the reference."));
             }
 
+            validateAuthRef(workload, path, authenticationsByName, findings);
+
             if (workload.type() == WorkloadType.PROTOCOL) {
                 validateProtocolWorkload(workload, path, declaredColumns(spec), findings);
             } else {
@@ -431,6 +447,38 @@ public final class SemanticValidator {
         }
 
         validateStartConditions(workloads, workloadNames, findings);
+    }
+
+    private static void validateAuthRef(WorkloadSpec workload, String path,
+            Map<String, AuthenticationSpec> authenticationsByName,
+            List<ValidationFinding> findings) {
+        if (isBlank(workload.authRef())) {
+            return;
+        }
+        AuthenticationSpec authentication = authenticationsByName.get(workload.authRef());
+        if (authentication == null) {
+            findings.add(ValidationFinding.error("spec.workload.authRef.unresolved",
+                    path + "/authRef",
+                    "authRef '" + workload.authRef()
+                            + "' does not match any declared authentication.",
+                    "Declare it under spec.authentication, or correct the reference."));
+            return;
+        }
+        if (isBlank(authentication.injectAs())) {
+            findings.add(ValidationFinding.error("spec.authentication.injectAs.missing",
+                    path + "/authRef",
+                    "Authentication '" + workload.authRef()
+                            + "' does not say how the runner should inject it.",
+                    "Set injectAs to the HTTP header name to add, for example Authorization "
+                            + "or Cookie."));
+        } else if (authentication.injectAs().contains("\n")
+                || authentication.injectAs().contains("\r")) {
+            findings.add(ValidationFinding.error("spec.authentication.injectAs.invalid",
+                    path + "/authRef",
+                    "Authentication '" + workload.authRef()
+                            + "' has an invalid injection target.",
+                    "Use a single HTTP header name, for example Authorization or Cookie."));
+        }
     }
 
     private static void validateProtocolWorkload(WorkloadSpec workload, String path,

@@ -14,11 +14,11 @@ import java.util.Objects;
  * Everything a runner provider needs to start one shard.
  *
  * <h2>What is deliberately absent</h2>
- * No secret values, no credentials, no resolved authentication material. A provider turns this into
- * a Job manifest, and manifests are readable by anyone with cluster access, appear in audit logs
- * and are frequently pasted into tickets. Secrets reach the runner by reference, mounted at
- * execution time by the runner's own service identity — never through this record and never through
- * a label, annotation or command argument.
+ * No persisted secrets and no specification-level credential values. S5 carries run-scoped
+ * runtime credentials only from trigger to provisioning. A provider must deliver those to the
+ * runner without embedding the values in labels, annotations, command arguments or stored plans;
+ * Kubernetes does that through a per-shard Secret reference, and local development does it through
+ * child-process environment only.
  *
  * <p>Also absent: the specification. The runner executes the compiled plan, which it fetches by
  * identifier. Passing the specification would invite a runner to reinterpret it and produce
@@ -44,6 +44,7 @@ import java.util.Objects;
  * @param datasets    this shard's dataset partitions, as keys plus the file names the engine expects
  *                    them under. Already sliced so no two shards send the same row — a provider
  *                    fetches and places them, and decides nothing about their contents
+ * @param runtimeCredentials run-scoped credential material. Never persisted and never logged.
  * @param deadline    hard wall-clock ceiling; the provider must stop the workload at this point
  *                    even if the plan believes it has more to do
  */
@@ -59,6 +60,7 @@ public record ProvisionRequest(
         String workloadKey,
         List<String> operationLabels,
         List<DatasetDelivery> datasets,
+        List<RuntimeCredential> runtimeCredentials,
         Duration deadline) {
 
     public ProvisionRequest {
@@ -73,6 +75,7 @@ public record ProvisionRequest(
         }
         operationLabels = operationLabels == null ? List.of() : List.copyOf(operationLabels);
         datasets = datasets == null ? List.of() : List.copyOf(datasets);
+        runtimeCredentials = runtimeCredentials == null ? List.of() : List.copyOf(runtimeCredentials);
         if (engine == null || engine.isBlank()) {
             throw new IllegalArgumentException("engine must not be null or blank");
         }
@@ -86,5 +89,14 @@ public record ProvisionRequest(
         if (deadline.isNegative() || deadline.isZero()) {
             throw new IllegalArgumentException("deadline must be positive");
         }
+    }
+
+    /** The shape that predates runtime credentials. */
+    public ProvisionRequest(TestRunId runId, TeamId teamId, RunnerShardId shardId,
+            int shardIndex, int shardCount, String engine, ExecutionPlanId planId,
+            SpecificationDigest planDigest, String workloadKey, List<String> operationLabels,
+            List<DatasetDelivery> datasets, Duration deadline) {
+        this(runId, teamId, shardId, shardIndex, shardCount, engine, planId, planDigest,
+                workloadKey, operationLabels, datasets, List.of(), deadline);
     }
 }

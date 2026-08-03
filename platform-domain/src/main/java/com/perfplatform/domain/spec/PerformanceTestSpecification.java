@@ -128,7 +128,12 @@ public record PerformanceTestSpecification(
      * It must never hold the secret itself; the value is resolved at execution time and mounted
      * only into the runner. Inline values are rejected during validation.
      */
-    public record AuthenticationSpec(String name, String type, String secretRef) {
+    public record AuthenticationSpec(String name, String type, String injectAs, String secretRef) {
+
+        /** The shape that predates runtime injection targets. */
+        public AuthenticationSpec(String name, String type, String secretRef) {
+            this(name, type, null, secretRef);
+        }
     }
 
     /**
@@ -181,6 +186,7 @@ public record PerformanceTestSpecification(
             WorkloadType type,
             String engine,
             String sourceRef,
+            String authRef,
             LoadModel model,
             List<ScenarioSpec> scenarios,
             StartCondition startWhen,
@@ -218,6 +224,14 @@ public record PerformanceTestSpecification(
                     .map(LoadStage::duration)
                     .filter(java.util.Objects::nonNull)
                     .reduce(Duration.ZERO, Duration::plus);
+        }
+
+        /** The shape that predates workload-level authentication. */
+        public WorkloadSpec(String name, WorkloadType type, String engine, String sourceRef,
+                LoadModel model, List<ScenarioSpec> scenarios, StartCondition startWhen,
+                Integer browserUsers, Integer iterationsPerUser) {
+            this(name, type, engine, sourceRef, null, model, scenarios, startWhen,
+                    browserUsers, iterationsPerUser);
         }
     }
 

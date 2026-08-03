@@ -4,6 +4,7 @@ import com.perfplatform.api.v2.SourceImportController;
 import com.perfplatform.api.v2.TestDefinitionController;
 import com.perfplatform.api.v2.security.CallerContextProvider;
 import com.perfplatform.domain.port.DatasetCatalog;
+import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TestDefinitionRepository;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.run.InvalidRunTransitionException;
@@ -13,6 +14,7 @@ import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
+import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -191,6 +193,15 @@ public class V2ProblemHandler {
                 request, e);
     }
 
+    @ExceptionHandler(TriggerTestRunUseCase.RuntimeCredentialMissingException.class)
+    public ProblemDetail handleMissingRuntimeCredential(
+            TriggerTestRunUseCase.RuntimeCredentialMissingException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "run.credential.missing",
+                "A runtime credential required by the test definition was not supplied.",
+                request, e);
+    }
+
     /**
      * A run identifier that names nothing the caller may see.
      *
@@ -254,6 +265,36 @@ public class V2ProblemHandler {
             HttpServletRequest request) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "dataset.team.unknown",
                 e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(ManageTargetsUseCase.UnknownTeamException.class)
+    public ProblemDetail handleUnknownTargetTeam(ManageTargetsUseCase.UnknownTeamException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "target.team.unknown",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(ManageTargetsUseCase.UnknownApplicationException.class)
+    public ProblemDetail handleUnknownTargetApplication(
+            ManageTargetsUseCase.UnknownApplicationException e, HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "target.application.unknown",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(ManageTargetsUseCase.ProductionTargetUnsupportedException.class)
+    public ProblemDetail handleProductionTargetUnsupported(
+            ManageTargetsUseCase.ProductionTargetUnsupportedException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "target.production.unsupported",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(TargetRegistry.UnsafeTargetException.class)
+    public ProblemDetail handleUnsafeTarget(TargetRegistry.UnsafeTargetException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "target.refused",
+                "The target address is not allowed by platform target policy.",
+                request, e);
     }
 
     /**

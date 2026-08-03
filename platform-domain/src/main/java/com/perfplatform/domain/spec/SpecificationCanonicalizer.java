@@ -144,6 +144,7 @@ public final class SpecificationCanonicalizer {
             String prefix = "spec.authentication[" + i + "]";
             field(out, prefix + ".name", authentication.name());
             field(out, prefix + ".type", authentication.type());
+            field(out, prefix + ".injectAs", authentication.injectAs());
             // The reference, not a resolved value: the digest must stay stable across rotation.
             field(out, prefix + ".secretRef", authentication.secretRef());
         }
@@ -177,6 +178,7 @@ public final class SpecificationCanonicalizer {
             field(out, prefix + ".type", name(workload.type()));
             field(out, prefix + ".engine", workload.engine());
             field(out, prefix + ".sourceRef", workload.sourceRef());
+            field(out, prefix + ".authRef", workload.authRef());
 
             LoadModel model = workload.model();
             if (model == null) {

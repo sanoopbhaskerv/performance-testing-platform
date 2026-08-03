@@ -85,6 +85,11 @@ public final class RunnerJobManifest {
         return name.length() <= MAX_NAME_LENGTH ? name : name.substring(0, MAX_NAME_LENGTH);
     }
 
+    /** Run-scoped credential Secret name for this shard. */
+    public static String runtimeCredentialSecretNameFor(ProvisionRequest request) {
+        return nameFor(request) + "-auth";
+    }
+
     /** The label selector that finds every Job belonging to one run. */
     public static Map<String, String> selectorForRun(String runId) {
         return Map.of(LABEL_MANAGED_BY, MANAGED_BY, LABEL_RUN_ID, runId);
@@ -268,12 +273,29 @@ public final class RunnerJobManifest {
         env.put("PERF_ARTIFACT_PREFIX", "teams/%s/runs/%s/shards/%s/".formatted(
                 request.teamId().value(), request.runId().value(), request.shardId().value()));
 
-        return env.entrySet().stream()
+        java.util.List<io.fabric8.kubernetes.api.model.EnvVar> rendered = env.entrySet().stream()
                 .map(entry -> new EnvVarBuilder()
                         .withName(entry.getKey())
                         .withValue(entry.getValue())
                         .build())
                 .toList();
+        if (request.runtimeCredentials().isEmpty()) {
+            return rendered;
+        }
+
+        java.util.List<io.fabric8.kubernetes.api.model.EnvVar> withCredentials =
+                new java.util.ArrayList<>(rendered);
+        request.runtimeCredentials().forEach(credential -> withCredentials.add(new EnvVarBuilder()
+                .withName(credential.environmentVariable())
+                .withNewValueFrom()
+                    .withNewSecretKeyRef()
+                        .withName(runtimeCredentialSecretNameFor(request))
+                        .withKey(credential.environmentVariable())
+                        .withOptional(Boolean.FALSE)
+                    .endSecretKeyRef()
+                .endValueFrom()
+                .build()));
+        return java.util.List.copyOf(withCredentials);
     }
 
     /**

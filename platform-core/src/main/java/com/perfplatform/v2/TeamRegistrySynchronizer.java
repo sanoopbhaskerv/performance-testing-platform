@@ -2,9 +2,12 @@ package com.perfplatform.v2;
 
 import com.perfplatform.config.TeamConfig;
 import com.perfplatform.config.TeamConfigLoader;
+import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TeamProvisioning;
 import com.perfplatform.domain.spec.TargetClass;
+import com.perfplatform.domain.target.TargetAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -43,10 +46,13 @@ public class TeamRegistrySynchronizer {
 
     private final TeamConfigLoader teamConfigs;
     private final TeamProvisioning provisioning;
+    private final TargetRegistry targets;
 
-    public TeamRegistrySynchronizer(TeamConfigLoader teamConfigs, TeamProvisioning provisioning) {
+    public TeamRegistrySynchronizer(TeamConfigLoader teamConfigs, TeamProvisioning provisioning,
+            TargetRegistry targets) {
         this.teamConfigs = teamConfigs;
         this.provisioning = provisioning;
+        this.targets = targets;
     }
 
     /**
@@ -70,8 +76,13 @@ public class TeamRegistrySynchronizer {
                     // Everything arriving from V1 YAML is non-production. A production target is a
                     // policy decision with an approval requirement attached, and it is not one a
                     // team makes by editing their own config file.
-                    provisioning.ensureApplication(teamId, target.getName(),
+                    ApplicationId applicationId = provisioning.ensureApplication(teamId, target.getName(),
                             TargetClass.NON_PRODUCTION);
+                    if (target.getBaseUrl() != null && !target.getBaseUrl().isBlank()) {
+                        targets.register(teamId, applicationId, target.getName(), "performance",
+                                TargetClass.NON_PRODUCTION, TargetAddress.parse(target.getBaseUrl()),
+                                "yaml-sync");
+                    }
                     applicationsSeen++;
                 }
             } catch (RuntimeException e) {

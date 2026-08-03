@@ -1,6 +1,7 @@
 package com.perfplatform.runner.kubernetes;
 
 import com.perfplatform.domain.execution.ProvisionRequest;
+import com.perfplatform.domain.execution.RuntimeCredential;
 import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
 import com.perfplatform.domain.identity.TeamId;
@@ -69,11 +70,21 @@ final class RunnerFixtures {
     /** A request carrying dataset partitions, for the delivery half of the Job contract. */
     static ProvisionRequest requestWithDatasets(
             List<com.perfplatform.domain.execution.DatasetDelivery> datasets) {
-        return build(0, 1, "jmeter", datasets);
+        return build(0, 1, "jmeter", datasets, List.of());
+    }
+
+    static ProvisionRequest requestWithCredentials(List<RuntimeCredential> credentials) {
+        return build(0, 1, "jmeter", List.of(), credentials);
     }
 
     private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
             List<com.perfplatform.domain.execution.DatasetDelivery> datasets) {
+        return build(shardIndex, shardCount, engine, datasets, List.of());
+    }
+
+    private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
+            List<com.perfplatform.domain.execution.DatasetDelivery> datasets,
+            List<RuntimeCredential> credentials) {
         TestRunId runId = TestRunId.generate();
         return new ProvisionRequest(
                 runId,
@@ -87,6 +98,7 @@ final class RunnerFixtures {
                 "teams/t/runs/" + runId.value() + "/shards/s/shard-0.jmx",
                 List.of("checkout-load/browse"),
                 datasets,
+                credentials,
                 DEADLINE);
     }
 }

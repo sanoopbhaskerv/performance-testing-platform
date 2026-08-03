@@ -15,11 +15,13 @@ import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
-import com.perfplatform.domain.port.TargetDirectory;
+import com.perfplatform.domain.port.SessionPoolProvider;
+import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TargetResolver;
 import com.perfplatform.domain.port.DefinitionVersionCatalog;
 import com.perfplatform.domain.port.ExecutionPlanRepository;
 import com.perfplatform.domain.port.RunnerShardRepository;
+import com.perfplatform.domain.port.RuntimeCredentialStore;
 import com.perfplatform.domain.port.TeamDirectory;
 import com.perfplatform.domain.port.TeamProvisioning;
 import com.perfplatform.domain.port.TestDefinitionRepository;
@@ -27,7 +29,7 @@ import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.orchestration.OrchestrationSettings;
 import com.perfplatform.orchestration.dataset.ManageDatasetsUseCase;
 import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
-import com.perfplatform.domain.target.TargetPolicy;
+import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import com.perfplatform.engine.jmeter.JmeterEngineProvider;
 import com.perfplatform.engine.jmeter.LocalJmeterExecutionProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
@@ -35,8 +37,10 @@ import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
 import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.InMemoryRuntimeCredentialStore;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
+import com.perfplatform.orchestration.run.RuntimeCredentialSessionPoolProvider;
 import com.perfplatform.orchestration.run.RunReconciler;
 import com.perfplatform.orchestration.run.RunWorkloadService;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
@@ -464,28 +468,27 @@ public class OrchestrationConfiguration {
     /**
      * Where a run's traffic goes.
      *
-     * <p>Resolved from V1's team YAML during the overlap, and checked against {@link TargetPolicy}
-     * before it is returned. Non-production only: a production deployment needs a target registry
-     * with environment classification and a hostname allowlist (CLAUDE.md §20), and enabling
-     * production or unrestricted targets is a pause condition (§31).
+     * <p>Resolved from the durable V2 target registry. During the migration overlap,
+     * {@link TeamRegistrySynchronizer} copies non-production V1 YAML targets into that registry at
+     * startup; runtime resolution itself no longer reads YAML.
      */
     @Bean
-    public TargetResolver targetResolver(TeamConfigLoader teamConfigs, TargetDirectory teams) {
-        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
-            throw new IllegalStateException(
-                    "Targets must not be resolved from V1 team YAML under a production profile. "
-                            + "Configure a target registry with environment classification and a "
-                            + "hostname allowlist (Increment 4).");
-        }
-        return new TeamYamlTargetResolver(teamConfigs, teams);
+    public TargetResolver targetResolver(TargetRegistry targets) {
+        return targets;
+    }
+
+    @Bean
+    public SessionPoolProvider sessionPoolProvider() {
+        return new RuntimeCredentialSessionPoolProvider();
     }
 
     @Bean
     public RunWorkloadService runWorkloadService(EngineRegistry engines, ArtifactStore artifacts,
             ResultCatalog results, RunAnalyzer analyzer, TargetResolver targets,
-            DatasetCatalog datasetCatalog, DatasetStore datasetStore) {
+            DatasetCatalog datasetCatalog, DatasetStore datasetStore,
+            SessionPoolProvider sessionPools) {
         return new RunWorkloadService(engines, artifacts, results, analyzer, targets,
-                datasetCatalog, datasetStore);
+                datasetCatalog, datasetStore, sessionPools);
     }
 
     @Bean
@@ -535,7 +538,7 @@ public class OrchestrationConfiguration {
     @ConditionalOnProperty(prefix = "platform.orchestration", name = "synchronize-teams-from-yaml",
             havingValue = "true", matchIfMissing = true)
     public TeamRegistrySynchronizer teamRegistrySynchronizer(TeamConfigLoader teamConfigs,
-            TeamProvisioning provisioning) {
+            TeamProvisioning provisioning, TargetRegistry targets) {
 
         if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
             throw new IllegalStateException(
@@ -548,13 +551,24 @@ public class OrchestrationConfiguration {
         log.warn("Team registry synchronization from YAML is enabled: teams and applications "
                 + "declared in the team configuration will be created if absent. Development only.");
 
-        return new TeamRegistrySynchronizer(teamConfigs, provisioning);
+        return new TeamRegistrySynchronizer(teamConfigs, provisioning, targets);
+    }
+
+    @Bean
+    public ManageTargetsUseCase manageTargetsUseCase(TargetRegistry targets, TeamDirectory teams) {
+        return new ManageTargetsUseCase(targets, teams);
     }
 
     @Bean
     public TriggerTestRunUseCase triggerTestRunUseCase(TestRunRepository runs,
-            DefinitionVersionCatalog versions, Clock clock) {
-        return new TriggerTestRunUseCase(runs, versions, clock);
+            DefinitionVersionCatalog versions, RuntimeCredentialStore runtimeCredentials,
+            Clock clock) {
+        return new TriggerTestRunUseCase(runs, versions, runtimeCredentials, clock);
+    }
+
+    @Bean
+    public RuntimeCredentialStore runtimeCredentialStore() {
+        return new InMemoryRuntimeCredentialStore();
     }
 
     @Bean
@@ -613,6 +627,7 @@ public class OrchestrationConfiguration {
             AdmissionPolicy admissionPolicy,
             CapacityLimits limits,
             OrchestrationSettings settings,
+            RuntimeCredentialStore runtimeCredentials,
             RunWorkloadService workloads,
             Clock clock) {
 
@@ -620,6 +635,6 @@ public class OrchestrationConfiguration {
         log.info("Reconciler owner identity for this instance: {}", owner);
 
         return new RunReconciler(runs, shards, plans, versions, compiler, provider,
-                admissionPolicy, limits, settings, workloads, clock, owner);
+                admissionPolicy, limits, settings, runtimeCredentials, workloads, clock, owner);
     }
 }

@@ -100,6 +100,7 @@ class RunReconcilerTest {
      * successful path untested. {@link SyntheticExecution} uses the unwrapped fake.
      */
     private com.perfplatform.domain.execution.ExecutionProvider declaredProvider;
+    private InMemoryRuntimeCredentialStore runtimeCredentials;
 
     private TriggerTestRunUseCase trigger;
     private CancelTestRunUseCase cancel;
@@ -111,7 +112,8 @@ class RunReconcilerTest {
         provider = new FakeExecutionProvider(clock, Duration.ZERO, Duration.ZERO,
                 artifacts, artifacts);
         declaredProvider = OrchestrationFixtures.declaringRealLoad(provider);
-        trigger = new TriggerTestRunUseCase(runs, versions, clock);
+        runtimeCredentials = new InMemoryRuntimeCredentialStore();
+        trigger = new TriggerTestRunUseCase(runs, versions, runtimeCredentials, clock);
         cancel = new CancelTestRunUseCase(runs, clock);
         team = TeamId.generate();
         version = versions.add(team);
@@ -128,14 +130,22 @@ class RunReconcilerTest {
     private RunReconciler reconciler(String owner, CapacityLimits limits,
             com.perfplatform.domain.execution.ExecutionProvider executionProvider) {
 
+        return reconciler(owner, limits, executionProvider,
+                new RuntimeCredentialSessionPoolProvider());
+    }
+
+    private RunReconciler reconciler(String owner, CapacityLimits limits,
+            com.perfplatform.domain.execution.ExecutionProvider executionProvider,
+            com.perfplatform.domain.port.SessionPoolProvider sessionPools) {
+
         RunWorkloadService workloads = new RunWorkloadService(engines, artifacts, artifacts,
                 OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget(),
-                datasets, datasets);
+                datasets, datasets, sessionPools);
 
         return new RunReconciler(runs, shards, plans, versions,
                 new EngineDispatchingPlanCompiler(engines), executionProvider,
                 new ConcurrencyAdmissionPolicy(), limits, OrchestrationSettings.DEFAULTS,
-                workloads, clock, owner);
+                runtimeCredentials, workloads, clock, owner);
     }
 
     private TestRun queueRun(String key) {
@@ -143,8 +153,95 @@ class RunReconcilerTest {
                 OrchestrationFixtures.caller(team)).run();
     }
 
+    private TestRun queueSessionRun(String key) {
+        version = versions.add(team, sessionSpecification(), true);
+        return trigger.trigger(new TriggerTestRunUseCase.TriggerCommand(
+                        version.id(), key, java.util.Map.of("session", "opaque-session-token")),
+                OrchestrationFixtures.caller(team)).run();
+    }
+
     private TestRun reload(TestRun run) {
         return runs.find(run.id()).orElseThrow();
+    }
+
+    private static com.perfplatform.domain.spec.PerformanceTestSpecification sessionSpecification() {
+        var base = OrchestrationFixtures.apiSpecification();
+        var body = base.spec();
+        var workload = body.workloads().get(0);
+        return new com.perfplatform.domain.spec.PerformanceTestSpecification(
+                base.apiVersion(), base.kind(), base.metadata(),
+                new com.perfplatform.domain.spec.PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(),
+                        java.util.List.of(
+                                new com.perfplatform.domain.spec.PerformanceTestSpecification
+                                        .AuthenticationSpec(
+                                        "session", "bearer", "Authorization", "run://session")),
+                        body.datasets(),
+                        java.util.List.of(
+                                new com.perfplatform.domain.spec.PerformanceTestSpecification
+                                        .WorkloadSpec(
+                                        workload.name(), workload.type(), workload.engine(),
+                                        workload.sourceRef(), "session", workload.model(),
+                                        workload.scenarios(), workload.startWhen(),
+                                        workload.browserUsers(), workload.iterationsPerUser())),
+                        body.objectives(), body.observability(), body.governance()));
+    }
+
+    @Nested
+    @DisplayName("runtime session pools")
+    class RuntimeSessionPools {
+
+        @Test
+        @DisplayName("session rows are delivered as a runner dataset partition")
+        void deliversSessionRowsAsDataset() {
+            TestRun run = queueSessionRun("session-delivery");
+
+            reconciler("reconciler-1").reconcile();
+
+            RunnerShard shard = shards.findByRun(run.id()).get(0);
+            var request = provider.requestFor(shard.id().value().toString()).orElseThrow();
+
+            assertThat(request.datasets())
+                    .anySatisfy(dataset ->
+                            assertThat(dataset.fileName()).isEqualTo("sessions.csv"));
+
+            String sessionKey = request.datasets().stream()
+                    .filter(dataset -> dataset.fileName().equals("sessions.csv"))
+                    .findFirst()
+                    .orElseThrow()
+                    .objectKey();
+
+            ArtifactStore.ArtifactReference sessionArtifact = artifacts.listForRun(run.id()).stream()
+                    .filter(reference -> reference.objectKey().equals(sessionKey))
+                    .findFirst()
+                    .orElseThrow();
+            String csv = new String(artifacts.read(sessionArtifact).orElseThrow(),
+                    StandardCharsets.UTF_8);
+
+            assertThat(csv).startsWith("session_id,session_value,session_expires_at");
+            assertThat(csv).contains("opaque-session-token");
+            assertThat(csv.lines().count()).isEqualTo(9);
+            assertThat(artifacts.artifactsFor(run.id()))
+                    .noneMatch(reference -> reference.objectKey().equals(sessionKey));
+        }
+
+        @Test
+        @DisplayName("sessions that expire before the run deadline fail before provisioning")
+        void refusesExpiringSessions() {
+            TestRun run = queueSessionRun("session-expiry");
+
+            reconciler("reconciler-1", CapacityLimits.DEFAULTS, declaredProvider,
+                    new RuntimeCredentialSessionPoolProvider(Duration.ofSeconds(1)))
+                    .reconcile();
+
+            TestRun failed = reload(run);
+            assertThat(failed.state()).isEqualTo(RunState.FAILED);
+            assertThat(failed.failure().orElseThrow().code())
+                    .isEqualTo(RunFailureCode.PROVISIONING_FAILED);
+            assertThat(shards.findByRun(run.id())).isNotEmpty();
+            RunnerShard shard = shards.findByRun(run.id()).get(0);
+            assertThat(provider.requestFor(shard.id().value().toString())).isEmpty();
+        }
     }
 
     /**

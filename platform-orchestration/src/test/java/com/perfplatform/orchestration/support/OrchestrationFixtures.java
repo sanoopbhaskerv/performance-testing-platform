@@ -105,7 +105,11 @@ public final class OrchestrationFixtures {
         }
 
         public DefinitionVersion add(TeamId teamId, boolean executable) {
-            PerformanceTestSpecification specification = apiSpecification();
+            return add(teamId, apiSpecification(), executable);
+        }
+
+        public DefinitionVersion add(TeamId teamId, PerformanceTestSpecification specification,
+                boolean executable) {
             DefinitionVersion version = new DefinitionVersion(
                     TestDefinitionVersionId.generate(),
                     TestDefinitionId.generate(),

@@ -5,6 +5,7 @@ import com.perfplatform.domain.admission.CapacityLimits;
 import com.perfplatform.domain.execution.ExecutionPhase;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.execution.ProvisionRequest;
+import com.perfplatform.domain.execution.RuntimeCredential;
 import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
 import com.perfplatform.domain.plan.ExecutionPlan;
@@ -15,6 +16,7 @@ import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
 import com.perfplatform.domain.port.ExecutionPlanRepository;
 import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.RunnerShardRepository;
+import com.perfplatform.domain.port.RuntimeCredentialStore;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.port.TestRunRepository.ClaimRequest;
 import com.perfplatform.domain.results.ObjectiveOutcome;
@@ -25,6 +27,7 @@ import com.perfplatform.domain.run.RunState;
 import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.run.ShardState;
 import com.perfplatform.domain.run.TestRun;
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.orchestration.OrchestrationSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,6 +87,7 @@ public final class RunReconciler {
     private final AdmissionPolicy admissionPolicy;
     private final CapacityLimits limits;
     private final OrchestrationSettings settings;
+    private final RuntimeCredentialStore runtimeCredentials;
     private final Clock clock;
 
     /** Rendering and analysis — everything that talks to an engine or the artifact store. */
@@ -107,6 +111,7 @@ public final class RunReconciler {
             AdmissionPolicy admissionPolicy,
             CapacityLimits limits,
             OrchestrationSettings settings,
+            RuntimeCredentialStore runtimeCredentials,
             RunWorkloadService workloads,
             Clock clock,
             String owner) {
@@ -119,6 +124,7 @@ public final class RunReconciler {
         this.admissionPolicy = Objects.requireNonNull(admissionPolicy, "admissionPolicy");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.runtimeCredentials = Objects.requireNonNull(runtimeCredentials, "runtimeCredentials");
         this.workloads = Objects.requireNonNull(workloads, "workloads");
         this.clock = Objects.requireNonNull(clock, "clock");
         if (owner == null || owner.isBlank()) {
@@ -223,6 +229,13 @@ public final class RunReconciler {
             return;
         }
         DefinitionVersion version = found.get();
+        List<RuntimeCredential> material = runtimeCredentials.find(run.id());
+        if (missingRuntimeCredential(version.specification(), material).isPresent()) {
+            fail(run, RunFailureCode.PROVISIONING_FAILED,
+                    "A runtime credential required by the test definition was not available for "
+                            + "provisioning", now, report);
+            return;
+        }
 
         ExecutionPlan plan = resolvePlan(run, version, now);
         TestRun attached = run.executionPlanId().isPresent()
@@ -252,9 +265,11 @@ public final class RunReconciler {
             // executed and what it sent are recoverable whatever happens to the runner afterwards.
             RunWorkloadService.PreparedShard prepared;
             try {
-                prepared = workloads.prepareShard(withPlan, plan, version, shard);
+                prepared = workloads.prepareShard(withPlan, plan, version, shard, material,
+                        deadlineFor(plan), now);
             } catch (RunWorkloadService.TargetUnresolvableException
-                    | RunWorkloadService.DatasetUnavailableException e) {
+                    | RunWorkloadService.DatasetUnavailableException
+                    | RunWorkloadService.SessionUnavailableException e) {
                 // Neither is transient. A target that is not registered does not become registered
                 // by retrying, and a dataset that does not have the declared columns will not grow
                 // them — and a run that sat in PROVISIONING forever would hold a capacity slot while
@@ -265,7 +280,8 @@ public final class RunReconciler {
 
             ExecutionProvider.ProvisioningResult result = provider.provision(
                     provisionRequest(withPlan, plan, shard, prepared,
-                            RunWorkloadService.operationLabels(version.specification())));
+                            RunWorkloadService.operationLabels(version.specification()),
+                            material));
 
             if (!result.isAccepted()) {
                 String reason = result.failureReason().orElse("The runner could not be created");
@@ -368,6 +384,7 @@ public final class RunReconciler {
 
         runs.apply(run.transitionTo(RunState.COMPLETED, RunEvent.SYSTEM_ACTOR,
                 "All objectives met", now));
+        runtimeCredentials.clear(run.id());
         log.info("Run completed runId={} teamId={} objectives={}",
                 run.id(), run.teamId(), analysis.outcomes().size());
         report.completed();
@@ -389,7 +406,8 @@ public final class RunReconciler {
     }
 
     private ProvisionRequest provisionRequest(TestRun run, ExecutionPlan plan, RunnerShard shard,
-            RunWorkloadService.PreparedShard prepared, List<String> operationLabels) {
+            RunWorkloadService.PreparedShard prepared, List<String> operationLabels,
+            List<RuntimeCredential> material) {
         return new ProvisionRequest(
                 run.id(),
                 run.teamId(),
@@ -402,6 +420,7 @@ public final class RunReconciler {
                 prepared.workload().objectKey(),
                 operationLabels,
                 prepared.datasets(),
+                material,
                 deadlineFor(plan));
     }
 
@@ -541,6 +560,7 @@ public final class RunReconciler {
                 RunEvent.SYSTEM_ACTOR, RunEvent.detail("shards", String.valueOf(current.size())), now));
         runs.apply(run.transitionTo(RunState.CANCELLED, RunEvent.SYSTEM_ACTOR,
                 run.cancellation().map(TestRun.Cancellation::reason).orElse("Cancelled"), now));
+        runtimeCredentials.clear(run.id());
 
         log.info("Run cancelled runId={} teamId={}", run.id(), run.teamId());
         report.cancelled();
@@ -587,8 +607,40 @@ public final class RunReconciler {
     private void fail(TestRun run, RunFailureCode code, String sanitizedReason, Instant now,
             ReconciliationReport.Builder report) {
         runs.apply(run.failed(code, sanitizedReason, RunEvent.SYSTEM_ACTOR, now));
+        runtimeCredentials.clear(run.id());
         log.warn("Run failed runId={} teamId={} failureCode={}", run.id(), run.teamId(), code);
         report.failed();
+    }
+
+    private static Optional<String> missingRuntimeCredential(PerformanceTestSpecification specification,
+            List<RuntimeCredential> material) {
+        if (specification.spec() == null) {
+            return Optional.empty();
+        }
+
+        Map<String, PerformanceTestSpecification.AuthenticationSpec> authByName =
+                specification.spec().authentication().stream()
+                        .filter(auth -> auth.name() != null)
+                        .collect(java.util.stream.Collectors.toMap(
+                                PerformanceTestSpecification.AuthenticationSpec::name,
+                                java.util.function.Function.identity(),
+                                (left, right) -> left,
+                                LinkedHashMap::new));
+
+        List<String> available = material.stream().map(RuntimeCredential::name).toList();
+        return specification.spec().workloads().stream()
+                .map(PerformanceTestSpecification.WorkloadSpec::authRef)
+                .filter(ref -> ref != null && !ref.isBlank())
+                .map(authByName::get)
+                .filter(Objects::nonNull)
+                .filter(auth -> auth.secretRef() != null
+                        && (auth.secretRef().regionMatches(true, 0, "run://", 0,
+                                "run://".length())
+                        || auth.secretRef().regionMatches(true, 0, "env://", 0,
+                                "env://".length())))
+                .map(PerformanceTestSpecification.AuthenticationSpec::name)
+                .filter(name -> !available.contains(name))
+                .findFirst();
     }
 
     /**
