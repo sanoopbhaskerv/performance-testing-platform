@@ -12,7 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Nothing in this plan has been implemented.** It is a plan.
+**Status: S1, S2 and S3's engine half are built.** See §11 for the per-increment state and
+`HANDOFF.md` §3n–§3p for what each delivered. Everything from S3's surfaces onward is still a plan.
 
 ---
 
@@ -44,6 +45,20 @@ instruction outranks this file):
 **k6 is still prohibited** (CLAUDE.md §3, §31). k6 Studio appears below purely as a **UX reference** —
 it is the most complete studio model published, and its screen decomposition is worth learning from.
 No k6 code, dependency or engine enters this platform.
+
+### On V1
+
+**The user has authorized V1's removal** — the CLAUDE.md §31 pause on deleting V1 functionality is
+cleared — and has asked for it **after** the studio build phases rather than during them. It splits
+in two, and only the first half is cheap:
+
+- **The V1 UI** (`App.tsx`'s legacy screens and the tab switcher) can go whenever. It makes the
+  studio simpler: the `.v2` scoping prefix becomes unnecessary, the light theme can follow
+  `prefers-color-scheme` instead of being an opt-in, and the last 3 lint errors go with it.
+- **The V1 API and engine cannot go until S5.** Three V2 components read V1's `TeamConfigLoader`:
+  `DevelopmentCallerContextProvider` for caller identity, `TeamYamlTargetResolver` for which host a
+  run may address, and `TeamRegistrySynchronizer` for the team registry. Removing it before S5
+  replaces the team YAML would leave the studio unable to authenticate anyone or resolve any target.
 
 ---
 
@@ -106,24 +121,26 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | Thresholds | ✅ built — objectives with verdicts |
 | Generated-plan preview | ✅ built |
 | Durable runs, cancel, quotas, authorization | ✅ built — and neither reference tool has any of it |
-| **Correlation rules** | ❌ **the central gap** |
-| **Verification rules (assertions)** | ❌ |
-| **Think time** | ❌ |
-| **Validator / single-iteration dry run** | ❌ |
-| **Arrival-rate load profile** | ❌ only staged concurrency |
-| **Recorder** | ❌ |
-| **Browser engine, Core Web Vitals** | ❌ |
-| **Studio shell** | ❌ a YAML editor with an import panel |
+| **Correlation rules** | ✅ **built in S3** — §3p. Not yet offered as suggestions in the UI |
+| **Verification rules (assertions)** | ✅ built in S3 — expressible in a document, not yet in the studio |
+| **Think time** | ✅ built in S3 |
+| **Studio shell** | ✅ built in S1 — §3n |
+| **A report a non-expert can read** | ✅ built in S2 — §3o |
+| **Validator / single-iteration dry run** | ❌ S4, next |
+| **Arrival-rate load profile** | ❌ S8. Only staged concurrency today |
+| **Recorder** | ❌ S10. Release 1 ships guided capture wizards (§5) |
+| **Browser engine, Core Web Vitals** | ❌ S6 |
 
-Roughly **half of a studio already exists**, and the strongest half — the import, sanitization and
-governance the desktop tools mostly lack.
+The table above was the state when this plan was written. Most of the gaps are closed; what
+remains is marked with the increment that owns it.
 
 ### Three structural facts that shape everything below
 
 Found by reading the code, not the docs:
 
-1. **A journey is one request.** `ScenarioSpec` carries one method and one path, with no way to carry
-   a value forward. No correlation, no login, no sequence.
+1. ~~**A journey is one request.**~~ **Fixed in S3** (`HANDOFF.md` §3p): `ScenarioSpec` carries
+   ordered steps, values are extracted and carried forward, and a failed extraction fails the sample
+   rather than reporting good latency.
 2. **`spec.authentication` is parsed, validated and used by nothing.** No `SecretResolver` exists.
 3. **A run has one plan with one engine.**
    [`EngineDispatchingPlanCompiler.primaryEngine()`](platform-orchestration/src/main/java/com/perfplatform/orchestration/plan/EngineDispatchingPlanCompiler.java:62)
@@ -697,7 +714,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 | Decision | Chosen | Why |
 |---|---|---|
-| **vitest** | **Yes — approved** | `platform-ui` has no test runner at all and release 1 roughly triples it. §31 pause cleared. |
+| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 130 UI tests now. |
 | **Recorder** | **Deferred.** Guided capture wizards instead (§5) | A server-side recording browser is large and needs a security review. The wizards get most of the value for almost nothing. |
 | **Live monitoring** | **Deferred.** Existing status, plus elapsed/stage/progress bar | The cost is a runner-image change and re-verification on a cluster. The progress bar is derivable from data the control plane already has — no runner change. |
 | **The novice report** | **Kept** | Pure UI, cheap, and most of what "usable without experience" actually means. |
@@ -709,20 +726,20 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 workload, one engine, one plan**. It does not need S9's multi-plan refactor at all — only the hybrid
 does. So web performance costs S8 alone, not S7 + S8.
 
-| # | Increment | Studio surface | Size | Release 1 |
-|---|---|---|---|---|
-| **S1** | Studio shell, and the API path end to end | 1 Start, 2 Sources, 3 Refine, 6 Load, 7 Objectives, 9 Status, 10 Report | Large | ✅ |
-| **S2** | The report a novice can read | 10 Report | Medium | ✅ |
-| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ |
-| **S4** | The Validator | 8 Validate | Medium | ✅ |
-| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ |
-| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ |
-| **S7** | Live monitoring | 9 Monitor | Large | — |
-| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — |
-| **S9** | One run, many workloads | structural | Large | — |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — |
-| **S11** | Web performance under load | Test type 3 ★ | Medium | — |
-| **S12** | Scale, baselines, comparison | 10 Report | Medium | — |
+| # | Increment | Studio surface | Size | Rel. 1 | State |
+|---|---|---|---|---|---|
+| **S1** | Studio shell, and the API path end to end | 1 Start, 2 Sources, 3 Refine, 6 Load, 7 Objectives, 9 Status, 10 Report | Large | ✅ | **done** — `HANDOFF.md` §3n |
+| **S2** | The report a novice can read | 10 Report | Medium | ✅ | **done** — §3o |
+| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **engine done** — §3p. HAR ordered steps and the Rules screen remain |
+| **S4** | The Validator | 8 Validate | Medium | ✅ | next |
+| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | |
+| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | |
+| **S7** | Live monitoring | 9 Monitor | Large | — | |
+| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |
+| **S9** | One run, many workloads | structural | Large | — | |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | |
+| **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
+| **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
 **Usable milestones:**
 

@@ -4,23 +4,30 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Increment 2h. Increments 0–2h are complete and committed.
+**Last updated:** Studio increment S3. Increments 0–2h and S1–S3 (engine half) are complete and committed.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
 a dataset is now uploaded, stored per team and per version, verified against the columns a test
 declares, sliced per shard and delivered (§3m).
 
-**A direction has been chosen: [`PLAN.md`](PLAN.md) — the Performance Studio.** One UI usable by
-someone with **no performance testing experience**, covering **API load testing** and **web
-performance testing**. Twelve increments, S1–S12, each shipping a backend capability *and* its studio
-screen; **release 1 is S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what
-happens next**; `ROADMAP.md` remains the inventory of what exists. Nothing in `PLAN.md` is
-implemented yet.
+**The direction is [`PLAN.md`](PLAN.md) — the Performance Studio.** One UI usable by someone with
+**no performance testing experience**, covering **API load testing** and **web performance testing**.
+Twelve increments, S1–S12, each shipping a backend capability *and* its studio screen; **release 1 is
+S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what happens next**;
+`ROADMAP.md` remains the inventory of what exists.
+
+**S1, S2 and S3's engine half are built** (§3n–§3p). A test can be described by clicking, its report
+opens with the answer in a sentence, a running test shows where it is in its plan, and a journey can
+sign in and carry a session forward.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
-- **vitest is approved** (§31 pause cleared) and lands in S1.
+- **vitest is approved** (§31 pause cleared) and was added in S1. **130 UI tests** where there were
+  none.
+- **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
+  the studio build phases. The UI half is cheap; the API half is blocked until S5 (`PLAN.md` §0,
+  "On V1").
 - **The recorder is deferred to S10.** Release 1 ships guided capture wizards instead: DevTools HAR
   for protocol journeys, `npx playwright codegen` for browser journeys. **A HAR cannot produce a
   Playwright script** — it records traffic, not user actions — so the two halves need separate
@@ -32,7 +39,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S1**.
+`NEXT-SESSION.md` §2 has the immediate task: **finish S3's surfaces**, then S4.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -70,8 +77,10 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**931 tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
-721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g).
+**931 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
+684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3).
+
+**130 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -87,21 +96,19 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: `PLAN.md`, increment S1** — the studio shell and the API path end to end.
-Gated on a vitest decision (`PLAN.md` §12, R1): `platform-ui` has no test runner and S1 roughly
-triples the UI, which is a CLAUDE.md §31 pause condition.
+**Immediate next action: finish S3's surfaces** — the HAR importer emitting ordered steps, and the
+studio's Rules screen. Then **S4, the Validator**. `NEXT-SESSION.md` §2 has the detail.
 
-**Three structural facts S1 onward has to work around**, each found by reading the code and each with
-an increment that fixes it:
+**Three structural facts the studio work has to deal with**, each found by reading the code:
 
-1. **A journey is one request** — `ScenarioSpec` has one method and one path and no way to carry a
-   value forward. No correlation, therefore no login. **S3.**
+1. ~~**A journey is one request.**~~ **Fixed in S3** (§3p). Scenarios carry ordered steps, values are
+   extracted and carried forward, and a failed extraction fails the sample.
 2. **`spec.authentication` is parsed, canonicalized, validated and used by nothing.** No
-   `SecretResolver` exists anywhere in the tree. **S5.**
+   `SecretResolver` exists anywhere in the tree. **S5** — and this is also what blocks V1's removal.
 3. **A run has one plan with one engine.** `EngineDispatchingPlanCompiler.primaryEngine()` takes the
    first workload that declares an engine and **silently ignores the rest** — so triggering the
    shipped `specification/examples/valid/hybrid.yaml` compiles only JMeter and drops the browser
-   workload with no error and no finding. **S7.**
+   workload with no error and no finding. **S9.**
 
 ---
 
@@ -1065,7 +1072,8 @@ number somebody invented and then trusts.
   injecting one. Overriding three declarations moves the button and the load bar; the breach and pass
   pills do not move, because a palette that rendered a breach in a reassuring green would make the
   studio lie in its own house style.
-- **vitest**, approved by the user, clearing the §31 pause. **88 UI tests** where there were none.
+- **vitest**, approved by the user, clearing the §31 pause. **88 UI tests at the close of S1**,
+  where there were none before it. (130 now — S2 and S3 added more.)
   Tests get their own `tsconfig.test.json` in the build: test code needs Node's types and application
   code must not have them.
 - The **YAML editor stays**, behind *Write it as YAML*. Removing it would turn the studio's gaps into

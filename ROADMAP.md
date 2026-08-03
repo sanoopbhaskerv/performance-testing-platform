@@ -10,12 +10,15 @@ than a surprise.
 
 ## 0. Where to stop
 
-> **Superseded, in part, by [`PLAN.md`](PLAN.md).** The user has chosen a direction: turn the
-> platform into a **Performance Studio** — one UI where someone with no performance testing
-> experience configures an API load test or a web performance test and reads a report they can act
-> on. `PLAN.md` sequences that as twelve increments (S1–S12), of which **S1–S6 are release 1**, and
-> reorders most of what follows in this file. **Read `PLAN.md` first.** This file remains the
-> inventory of what exists and what does not; `PLAN.md` is the decision about what happens next.
+> **Superseded, in part, by [`PLAN.md`](PLAN.md).** The direction is a **Performance Studio** — one
+> UI where someone with no performance testing experience configures an API load test or a web
+> performance test and reads a report they can act on. `PLAN.md` sequences that as twelve increments
+> (S1–S12), of which **S1–S6 are release 1**, and reorders most of what follows in this file.
+> **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
+> `PLAN.md` is the decision about what happens next.
+>
+> **Built so far: S1, S2 and S3's engine half** — the studio, a report a non-expert can read, run
+> progress, and multi-step journeys with correlation. `HANDOFF.md` §3n–§3p.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -27,8 +30,13 @@ immutably per version, verified against the columns a test declares, sliced per 
 HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
-was chosen. It has been: `PLAN.md`, release 1 (S1–S6). Everything below is still an accurate
-inventory of what exists and what does not.
+was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and three of those six are built. Everything
+below is still an accurate inventory of what exists and what does not.
+
+**V1's removal is authorized** and deferred until after the studio build phases. The UI half is
+cheap; the API half is blocked until S5, because `DevelopmentCallerContextProvider`,
+`TeamYamlTargetResolver` and `TeamRegistrySynchronizer` all read V1's `TeamConfigLoader` — V2 has no
+identity and no targets without it. `PLAN.md` §0, "On V1".
 
 **One thing to carry forward, wherever you go next:** 2h changed the runner image's entrypoint, and
 that change has not been run on a cluster. The local path is verified with real load. Re-run
@@ -53,13 +61,13 @@ Kept for the record. All four steps landed:
 
 ## 2. Increment 2, remaining
 
-Worth doing, in this order, none urgent.
+Reordered by `PLAN.md`; kept here as the inventory. Correlation is done; the rest map onto S-numbers.
 
 | Item | Why it matters | Size |
 |---|---|---|
-| **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. | Medium |
-| **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. | Medium |
-| **Jenkins shared library** | CLAUDE.md §20 wants CI to use a scoped service identity, not a person's key. Blocked on Increment 4's identity work to be done properly; a thin version using an API key is possible sooner. | Small–Medium |
+| **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. **This is `PLAN.md` S4** — next after S3's remaining surfaces. | Medium |
+| **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. **`PLAN.md` S12**; S2 shaped the report to take one. | Medium |
+| ~~**Jenkins shared library**~~ | **Dropped.** CI triggering is not this organisation's practice; the V2 API remains available for whoever wants it. | — |
 | ~~**Manual correlation and extraction**~~ | **Done in `PLAN.md` S3** — scenarios carry ordered steps, values are extracted and carried forward, and a failed extraction fails the sample rather than reporting good latency. `HANDOFF.md` §3p. | — |
 
 ---
@@ -119,7 +127,13 @@ Each is real, none blocks anything.
   count rises is calibration (`docs/operations/runner-calibration.md`).
 - **The runner image's dataset fetch has not run on a cluster.** Added by 2h and verified only
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
-- **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload belongs.
+- **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload
+  belongs.
+- **Journeys cannot be built by clicking.** S3 made multi-step scenarios with correlation
+  expressible in YAML and over the API, but the studio has no Rules screen yet and its Sources/Refine
+  screens still produce single-request scenarios. Owned by the rest of S3.
+- **The HAR importer still emits sibling scenarios, not ordered steps**, so its
+  `import.har.journeys.notOrdered` warning still stands and must not be retired. Also the rest of S3.
 - **The studio asks for the team name.** Nothing reports the caller's own team: `TeamDirectory` maps
   name to id and not back, and no endpoint exposes it. Owned by `PLAN.md` S5.
 - **The credential-name list is header-shaped.** `x-api-key` is refused as a query parameter but
@@ -130,8 +144,9 @@ Each is real, none blocks anything.
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
-- ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library, with
-  88 tests covering `scenarioYaml.ts`, the design tokens and the studio's specification emitter.
+- ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library.
+  **130 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
+  emitter and step rules, the report narrative and run progress.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).
 - **UI lint reports 10 errors, 3 warnings**, all pre-existing in `App.tsx` and the pre-1D parts of

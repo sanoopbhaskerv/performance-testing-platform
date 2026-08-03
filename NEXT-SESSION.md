@@ -89,22 +89,25 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved and added in S1.** §31 pause cleared. 88 tests. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **130 UI tests** now. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
 | **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
+| **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. The UI half is cheap; the API half is blocked until S5 replaces the team YAML that V2 reads for identity and targets. `PLAN.md` §0, "On V1". |
 
-**S1 is complete** (`HANDOFF.md` §3n). The studio exists: *New test* → pick a test type → import a
-source → review journeys → set load → set objectives → the platform validates live → Save. Verified
-end to end in a browser against a running control plane. **88 UI tests.**
+### What is built
 
-**S2 is complete** (`HANDOFF.md` §3o). The report opens with the answer in a sentence, every metric
-explains itself where it appears, and a running test shows where it is in its plan. **130 UI tests.**
+- **S1** (`HANDOFF.md` §3n) — the studio. *New test* → pick a test type → import a source → review
+  journeys → set load → set objectives → the platform validates live → Save. Verified end to end in
+  a browser against a running control plane.
+- **S2** (§3o) — the report opens with the answer in a sentence, every metric explains itself where
+  it appears, and a running test shows where it is in its plan.
+- **S3, engine half** (§3p) — a test can sign in. Scenarios carry ordered steps, values are extracted
+  and carried forward, and a broken correlation fails loudly instead of reporting excellent latency.
+  Proven with two real runs differing only by one JSON path.
 
-**S3's engine half is complete** (`HANDOFF.md` §3p). A test can sign in: scenarios carry ordered
-steps, values are extracted and carried forward, and a broken correlation fails loudly instead of
-reporting excellent latency. Proven with two real runs differing only by one JSON path.
+**931 Java tests, 130 UI tests.**
 
 **Next: finish S3's surfaces**, then S4.
 1. **The HAR importer should emit ordered steps** rather than sibling scenarios, retiring its
@@ -116,22 +119,28 @@ reporting excellent latency. Proven with two real runs differing only by one JSO
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
 
-### The three facts S1 onward has to work around
+### The three facts the studio work has to deal with
 
 Found by reading the code, and each is recorded in `PLAN.md` §2:
 
-1. **A journey is one request.** No correlation, so no login. Fixed in S3.
-2. **`spec.authentication` is parsed, validated and used by nothing.** Fixed in S5.
+1. ~~**A journey is one request.**~~ **Fixed in S3.** Scenarios carry ordered steps with extraction
+   and assertions.
+2. **`spec.authentication` is parsed, validated and used by nothing.** No `SecretResolver` exists.
+   **S5** — and it is also what blocks V1's removal.
 3. **A run has one plan with one engine** — `EngineDispatchingPlanCompiler.primaryEngine()` takes the
    first workload's engine and silently ignores the rest, so the shipped `hybrid.yaml` would drop its
-   browser workload with no error. Fixed in S7.
+   browser workload with no error. **S9.**
 
 ### The caveat to carry forward
 
 2h changed the runner image's entrypoint (it now fetches dataset partitions), and that change has
-**not been run on a cluster**. The local-JMeter path is verified with real load. Before trusting the
-Kubernetes path with a dataset, re-run `docs/operations/local-kubernetes-run.md`. S2 changes the
-runner image again (progress snapshots), so the same procedure applies then.
+**not been run on a cluster**. The local-JMeter path is verified with real load — including S3's
+journeys. Before trusting the Kubernetes path with a dataset, re-run
+`docs/operations/local-kubernetes-run.md`.
+
+Nothing since has touched the runner image: S1–S3 are control-plane and UI work, and **S7** is the
+next increment that changes it (progress snapshots for live monitoring). Re-run the kind procedure
+then too.
 
 ### Datasets, in one paragraph
 
@@ -143,11 +152,12 @@ refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
 
 ### What is already done — do not rebuild
 
-Increments 0 through 2h. The canonical specification, durable run orchestration, the JMeter engine
-behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact store, the runner
-image, report and artifact download, synthetic-run marking, **four source importers**, the console's
-import panel, dataset binding and partitioning, and dataset upload, storage and delivery.
-`HANDOFF.md` §3–§3m is the account of each.
+Increments 0 through 2h, then S1–S3. The canonical specification, durable run orchestration, the
+JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact
+store, the runner image, report and artifact download, synthetic-run marking, **four source
+importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
+(shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
+progress**, and **multi-step journeys with correlation**. `HANDOFF.md` §3–§3p is the account of each.
 
 ## 3. Rules that do not bend
 
@@ -164,7 +174,11 @@ import panel, dataset binding and partitioning, and dataset upload, storage and 
   A commit whose documents still describe the previous state is how a fresh context starts by
   rebuilding something that already exists.
 - Do not push, tag, merge or publish without explicit authorization.
-- V1 must keep working. `/api/v1/**` and the **Legacy (v1)** UI tab are the check.
+- **V1 still works and still must, for now.** Its removal is authorized but deferred until after the
+  studio build phases, and its API cannot go until S5 — `DevelopmentCallerContextProvider`,
+  `TeamYamlTargetResolver` and `TeamRegistrySynchronizer` all read V1's `TeamConfigLoader`, so V2 has
+  no identity and no targets without it. Until then `/api/v1/**` and the **Legacy (v1)** tab are the
+  check.
 - Tests named `KNOWN DEFECT` / `KNOWN GAP` / `KNOWN SECURITY GAP` assert behaviour that is wrong on
   purpose. Invert them in place when the owning increment fixes them; never delete one to go green.
 - Pause and ask before: a new unapproved dependency, k6, a secret manager, an identity provider, a
