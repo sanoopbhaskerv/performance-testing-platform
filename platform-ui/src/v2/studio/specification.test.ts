@@ -4,6 +4,7 @@ import {
   humanDuration,
   objectiveThreshold,
   totalDurationSeconds,
+  approximateDuration,
   governanceCeilingSeconds,
   IncompleteDraftError,
 } from './specification';
@@ -227,6 +228,25 @@ describe('humanDuration', () => {
   it('keeps a duration exact rather than rounding it to a nicer unit', () => {
     // 90 seconds is not "about 2 minutes". The number someone typed is how long the test runs.
     expect(humanDuration(90)).toBe('90s');
+  });
+});
+
+describe('approximateDuration', () => {
+  it.each([
+    [45, '45 seconds'],
+    [60, '1 minute'],
+    [165, '3 minutes'],
+    [900, '15 minutes'],
+    [3600, '1 hour'],
+    [5400, '1h 30m'],
+  ])('renders %i seconds as %s for a sentence a person reads', (seconds, expected) => {
+    expect(approximateDuration(seconds)).toBe(expected);
+  });
+
+  it('rounds where humanDuration does not, because the two answer different questions', () => {
+    // The document must run for exactly as long as somebody asked; the summary says "about".
+    expect(humanDuration(165)).toBe('165s');
+    expect(approximateDuration(165)).toBe('3 minutes');
   });
 });
 

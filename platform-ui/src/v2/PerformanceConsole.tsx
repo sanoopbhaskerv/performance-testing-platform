@@ -28,6 +28,7 @@ import type {
 import { V2Client, describeError, isTerminal } from './api';
 import RunReport from './RunReport';
 import ImportPanel from './ImportPanel';
+import Studio from './studio/Studio';
 import { objectiveLabel } from './labels';
 import './console.css';
 
@@ -270,6 +271,14 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [capability, setCapability] = useState<ExecutionCapability | null>(null);
 
   const [editorOpen, setEditorOpen] = useState(false);
+  /**
+   * The studio, which is now the way a test is described.
+   *
+   * The YAML editor stays available behind "Write it as YAML" — it is how an expert works, how a
+   * definition already in Git is edited, and the escape hatch for anything the studio cannot yet
+   * express. Removing it would make the studio's gaps into walls.
+   */
+  const [studioOpen, setStudioOpen] = useState(false);
   // Defaults to the demo template: it is the one that runs without editing, and someone opening the
   // editor for the first time is far more likely to want a working test than an empty shape.
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
@@ -497,11 +506,39 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
             <button className="btn btn-quiet" onClick={refresh} disabled={busy}>
               <RefreshCw size={14} /> Refresh
             </button>
-            <button className="btn" onClick={() => setEditorOpen((open) => !open)}>
+            <button
+              className="btn btn-quiet"
+              onClick={() => {
+                setStudioOpen(false);
+                setEditorOpen((open) => !open);
+              }}
+            >
+              Write it as YAML
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setEditorOpen(false);
+                setStudioOpen(true);
+              }}
+            >
               <Plus size={14} /> New test
             </button>
           </div>
         </header>
+
+        {studioOpen && (
+          <Studio
+            client={client}
+            team=""
+            onSaved={(name) => {
+              setStudioOpen(false);
+              setNotice(`Created "${name}". Choose it below to run it.`);
+              void refresh();
+            }}
+            onCancel={() => setStudioOpen(false)}
+          />
+        )}
 
         {editorOpen && (
           <div className="editor">

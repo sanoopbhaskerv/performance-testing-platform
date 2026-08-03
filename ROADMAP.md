@@ -119,7 +119,9 @@ Each is real, none blocks anything.
   count rises is calibration (`docs/operations/runner-calibration.md`).
 - **The runner image's dataset fetch has not run on a cluster.** Added by 2h and verified only
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
-- **No console UI for datasets.** They are API-only; the import panel is where an upload belongs.
+- **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload belongs.
+- **The studio asks for the team name.** Nothing reports the caller's own team: `TeamDirectory` maps
+  name to id and not back, and no endpoint exposes it. Owned by `PLAN.md` S5.
 - **`ConcurrencyThreadGroup` is in the runner image but unused.** The plan generator still emits
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.

@@ -87,15 +87,19 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved.** Add it in S1. §31 pause cleared. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. 88 tests. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
 | **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
 
-**The next increment is S1 — studio shell, and the API path end to end.** Screens: Start, Sources,
-Refine, Load, Objectives, Status, Report, wired to what already exists (four importers, datasets,
-load stages, objectives, runs). Add vitest first.
+**S1 is complete** (`HANDOFF.md` §3n). The studio exists: *New test* → pick a test type → import a
+source → review journeys → set load → set objectives → the platform validates live → Save. Verified
+end to end in a browser against a running control plane. **88 UI tests.**
+
+**The next increment is S2 — the report a novice can read**, plus the status page gaining elapsed
+time, current stage and a progress bar. No runner-image change: all of it is derivable from the
+plan's stage arithmetic and the shard's persisted `startedAt`. `PLAN.md` §11.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

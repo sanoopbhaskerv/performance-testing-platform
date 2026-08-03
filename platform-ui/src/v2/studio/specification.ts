@@ -39,6 +39,25 @@ export function humanDuration(seconds: number): string {
   return `${seconds}s`;
 }
 
+/**
+ * A duration for a sentence a person reads, as opposed to one the platform parses.
+ *
+ * Deliberately not {@link humanDuration}. That one keeps 165 seconds as `165s`, because the
+ * specification must run for exactly as long as somebody asked. This one is for the studio's
+ * summary line, which begins with the word "about" — and "about 165s" is a number a reader has to
+ * do arithmetic on before it means anything, which is the opposite of what a summary is for.
+ */
+export function approximateDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds} seconds`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0
+    ? `${hours} hour${hours === 1 ? '' : 's'}`
+    : `${hours}h ${rest}m`;
+}
+
 /** The unit an objective's number carries, decided by its metric rather than typed by a consumer. */
 export function objectiveThreshold(objective: ObjectiveDraft): string {
   switch (objective.metric) {

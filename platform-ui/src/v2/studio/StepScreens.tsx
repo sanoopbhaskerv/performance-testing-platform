@@ -1,0 +1,482 @@
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
+import type { ValidationFinding, V2Client } from '../api';
+import { describeError } from '../api';
+import type { ObjectiveDraft, ObjectiveMetric, StudioDraft } from './draft';
+import { includedJourneys, toResourceName } from './draft';
+import {
+  approximateDuration,
+  toSpecification,
+  totalDurationSeconds,
+  IncompleteDraftError,
+} from './specification';
+
+/** The shape every step shares: it edits the draft and hands the whole thing back. */
+interface StepProps {
+  draft: StudioDraft;
+  onChange: (draft: StudioDraft) => void;
+}
+
+/**
+ * How much load, and for how long.
+ *
+ * Asked as peak users plus three durations, not as a stage list. Somebody who has never run a
+ * performance test knows roughly how many people they expect and how long they want to hold it; they
+ * do not know that a stage list has to end at zero users, and a form that asked for one would be
+ * teaching JMeter rather than asking a question.
+ */
+export function LoadStep({ draft, onChange }: StepProps) {
+  const set = (patch: Partial<StudioDraft['load']>) =>
+    onChange({ ...draft, load: { ...draft.load, ...patch } });
+
+  const total = totalDurationSeconds(draft);
+  const browser = draft.testType === 'web-experience';
+
+  return (
+    <>
+      <div className="studio-grid">
+        <div className="studio-field">
+          <label htmlFor="peak-users">{browser ? 'Browsers at once' : 'People at once'}</label>
+          <input
+            id="peak-users"
+            type="number"
+            min={1}
+            max={browser ? 20 : 1000}
+            value={draft.load.peakUsers}
+            onChange={(e) => set({ peakUsers: Number(e.target.value) })}
+            aria-describedby="peak-users-hint"
+          />
+          <p className="studio-hint" id="peak-users-hint">
+            {browser
+              ? /*
+                 * The ceiling is explained, not merely enforced. A greyed-out field teaches nothing;
+                 * a sentence about why a browser costs a hundred times what a virtual user costs is
+                 * the thing that stops somebody asking for 500 and concluding the tool is broken.
+                 */
+                'Each one is a real browser using about a gigabyte of memory, so this is capped at ' +
+                '20. Browsers measure the experience; they are not how load is generated.'
+              : 'The number of simultaneous users the test simulates at its busiest.'}
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="ramp-up">Ramp up over (seconds)</label>
+          <input
+            id="ramp-up"
+            type="number"
+            min={0}
+            value={draft.load.rampUpSeconds}
+            onChange={(e) => set({ rampUpSeconds: Number(e.target.value) })}
+            aria-describedby="ramp-up-hint"
+          />
+          <p className="studio-hint" id="ramp-up-hint">
+            Building up gradually rather than all at once, which is both more realistic and easier
+            on the system under test.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="steady">Hold for (seconds)</label>
+          <input
+            id="steady"
+            type="number"
+            min={0}
+            value={draft.load.steadySeconds}
+            onChange={(e) => set({ steadySeconds: Number(e.target.value) })}
+            aria-describedby="steady-hint"
+          />
+          <p className="studio-hint" id="steady-hint">
+            The part that matters. Measurements taken while load is still climbing describe the ramp,
+            not the system.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="ramp-down">Ramp down over (seconds)</label>
+          <input
+            id="ramp-down"
+            type="number"
+            min={0}
+            value={draft.load.rampDownSeconds}
+            onChange={(e) => set({ rampDownSeconds: Number(e.target.value) })}
+            aria-describedby="ramp-down-hint"
+          />
+          <p className="studio-hint" id="ramp-down-hint">
+            Winding down rather than stopping dead, so the last samples are not taken mid-teardown.
+          </p>
+        </div>
+      </div>
+
+      <p className="studio-summary">
+        This test will run for about <strong>{approximateDuration(total)}</strong>, reaching{' '}
+        <strong>
+          {draft.load.peakUsers} {browser ? 'browsers' : 'people'}
+        </strong>{' '}
+        at its busiest.
+      </p>
+    </>
+  );
+}
+
+/** What each metric is called on screen, and what its number means. */
+const METRICS: Array<{ metric: ObjectiveMetric; label: string; unit: string; hint: string }> = [
+  {
+    metric: 'http.response.time',
+    label: 'Response time',
+    unit: 'ms',
+    hint: 'How long requests take. Judged at a percentile rather than an average, because an average hides the slow tail that people actually notice.',
+  },
+  {
+    metric: 'http.error.rate',
+    label: 'Error rate',
+    unit: '%',
+    hint: 'The share of requests that failed.',
+  },
+  {
+    metric: 'http.throughput',
+    label: 'Throughput',
+    unit: 'per second',
+    hint: 'How many requests completed per second.',
+  },
+];
+
+/**
+ * What counts as fast enough.
+ *
+ * Optional on purpose. A test with no objectives still measures everything, and demanding a
+ * threshold before somebody's first run produces a number they invented and then trust — which is
+ * worse than no number, because it arrives wearing a verdict.
+ */
+export function ObjectivesStep({ draft, onChange }: StepProps) {
+  const journeys = includedJourneys(draft);
+
+  const update = (position: number, patch: Partial<ObjectiveDraft>) =>
+    onChange({
+      ...draft,
+      objectives: draft.objectives.map((objective, i) =>
+        i === position ? { ...objective, ...patch } : objective,
+      ),
+    });
+
+  const remove = (position: number) =>
+    onChange({ ...draft, objectives: draft.objectives.filter((_, i) => i !== position) });
+
+  return (
+    <>
+      {draft.objectives.length === 0 && (
+        <p className="studio-hint">
+          No objectives yet. The test will still measure everything — it just will not say whether
+          the result is good or bad.
+        </p>
+      )}
+
+      {draft.objectives.map((objective, position) => {
+        const metric = METRICS.find((m) => m.metric === objective.metric) ?? METRICS[0];
+        return (
+          <div className="studio-grid" key={position}>
+            <div className="studio-field">
+              <label htmlFor={`metric-${position}`}>Measure</label>
+              <select
+                id={`metric-${position}`}
+                value={objective.metric}
+                onChange={(e) =>
+                  update(position, {
+                    metric: e.target.value as ObjectiveMetric,
+                    // A percentile is meaningless on a rate, and leaving a stale one behind would
+                    // emit a document whose objective reads as something nobody chose.
+                    percentile: e.target.value === 'http.response.time' ? 95 : null,
+                  })
+                }
+              >
+                {METRICS.map((m) => (
+                  <option key={m.metric} value={m.metric}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <p className="studio-hint">{metric.hint}</p>
+            </div>
+
+            {objective.percentile !== null && (
+              <div className="studio-field">
+                <label htmlFor={`percentile-${position}`}>For this share of requests</label>
+                <select
+                  id={`percentile-${position}`}
+                  value={objective.percentile}
+                  onChange={(e) => update(position, { percentile: Number(e.target.value) })}
+                >
+                  <option value={50}>50% — the typical request</option>
+                  <option value={90}>90%</option>
+                  <option value={95}>95% — the usual choice</option>
+                  <option value={99}>99% — the worst experiences</option>
+                </select>
+              </div>
+            )}
+
+            <div className="studio-field">
+              <label htmlFor={`value-${position}`}>No worse than ({metric.unit})</label>
+              <input
+                id={`value-${position}`}
+                type="number"
+                min={0}
+                value={objective.value}
+                onChange={(e) => update(position, { value: Number(e.target.value) })}
+              />
+            </div>
+
+            <div className="studio-field">
+              <label htmlFor={`scope-${position}`}>Applies to</label>
+              <select
+                id={`scope-${position}`}
+                value={objective.journey ?? ''}
+                onChange={(e) => update(position, { journey: e.target.value || null })}
+              >
+                <option value="">The whole test</option>
+                {journeys.map((journey) => (
+                  <option key={journey.name} value={journey.name}>
+                    {journey.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="link" onClick={() => remove(position)}>
+                Remove this objective
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
+      <div>
+        <button
+          type="button"
+          className="btn btn-quiet"
+          onClick={() =>
+            onChange({
+              ...draft,
+              objectives: [
+                ...draft.objectives,
+                { metric: 'http.response.time', percentile: 95, journey: null, value: 1000 },
+              ],
+            })
+          }
+        >
+          Add an objective
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Name it, check it, save it.
+ *
+ * The specification is validated **by the server** before Save is offered, not by a rule
+ * reimplemented here. The platform already owns a validator; using it means what the studio shows
+ * is what the platform actually thinks, and a divergence between the two is impossible rather than
+ * merely unlikely.
+ */
+export function ReviewStep({
+  client,
+  draft,
+  onChange,
+  onSave,
+  saving,
+}: StepProps & {
+  client: V2Client;
+  onSave: (document: string) => void;
+  saving: boolean;
+}) {
+  /**
+   * The platform's verdict, tagged with the document it describes.
+   *
+   * Tagged rather than cleared, because the alternative is an effect that resets state when the
+   * document changes — and a findings list that briefly belongs to the previous draft is exactly
+   * the kind of stale reassurance this studio must not show. Comparing `forDocument` against the
+   * current text makes that impossible rather than merely unlikely.
+   */
+  const [checked, setChecked] = useState<{
+    forDocument: string;
+    findings: ValidationFinding[] | null;
+    error: string | null;
+  } | null>(null);
+
+  const document = useMemo(() => {
+    try {
+      return { text: toSpecification(draft), problem: null as string | null };
+    } catch (err) {
+      return {
+        text: null,
+        problem: err instanceof IncompleteDraftError ? err.message : String(err),
+      };
+    }
+  }, [draft]);
+
+  // Re-validated whenever the document changes, debounced. Every state update happens inside the
+  // timer or a promise handler rather than in the effect body, so React is never asked to re-render
+  // synchronously from an effect.
+  useEffect(() => {
+    const text = document.text;
+    if (!text) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      client
+        .validate(text)
+        .then((result) => {
+          if (!cancelled) setChecked({ forDocument: text, findings: result.findings, error: null });
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setChecked({ forDocument: text, findings: null, error: describeError(err) });
+          }
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [client, document.text]);
+
+  // Only trust a verdict that was issued for the document currently on screen.
+  const current = checked && checked.forDocument === document.text ? checked : null;
+  const findings = current?.findings ?? null;
+  const checkError = current?.error ?? null;
+  const checking = document.text !== null && current === null;
+
+  const errors = findings?.filter((f) => f.severity === 'ERROR') ?? [];
+  const warnings = findings?.filter((f) => f.severity === 'WARNING') ?? [];
+  const ready = document.text !== null && errors.length === 0 && !checking;
+
+  return (
+    <>
+      <div className="studio-grid">
+        <div className="studio-field">
+          <label htmlFor="test-name">Name this test</label>
+          <input
+            id="test-name"
+            type="text"
+            value={draft.name}
+            placeholder="checkout-baseline"
+            // Normalized as they type rather than rejected on save. A validation error about label
+            // syntax is a demand that a consumer learn Kubernetes' naming rules to run a test.
+            onChange={(e) => onChange({ ...draft, name: toResourceName(e.target.value) })}
+            aria-describedby="test-name-hint"
+          />
+          <p className="studio-hint" id="test-name-hint">
+            Lowercase letters, numbers and hyphens. You will find the test by this name later.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="team">Your team</label>
+          <input
+            id="team"
+            type="text"
+            value={draft.team}
+            placeholder="local-dev"
+            onChange={(e) => onChange({ ...draft, team: e.target.value })}
+            aria-describedby="team-hint"
+          />
+          <p className="studio-hint" id="team-hint">
+            The team your API key belongs to. Asked for rather than filled in: nothing yet reports
+            the caller&rsquo;s own team name, which is part of what S5&rsquo;s identity work fixes.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="application">Which application?</label>
+          <input
+            id="application"
+            type="text"
+            value={draft.application}
+            placeholder="demo-service"
+            onChange={(e) => onChange({ ...draft, application: e.target.value })}
+            aria-describedby="application-hint"
+          />
+          <p className="studio-hint" id="application-hint">
+            The platform looks up where to send the traffic from this. A test cannot choose its own
+            address — that is what stops it being pointed somewhere it should not go.
+          </p>
+        </div>
+      </div>
+
+      <p className="studio-summary">
+        {includedJourneys(draft).length} journey
+        {includedJourneys(draft).length === 1 ? '' : 's'}, reaching{' '}
+        <strong>{draft.load.peakUsers}</strong> at once, for about{' '}
+        <strong>{approximateDuration(totalDurationSeconds(draft))}</strong>.
+      </p>
+
+      {document.problem && (
+        <div className="banner banner-bad" role="alert">
+          <AlertCircle size={16} /> {document.problem}
+        </div>
+      )}
+
+      {checkError && (
+        <div className="banner banner-bad" role="alert">
+          <AlertCircle size={16} /> Could not check this test: {checkError}
+        </div>
+      )}
+
+      {errors.length > 0 && (
+        <ul className="findings">
+          {errors.map((finding, i) => (
+            <li className="finding" key={i}>
+              <AlertCircle size={15} className="tone-bad" aria-hidden />
+              <div>
+                <p>{finding.message}</p>
+                {finding.remediation && <p className="muted">{finding.remediation}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {warnings.length > 0 && (
+        <ul className="findings">
+          {warnings.map((finding, i) => (
+            <li className="finding" key={i}>
+              <AlertTriangle size={15} className="tone-warn" aria-hidden />
+              <div>
+                <p>{finding.message}</p>
+                {finding.remediation && <p className="muted">{finding.remediation}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {findings !== null && errors.length === 0 && !checking && (
+        <p className="studio-blocker" style={{ color: 'var(--pf-verdict-pass-fg)' }}>
+          <CheckCircle2 size={15} aria-hidden /> Checked by the platform — this test is valid.
+        </p>
+      )}
+
+      {/*
+        The generated document, collapsed. CLAUDE.md §24 permits an advanced read-only view, and it
+        is how somebody builds trust in a plan they did not write by hand.
+      */}
+      {document.text && (
+        <details className="advanced">
+          <summary>Show the test definition this produces</summary>
+          <pre className="validation">{document.text}</pre>
+        </details>
+      )}
+
+      <div>
+        <button
+          type="button"
+          className="btn"
+          disabled={!ready || saving}
+          onClick={() => document.text && onSave(document.text)}
+        >
+          {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
+          {saving ? 'Saving…' : 'Save test'}
+        </button>
+        {checking && <span className="studio-hint"> Checking with the platform…</span>}
+      </div>
+    </>
+  );
+}

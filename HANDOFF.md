@@ -62,7 +62,8 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | 2f — importing from the console | **Complete** | see §3k |
 | 2g — dataset binding and partitioning | **Complete** | see §3l |
 | 2h — dataset storage and delivery | **Complete** | see §3m |
-| **S1–S6 — Performance Studio, release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S1 — the studio: shell, sources, refine, load, objectives, review** | **Complete** | see §3n |
+| **S2–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
@@ -999,6 +1000,86 @@ MinIO test that stores both in one shard prefix and asserts the two types come b
 - **`inline` dataset sources are still accepted by the schema and not delivered.** Only
   `object-storage` with a `dataset://` uri resolves; an inline source now fails validation through
   the uri check rather than through a rule of its own.
+
+---
+
+## 3n. S1 — the studio
+
+**A test can now be described by clicking, and the document it produces is the one the platform
+already speaks.** Verified end to end in a browser against a running control plane: pick *Test an
+API* → paste a cURL command → review the journeys → set load → set objectives → the platform
+validates it live → **Save** → `studio-smoke-test` v1, digest `4c39a061…`, `executable: true`, with a
+**Run this** button.
+
+### The emitter is the increment, not the screens
+
+`studio/specification.ts` is a pure function from the studio's state to the canonical YAML, and it
+was finished and tested before any component called it. CLAUDE.md §32's "one specification, three
+channels" is easy to satisfy on paper and easy to lose in practice — the studio grows a field, the
+emitter grows a line, and the channels drift into describing subtly different tests. A byte-for-byte
+test against a hand-written document is what makes that drift impossible to miss.
+
+**Verified against the server, not only against an expectation.** The first emit came back with one
+warning — no `maxDuration` — so the studio now states its own governance ceiling: the stages plus ten
+minutes, matching the platform's execution grace, rounded up to a whole minute. A warning a consumer
+cannot act on is worse than no warning; they either learn to ignore findings, which is the one habit
+this platform cannot afford, or they go hunting for a governance concept no screen showed them.
+
+### Consumer language is structural, not a style choice
+
+A load shape is **peak users plus three durations**, never a stage list. Somebody who has never run a
+performance test knows how many people they expect; they do not know that the last stage has to
+target zero users. The translation into the platform's vocabulary happens in exactly one place, on
+the way out.
+
+`steps.ts` decides whether someone can move on **and** says what is missing, and the two agree by
+construction — a test pins that `isSaveable` and the emitter never disagree, because a saveable draft
+the emitter refuses is a Save button that throws, and the reverse is a button disabled for no visible
+reason. Another test pins that no blocker is phrased as the rule that was broken.
+
+Objectives are deliberately **not required**: demanding a threshold before a first run produces a
+number somebody invented and then trusts.
+
+### Two defects the browser found that tests did not
+
+1. **Every status surface lost its background.** Channel triples were comma-separated, so
+   `rgb(var(--pf-hue-fail) / 15%)` expanded to `rgb(239, 68, 68 / 15%)` — legacy and modern colour
+   syntax mixed, which fails to parse. **CSS drops the declaration silently**: every pill, banner and
+   the synthetic-run disclosure went transparent and fell back to `currentColor` for its border.
+   Nothing threw, and the token test was happy because it only checked that literals were *absent*.
+   Found by diffing computed styles against the pre-migration values; now pinned by two tests, one on
+   the tokens and one on the override example in the comment, since that example is what a re-brand
+   copies.
+2. **The Load summary read "about 165s".** The specification's exactness rule — the number someone
+   typed is how long the test runs — had leaked into a human sentence beginning with the word
+   "about". Two different jobs, now two functions: `humanDuration` for the document,
+   `approximateDuration` for the reader.
+
+### Also
+
+- **Design tokens** (§4.4 of `PLAN.md`): primitives a brand replaces, semantics components consume,
+  and `tokens.test.ts` fails the build on a colour literal in any other stylesheet — proven by
+  injecting one. Overriding three declarations moves the button and the load bar; the breach and pass
+  pills do not move, because a palette that rendered a breach in a reassuring green would make the
+  studio lie in its own house style.
+- **vitest**, approved by the user, clearing the §31 pause. **88 UI tests** where there were none.
+  Tests get their own `tsconfig.test.json` in the build: test code needs Node's types and application
+  code must not have them.
+- The **YAML editor stays**, behind *Write it as YAML*. Removing it would turn the studio's gaps into
+  walls.
+- A run's credentials never reach the screen: a cURL command carrying a bearer token and a session
+  cookie imported as one journey with two findings, and **grep found no byte of either in the
+  rendered page**.
+
+### Not done, and owned by later increments
+
+- **The team name is asked for rather than filled in.** Nothing reports the caller's own team —
+  `TeamDirectory` maps name → id and not back, and no endpoint exposes it. S5's identity work fixes
+  it; until then the studio asks, exactly as the YAML templates already did.
+- **The status page is unchanged.** Elapsed, current stage and a progress bar are S2, along with the
+  report's novice rewrite.
+- **`web-experience` is choosable but not runnable.** The card, the steps and the browser-specific
+  wording exist; the engine behind it is S6.
 
 ---
 
