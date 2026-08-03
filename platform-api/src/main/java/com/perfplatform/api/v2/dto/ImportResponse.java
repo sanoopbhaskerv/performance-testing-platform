@@ -1,6 +1,7 @@
 package com.perfplatform.api.v2.dto;
 
 import com.perfplatform.domain.importer.SourceImporter.ImportResult;
+import com.perfplatform.domain.importer.SourceImporter.CorrelationSuggestion;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -29,7 +30,8 @@ import java.util.Map;
 public record ImportResponse(
         String sourceType,
         List<ImportedScenario> scenarios,
-        List<ValidationResponse.Finding> findings) {
+        List<ValidationResponse.Finding> findings,
+        List<ImportedCorrelationSuggestion> correlationSuggestions) {
 
     /**
      * One draft scenario. Mirrors the specification's own shape, so it can be pasted straight in.
@@ -76,6 +78,31 @@ public record ImportResponse(
     public record RequestBodyResponse(String contentType, String content) {
     }
 
+    /** A correlation suggestion with enough evidence for a person to accept or reject it. */
+    public record ImportedCorrelationSuggestion(
+            String id,
+            String scenarioName,
+            String variableName,
+            ImportedExtractionEvidence extraction,
+            List<ImportedReplacementEvidence> replacements) {
+    }
+
+    /** The response-side evidence for a suggested extraction. */
+    public record ImportedExtractionEvidence(
+            String stepName,
+            String from,
+            String expression,
+            String valuePreview) {
+    }
+
+    /** A later request location that uses the captured value. */
+    public record ImportedReplacementEvidence(
+            String stepName,
+            String location,
+            String name,
+            String currentValue) {
+    }
+
     public static ImportResponse from(String sourceType, ImportResult result) {
         return new ImportResponse(
                 sourceType,
@@ -84,6 +111,28 @@ public record ImportResponse(
                 // concept is how the two drift apart, and a consumer already parses this one.
                 result.findings().findings().stream()
                         .map(ValidationResponse.Finding::from)
+                        .toList(),
+                result.correlationSuggestions().stream()
+                        .map(ImportResponse::suggestionFrom)
+                        .toList());
+    }
+
+    private static ImportedCorrelationSuggestion suggestionFrom(CorrelationSuggestion suggestion) {
+        return new ImportedCorrelationSuggestion(
+                suggestion.id(),
+                suggestion.scenarioName(),
+                suggestion.variableName(),
+                new ImportedExtractionEvidence(
+                        suggestion.extraction().stepName(),
+                        suggestion.extraction().from(),
+                        suggestion.extraction().expression(),
+                        suggestion.extraction().valuePreview()),
+                suggestion.replacements().stream()
+                        .map(replacement -> new ImportedReplacementEvidence(
+                                replacement.stepName(),
+                                replacement.location(),
+                                replacement.name(),
+                                replacement.currentValue()))
                         .toList());
     }
 

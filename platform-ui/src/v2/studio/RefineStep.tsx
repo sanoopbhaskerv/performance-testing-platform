@@ -75,9 +75,19 @@ export default function RefineStep({
                   />
                 </td>
                 <td>
-                  <code>
-                    {journey.method} {journey.path}
-                  </code>
+                  {journey.steps.length > 0 ? (
+                    <>
+                      <code>{journey.steps.length} ordered steps</code>
+                      <span className="muted">
+                        {' '}
+                        from {journey.steps[0].method} {journey.steps[0].path}
+                      </span>
+                    </>
+                  ) : (
+                    <code>
+                      {journey.method} {journey.path}
+                    </code>
+                  )}
                   {Object.keys(journey.headers).length > 0 && (
                     <span className="muted"> +{Object.keys(journey.headers).length} header
                       {Object.keys(journey.headers).length === 1 ? '' : 's'}</span>

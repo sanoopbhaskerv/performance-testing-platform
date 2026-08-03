@@ -88,7 +88,13 @@ export default function SourcesStep({
       setFindings(result.findings);
       // Appended, not replaced: a test can legitimately draw on more than one source, and silently
       // discarding what was already there would lose work with no way to get it back.
-      onChange({ ...draft, journeys: [...draft.journeys, ...journeysFromImport(result.scenarios)] });
+      onChange({
+        ...draft,
+        journeys: [
+          ...draft.journeys,
+          ...journeysFromImport(result.scenarios, result.correlationSuggestions),
+        ],
+      });
     } catch (err) {
       setError(describeError(err));
       setFindings(null);
@@ -106,6 +112,8 @@ export default function SourcesStep({
       headers: {},
       query: {},
       body: null,
+      steps: [],
+      correlationSuggestions: [],
       operationId: null,
       include: true,
     };

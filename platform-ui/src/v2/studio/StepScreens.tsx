@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock3, Loader2, Save } from 'lucide-react';
 import type { ValidationFinding, V2Client } from '../api';
 import { describeError } from '../api';
 import type { ObjectiveDraft, ObjectiveMetric, StudioDraft } from './draft';
@@ -15,6 +15,228 @@ import {
 interface StepProps {
   draft: StudioDraft;
   onChange: (draft: StudioDraft) => void;
+}
+
+/**
+ * Correlation, response checks and pauses.
+ *
+ * The key rule is the one in the title: nothing is applied silently. Imported suggestions arrive
+ * as evidence and stay pending until a person accepts or rejects them.
+ */
+export function RulesStep({ draft, onChange }: StepProps) {
+  const journeys = includedJourneys(draft);
+  const suggestions = journeys.flatMap((journey) =>
+    journey.correlationSuggestions.map((suggestion) => ({ journey, suggestion })),
+  );
+
+  const updateSuggestion = (journeyName: string, id: string, decision: 'accepted' | 'rejected') =>
+    onChange({
+      ...draft,
+      journeys: draft.journeys.map((journey) =>
+        journey.name === journeyName
+          ? {
+              ...journey,
+              correlationSuggestions: journey.correlationSuggestions.map((suggestion) =>
+                suggestion.id === id ? { ...suggestion, decision } : suggestion,
+              ),
+            }
+          : journey,
+      ),
+    });
+
+  const updateStep = (
+    journeyName: string,
+    stepName: string,
+    patch: Partial<StudioDraft['journeys'][number]['steps'][number]>,
+  ) =>
+    onChange({
+      ...draft,
+      journeys: draft.journeys.map((journey) =>
+        journey.name === journeyName
+          ? {
+              ...journey,
+              steps:
+                journey.steps.length > 0
+                  ? journey.steps.map((step) =>
+                      step.name === stepName ? { ...step, ...patch } : step,
+                    )
+                  : [
+                      {
+                        name: journey.name,
+                        method: journey.method ?? 'GET',
+                        path: journey.path ?? '/',
+                        headers: journey.headers,
+                        query: journey.query,
+                        body: journey.body,
+                        expectStatus: false,
+                        expectedStatus: null,
+                        thinkTimeSeconds: 0,
+                        ...patch,
+                      },
+                    ],
+            }
+          : journey,
+      ),
+    });
+
+  return (
+    <>
+      <section className="studio-section">
+        <h3>Correlation</h3>
+        <p className="studio-hint">
+          The platform can point out values that appeared in a response and were reused later. It
+          does not wire them into the test until you accept the rule.
+        </p>
+
+        {suggestions.length === 0 ? (
+          <p className="studio-summary">
+            No correlation suggestions were found in the imported journeys. You can still write
+            correlation in YAML, and the Validator step will exercise it before a load run.
+          </p>
+        ) : (
+          <div className="rule-list">
+            {suggestions.map(({ journey, suggestion }) => (
+              <article className="rule-card" key={suggestion.id}>
+                <div>
+                  <h4>{suggestion.variableName}</h4>
+                  <p className="studio-hint">
+                    From <strong>{suggestion.extraction.stepName}</strong>{' '}
+                    ({suggestion.extraction.from} {suggestion.extraction.expression}) with value{' '}
+                    <code>{suggestion.extraction.valuePreview}</code>.
+                  </p>
+                  <ul className="rule-evidence">
+                    {suggestion.replacements.map((replacement, index) => (
+                      <li key={index}>
+                        Used by <strong>{replacement.stepName}</strong> in {replacement.location}
+                        {replacement.name ? ` "${replacement.name}"` : ''}.
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rule-actions" aria-label={`Decision for ${suggestion.variableName}`}>
+                  <button
+                    type="button"
+                    className={suggestion.decision === 'accepted' ? 'btn' : 'btn btn-quiet'}
+                    onClick={() => updateSuggestion(journey.name, suggestion.id, 'accepted')}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className={suggestion.decision === 'rejected' ? 'btn' : 'btn btn-quiet'}
+                    onClick={() => updateSuggestion(journey.name, suggestion.id, 'rejected')}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="studio-section">
+        <h3>Verification and think time</h3>
+        <p className="studio-hint">
+          A fast error page is still an error. Add status checks where you know the expected result,
+          and add pauses where a person would stop before the next request.
+        </p>
+
+        <div className="table-scroll">
+          <table className="metrics">
+            <caption className="sr-only">Per-step checks and pauses</caption>
+            <thead>
+              <tr>
+                <th scope="col">Journey</th>
+                <th scope="col">Step</th>
+                <th scope="col">Status check</th>
+                <th scope="col">Pause after</th>
+              </tr>
+            </thead>
+            <tbody>
+              {journeys.flatMap((journey) =>
+                effectiveSteps(journey).map((step) => (
+                  <tr key={`${journey.name}:${step.name}`}>
+                    <td>{journey.name}</td>
+                    <td>
+                      <code>
+                        {step.method} {step.path}
+                      </code>
+                    </td>
+                    <td>
+                      <label className="inline-control">
+                        <input
+                          type="checkbox"
+                          checked={step.expectStatus}
+                          onChange={(event) =>
+                            updateStep(journey.name, step.name, {
+                              expectStatus: event.target.checked,
+                              expectedStatus: step.expectedStatus ?? 200,
+                            })
+                          }
+                        />
+                        Expect
+                      </label>{' '}
+                      <input
+                        type="number"
+                        min={100}
+                        max={599}
+                        value={step.expectedStatus ?? 200}
+                        disabled={!step.expectStatus}
+                        onChange={(event) =>
+                          updateStep(journey.name, step.name, {
+                            expectedStatus: Number(event.target.value),
+                          })
+                        }
+                        aria-label={`Expected status for ${journey.name} ${step.name}`}
+                        style={{ width: '5rem' }}
+                      />
+                    </td>
+                    <td>
+                      <label className="inline-control">
+                        <Clock3 size={14} aria-hidden />
+                        <input
+                          type="number"
+                          min={0}
+                          value={step.thinkTimeSeconds}
+                          onChange={(event) =>
+                            updateStep(journey.name, step.name, {
+                              thinkTimeSeconds: Number(event.target.value),
+                            })
+                          }
+                          aria-label={`Pause after ${journey.name} ${step.name}`}
+                          style={{ width: '5rem' }}
+                        />{' '}
+                        seconds
+                      </label>
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function effectiveSteps(journey: StudioDraft['journeys'][number]) {
+  return journey.steps.length > 0
+    ? journey.steps
+    : [
+        {
+          name: journey.name,
+          method: journey.method ?? 'GET',
+          path: journey.path ?? '/',
+          headers: journey.headers,
+          query: journey.query,
+          body: journey.body,
+          expectStatus: false,
+          expectedStatus: null,
+          thinkTimeSeconds: 0,
+        },
+      ];
 }
 
 /**

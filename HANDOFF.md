@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S3. Increments 0–2h and S1–S3 (engine half) are complete and committed.
+**Last updated:** Studio increment S3. Increments 0–2h and S1–S3 are complete and committed.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -17,13 +17,13 @@ Twelve increments, S1–S12, each shipping a backend capability *and* its studio
 S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what happens next**;
 `ROADMAP.md` remains the inventory of what exists.
 
-**S1, S2 and S3's engine half are built** (§3n–§3p). A test can be described by clicking, its report
-opens with the answer in a sentence, a running test shows where it is in its plan, and a journey can
-sign in and carry a session forward.
+**S1, S2 and S3 are built** (§3n–§3r). A test can be described by clicking, its report opens with
+the answer in a sentence, a running test shows where it is in its plan, and a journey can sign in,
+carry a session forward, and review correlation rules before they are applied.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
-- **vitest is approved** (§31 pause cleared) and was added in S1. **130 UI tests** where there were
+- **vitest is approved** (§31 pause cleared) and was added in S1. **133 UI tests** where there were
   none.
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
   the studio build phases. The UI half is cheap; the API half is blocked until S5 (`PLAN.md` §0,
@@ -39,7 +39,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **finish S3's surfaces**, then S4.
+`NEXT-SESSION.md` §2 has the immediate task: **S4, the Validator**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -73,15 +73,16 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S2 — the report a novice can read, and run progress** | **Complete** | see §3o |
 | **S3 — journeys and correlation (engine half)** | **Complete** | see §3p |
 | **S3 — HAR imports ordered journeys** | **Complete** | see §3q |
-| **S3 — studio Rules screen** | **Not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S3 — studio Rules screen** | **Complete** | see §3r |
 | **S4–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**934 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
-684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3).
+**936 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
+684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3
+Rules).
 
-**130 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
+**133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -97,8 +98,8 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: finish S3's surfaces** — the HAR importer emitting ordered steps, and the
-studio's Rules screen. Then **S4, the Validator**. `NEXT-SESSION.md` §2 has the detail.
+**Immediate next action: S4, the Validator** — one iteration against the real target before a load
+slot is booked. `NEXT-SESSION.md` §2 has the detail.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -1224,12 +1225,12 @@ Steps are written to the canonical form **only when present**, a deliberate depa
 specification written before journeys existed keeps its digest — unlike 2g, which changed all of
 them. Two documents differing only by a step digest differently, verified.
 
-### Not done, and still S3
+### Closed by later S3 surfaces
 
-- **The HAR importer still emits sibling scenarios, not ordered steps.** Its
-  `import.har.journeys.notOrdered` warning therefore stands and must not be retired yet.
-- **No studio Rules screen.** Journeys are expressible in YAML and through the API, not yet by
-  clicking. The studio's Sources/Refine screens still produce single-request scenarios.
+- ~~**The HAR importer still emits sibling scenarios, not ordered steps.**~~ Closed in §3q. A capture
+  now becomes one ordered journey per page.
+- ~~**No studio Rules screen.**~~ Closed in §3r. Journeys can now be reviewed by clicking, with
+  correlation suggestions accepted or rejected explicitly.
 
 ### A gap this uncovered, pre-existing and not fixed here
 
@@ -1297,11 +1298,53 @@ studio as a scenario with no method and no path — the same mistake `operationI
 and harder to spot here because the object would still have looked valid. A journey also reports a
 null method rather than the `GET` default, which would describe a request it does not make.
 
-### Not done
+### Closed by §3r
 
-**The studio has no Rules screen**, so journeys are importable and expressible but still not
-*editable* by clicking: correlation suggestions with evidence, verification and think time are the
-remaining half of S3.
+The studio now has a Rules screen. Journeys are importable, expressible and editable by clicking:
+correlation suggestions show evidence, and verification plus think time can be set per step.
+
+## 3r. S3 — the studio Rules screen
+
+**Correlation is now proposed, never silently applied.** A HAR import returns correlation suggestions
+beside its ordered journeys. Each suggestion names the journey, the proposed variable, the source
+response that produced the value, the extraction expression and every later request location where
+the captured value was reused.
+
+The studio's Rules screen shows that evidence and requires a person to **Accept** or **Reject** each
+proposal. Pending and rejected suggestions are kept as review state but do not alter the generated
+specification. Only accepted suggestions materialize as step `extract` rules and `${variable}`
+replacements in later paths, query parameters, headers or bodies.
+
+### Why the importer still does not wire correlations itself
+
+The importer can prove only that the same observed value appeared in an earlier response and a later
+request. It cannot prove that a future response will provide the same semantic value, and it cannot
+know whether a person wants that value correlated or deliberately fixed. The evidence is therefore
+surfaced for review, not converted into executable behavior behind the user's back.
+
+### What the Rules screen also covers
+
+- **Verification** — each imported step can add an expected status assertion.
+- **Think time** — each step can carry a fixed pause in seconds.
+- **Journey preview** — the Refine step now distinguishes imported ordered journeys from old
+  single-request scenarios, and the YAML/specification emitters preserve those ordered steps.
+
+### Guardrails
+
+- Token- and credential-shaped response values are not proposed as suggestions, and credential-named
+  response headers are skipped.
+- Response bodies used for evidence are read only to discover candidate scalar values; they are not
+  imported into the specification.
+- The UI applies no correlation while a suggestion remains pending.
+
+### Deliberately left for later
+
+- **Parameterization-by-clicking** is still not in the studio. Dataset binding already exists in the
+  API/YAML path; choosing a request value and binding it to a dataset column belongs with S5's Data
+  and Auth work.
+- **The Validator is still next.** The Rules screen can assemble the intended request sequence, but
+  only S4 will run one iteration against the target and show whether the correlations actually
+  resolve.
 
 ---
 

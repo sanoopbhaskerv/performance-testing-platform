@@ -38,7 +38,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **934 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
+Expect **936 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
@@ -89,7 +89,7 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved and added in S1.** §31 pause cleared. **130 UI tests** now. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **133 UI tests** now. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
@@ -103,19 +103,17 @@ that exposes it. Nothing lands API-only.
   a browser against a running control plane.
 - **S2** (§3o) — the report opens with the answer in a sentence, every metric explains itself where
   it appears, and a running test shows where it is in its plan.
-- **S3, engine and importer** (§3p, §3q) — a test can sign in, and a HAR capture becomes an
-  ordered journey. A test can sign in. Scenarios carry ordered steps, values are extracted
-  and carried forward, and a broken correlation fails loudly instead of reporting excellent latency.
-  Proven with two real runs differing only by one JSON path.
+- **S3** (§3p, §3q, §3r) — a test can sign in, a HAR capture becomes an ordered journey, and the
+  Rules screen proposes correlations with evidence. Scenarios carry ordered steps, values are
+  extracted and carried forward, and a broken correlation fails loudly instead of reporting
+  excellent latency. Proposed correlations are accepted or rejected by a person and never applied
+  silently.
 
-**934 Java tests, 130 UI tests.**
+**936 Java tests, 133 UI tests.**
 
-**Next: the studio's Rules screen**, the last of S3, then S4.
-1. **The Rules screen** — correlation suggestions with evidence (which response a value came from,
-   which requests use it), accepted or rejected by a person and never applied silently. Plus
-   verification and think time. Journeys are importable and expressible today, not yet editable by
-   clicking. `PLAN.md` §7.
-2. Then **S4, the Validator**: one iteration against the real target before a load slot is booked.
+**Next: S4, the Validator** — one iteration against the real target before a load slot is booked.
+It should show every request and response, including which extractions resolved, which assertions
+passed, and which request failed when a path, credential or correlation is wrong.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -158,22 +156,38 @@ JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, 
 store, the runner image, report and artifact download, synthetic-run marking, **four source
 importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
 (shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
-progress**, and **multi-step journeys with correlation**. `HANDOFF.md` §3–§3p is the account of each.
+progress**, and **multi-step journeys with reviewed correlation rules**. `HANDOFF.md` §3–§3r is the
+account of each.
 
 ## 3. Rules that do not bend
 
 - **Stop after the increment you were asked for.** Produce the CLAUDE.md §30 completion report.
-- **Finish every increment the same way**, before anything else is started:
-  1. Update `HANDOFF.md` — the status table, the test count, and a new `§3x` section saying what was
+- **Finish every increment the same way**, before anything else is started. **All four documents,
+  every time** — the list is four because it was three when `PLAN.md` did not exist, and updating
+  only the old three is a mistake that has already been made once:
+  1. **`HANDOFF.md`** — the status table, the test counts, and a new `§3x` section saying what was
      built, what was decided and *why*, and what was deliberately left undone.
-  2. Update `NEXT-SESSION.md` §2 and `ROADMAP.md` so the next person's first move is obvious.
-  3. **Commit**, code and documents together, with a message in this repo's style: an imperative
+  2. **`PLAN.md`** — the status line under the title, and the increment's row in the §11 sequence
+     table. It is the plan of record; a plan that still describes work as pending after it shipped is
+     the document most likely to make somebody rebuild it.
+  3. **`NEXT-SESSION.md` §2** and **`ROADMAP.md`**, so the next person's first move is obvious and
+     the inventory of what exists is true.
+  4. **Commit**, code and documents together, with a message in this repo's style: an imperative
      sentence naming the outcome a consumer gets, not the files touched. `git log` for examples —
      *"Import a cURL command into draft scenarios"*, *"Let a specification express a whole request"*,
      *"Prove the Kubernetes path on a real cluster, and fix what that found"*. The body carries the
      detail: what changed, what was decided, what is verified, what is not.
+
   A commit whose documents still describe the previous state is how a fresh context starts by
   rebuilding something that already exists.
+
+  **The check that catches a miss**, before committing — the four must agree on all three:
+
+  ```bash
+  grep -ohE "9[0-9]{2} (Java )?tests|1[0-9]{2} UI tests" HANDOFF.md NEXT-SESSION.md ROADMAP.md PLAN.md | sort -u
+  grep -n "Validator\|S4" HANDOFF.md PLAN.md                           # the same thing is outstanding
+  grep -n "next" NEXT-SESSION.md ROADMAP.md | grep -i "increment\|S[0-9]"   # the same next move
+  ```
 - Do not push, tag, merge or publish without explicit authorization.
 - **V1 still works and still must, for now.** Its removal is authorized but deferred until after the
   studio build phases, and its API cannot go until S5 — `DevelopmentCallerContextProvider`,

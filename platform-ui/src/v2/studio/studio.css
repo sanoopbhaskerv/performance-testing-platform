@@ -226,6 +226,58 @@
   gap: var(--pf-space-5);
 }
 
+.v2 .studio-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-4);
+}
+
+.v2 .studio-section h3,
+.v2 .rule-card h4 {
+  margin: 0;
+  font-size: var(--pf-text-md);
+}
+
+.v2 .rule-list {
+  display: grid;
+  gap: var(--pf-space-4);
+}
+
+.v2 .rule-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--pf-space-4);
+  align-items: start;
+  padding: var(--pf-space-4);
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-raised);
+}
+
+.v2 .rule-card p {
+  margin: var(--pf-space-2) 0 0;
+}
+
+.v2 .rule-evidence {
+  margin: var(--pf-space-3) 0 0;
+  padding-left: var(--pf-space-5);
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .rule-actions {
+  display: flex;
+  gap: var(--pf-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.v2 .inline-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: var(--pf-text-sm);
+}
+
 /* ── The load summary ───────────────────────────────────────────────────
  *
  * One sentence saying what the numbers add up to. Someone who has never run a performance test has

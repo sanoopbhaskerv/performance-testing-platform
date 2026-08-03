@@ -54,6 +54,18 @@ function mapLines(name: string, entries: Record<string, string>, pad: string): s
   return [`${pad}${name}:`, ...keys.map((key) => `${pad}  ${quote(key)}: ${quote(entries[key])}`)];
 }
 
+function bodyLines(
+  body: { contentType: string; content: string } | null,
+  pad: string,
+): string[] {
+  if (!body) return [];
+  return [
+    `${pad}body:`,
+    `${pad}  contentType: ${quote(body.contentType)}`,
+    `${pad}  content: ${quote(body.content)}`,
+  ];
+}
+
 /**
  * The scenarios as YAML list items, indented to sit under a `scenarios:` key.
  *
@@ -72,14 +84,47 @@ export function scenariosToYaml(scenarios: ImportedScenario[], indent: number): 
         `${field}weight: ${scenario.weight}`,
       ];
       if (scenario.operationId) lines.push(`${field}operationId: ${quote(scenario.operationId)}`);
-      lines.push(`${field}method: ${scenario.method}`);
-      lines.push(`${field}path: ${quote(scenario.path)}`);
-      lines.push(...mapLines('headers', scenario.headers, field));
-      lines.push(...mapLines('query', scenario.query, field));
-      if (scenario.body) {
-        lines.push(`${field}body:`);
-        lines.push(`${field}  contentType: ${quote(scenario.body.contentType)}`);
-        lines.push(`${field}  content: ${quote(scenario.body.content)}`);
+      if (scenario.steps.length > 0) {
+        lines.push(`${field}steps:`);
+        for (const step of scenario.steps) {
+          const stepField = `${field}    `;
+          lines.push(`${field}  - name: ${quote(step.name)}`);
+          lines.push(`${stepField}method: ${step.method}`);
+          lines.push(`${stepField}path: ${quote(step.path)}`);
+          lines.push(...mapLines('headers', step.headers, stepField));
+          lines.push(...mapLines('query', step.query, stepField));
+          lines.push(...bodyLines(step.body, stepField));
+          if (step.extract && step.extract.length > 0) {
+            lines.push(`${stepField}extract:`);
+            for (const extraction of step.extract) {
+              lines.push(`${stepField}  - name: ${quote(extraction.name)}`);
+              lines.push(`${stepField}    from: ${extraction.from}`);
+              if (extraction.expression) {
+                lines.push(`${stepField}    expression: ${quote(extraction.expression)}`);
+              }
+              if (extraction.required === false) {
+                lines.push(`${stepField}    required: false`);
+              }
+            }
+          }
+          if (step.expect && step.expect.length > 0) {
+            lines.push(`${stepField}expect:`);
+            for (const expectation of step.expect) {
+              lines.push(`${stepField}  - subject: ${expectation.subject}`);
+              lines.push(`${stepField}    operator: ${expectation.operator}`);
+              lines.push(`${stepField}    value: ${quote(String(expectation.value))}`);
+            }
+          }
+          if (step.thinkTime) {
+            lines.push(`${stepField}thinkTime: ${step.thinkTime}`);
+          }
+        }
+      } else {
+        lines.push(`${field}method: ${scenario.method ?? 'GET'}`);
+        lines.push(`${field}path: ${quote(scenario.path ?? '/')}`);
+        lines.push(...mapLines('headers', scenario.headers, field));
+        lines.push(...mapLines('query', scenario.query, field));
+        lines.push(...bodyLines(scenario.body, field));
       }
       return lines.join('\n');
     })

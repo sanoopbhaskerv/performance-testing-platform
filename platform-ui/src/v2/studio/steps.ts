@@ -10,7 +10,7 @@ import { includedJourneys } from './draft';
  * disabled button with no explanation is the most common way a wizard strands somebody.
  */
 
-export type StepId = 'sources' | 'refine' | 'load' | 'objectives' | 'review';
+export type StepId = 'sources' | 'refine' | 'rules' | 'load' | 'objectives' | 'review';
 
 export interface Step {
   id: StepId;
@@ -23,6 +23,7 @@ export interface Step {
 const API_LOAD_STEPS: Step[] = [
   { id: 'sources', title: 'Journeys', hint: 'What requests should the test send?' },
   { id: 'refine', title: 'Review journeys', hint: 'Keep what matters, drop the noise.' },
+  { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Load', hint: 'How many people, and for how long?' },
   { id: 'objectives', title: 'Objectives', hint: 'What counts as fast enough?' },
   { id: 'review', title: 'Save and run', hint: 'Check the test, then start it.' },
@@ -31,6 +32,7 @@ const API_LOAD_STEPS: Step[] = [
 const WEB_EXPERIENCE_STEPS: Step[] = [
   { id: 'sources', title: 'Journey', hint: 'Which pages should the test measure?' },
   { id: 'refine', title: 'Review journey', hint: 'Check what will be measured.' },
+  { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Browsers', hint: 'How many real browsers, and how many times?' },
   { id: 'objectives', title: 'Objectives', hint: 'What counts as fast enough?' },
   { id: 'review', title: 'Save and run', hint: 'Check the test, then start it.' },
@@ -57,6 +59,9 @@ export function blockerFor(step: StepId, draft: StudioDraft): string | null {
       return includedJourneys(draft).length === 0
         ? 'Keep at least one journey. A test with none would send nothing and measure nothing.'
         : null;
+
+    case 'rules':
+      return null;
 
     case 'load':
       if (draft.load.peakUsers < 1) {

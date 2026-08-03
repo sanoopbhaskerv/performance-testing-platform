@@ -30,6 +30,8 @@ function journey(overrides: Partial<Journey> = {}): Journey {
     headers: {},
     query: {},
     body: null,
+    steps: [],
+    correlationSuggestions: [],
     operationId: null,
     include: true,
     ...overrides,
@@ -152,6 +154,135 @@ spec:
     expect(spec).toContain('"X-Note": "he said \\"hello\\""');
     expect(spec).toContain('"q": "a b&c"');
     expect(spec).toContain('content: "{\\"a\\": 1}"');
+  });
+
+  it('emits accepted correlation rules as reviewed extractions and replacements', () => {
+    const spec = toSpecification(
+      draft({
+        journeys: [
+          journey({
+            method: null,
+            path: null,
+            steps: [
+              {
+                name: 'post-api-basket',
+                method: 'POST',
+                path: '/api/basket',
+                headers: {},
+                query: {},
+                body: null,
+                expectStatus: false,
+                expectedStatus: null,
+                thinkTimeSeconds: 0,
+              },
+              {
+                name: 'post-api-orders',
+                method: 'POST',
+                path: '/api/orders',
+                headers: { 'Content-Type': 'application/json' },
+                query: {},
+                body: {
+                  contentType: 'application/json',
+                  content: '{"basketId":"basket-123"}',
+                },
+                expectStatus: true,
+                expectedStatus: 201,
+                thinkTimeSeconds: 3,
+              },
+            ],
+            correlationSuggestions: [
+              {
+                id: 'checkout:post-api-basket:basketId',
+                scenarioName: 'browse-users',
+                variableName: 'basketId',
+                decision: 'accepted',
+                extraction: {
+                  stepName: 'post-api-basket',
+                  from: 'json-body',
+                  expression: '$.basketId',
+                  valuePreview: 'basket-123',
+                },
+                replacements: [
+                  {
+                    stepName: 'post-api-orders',
+                    location: 'body',
+                    name: null,
+                    currentValue: 'basket-123',
+                  },
+                ],
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(spec).toContain('steps:');
+    expect(spec).toContain('extract:');
+    expect(spec).toContain('name: "basketId"');
+    expect(spec).toContain('expression: "$.basketId"');
+    expect(spec).toContain('content: "{\\"basketId\\":\\"${basketId}\\"}"');
+    expect(spec).toContain('expect:');
+    expect(spec).toContain('value: "201"');
+    expect(spec).toContain('thinkTime: 3s');
+  });
+
+  it('does not apply pending or rejected correlation suggestions', () => {
+    const spec = toSpecification(
+      draft({
+        journeys: [
+          journey({
+            method: null,
+            path: null,
+            steps: [
+              {
+                name: 'source',
+                method: 'GET',
+                path: '/api/source',
+                headers: {},
+                query: {},
+                body: null,
+                expectStatus: false,
+                expectedStatus: null,
+                thinkTimeSeconds: 0,
+              },
+              {
+                name: 'target',
+                method: 'GET',
+                path: '/api/target/basket-123',
+                headers: {},
+                query: {},
+                body: null,
+                expectStatus: false,
+                expectedStatus: null,
+                thinkTimeSeconds: 0,
+              },
+            ],
+            correlationSuggestions: [
+              {
+                id: 'pending',
+                scenarioName: 'browse-users',
+                variableName: 'basketId',
+                decision: 'pending',
+                extraction: {
+                  stepName: 'source',
+                  from: 'json-body',
+                  expression: '$.basketId',
+                  valuePreview: 'basket-123',
+                },
+                replacements: [
+                  { stepName: 'target', location: 'path', name: null, currentValue: 'basket-123' },
+                ],
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(spec).not.toContain('extract:');
+    expect(spec).toContain('path: "/api/target/basket-123"');
+    expect(spec).not.toContain('${basketId}');
   });
 
   it('excludes journeys dropped on the Refine screen, and re-apportions what is left', () => {

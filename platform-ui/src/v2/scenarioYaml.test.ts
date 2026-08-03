@@ -22,6 +22,7 @@ function scenario(overrides: Partial<ImportedScenario> = {}): ImportedScenario {
     headers: {},
     query: {},
     body: null,
+    steps: [],
     ...overrides,
   };
 }

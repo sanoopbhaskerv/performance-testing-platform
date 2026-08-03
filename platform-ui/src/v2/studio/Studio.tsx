@@ -8,7 +8,7 @@ import type { StepId } from './steps';
 import { blockerFor, stepsFor } from './steps';
 import SourcesStep from './SourcesStep';
 import RefineStep from './RefineStep';
-import { LoadStep, ObjectivesStep, ReviewStep } from './StepScreens';
+import { LoadStep, ObjectivesStep, ReviewStep, RulesStep } from './StepScreens';
 import './studio.css';
 
 /**
@@ -122,6 +122,7 @@ export default function Studio({
           <SourcesStep client={client} draft={draft} onChange={setDraft} />
         )}
         {step.id === 'refine' && <RefineStep draft={draft} onChange={setDraft} />}
+        {step.id === 'rules' && <RulesStep draft={draft} onChange={setDraft} />}
         {step.id === 'load' && <LoadStep draft={draft} onChange={setDraft} />}
         {step.id === 'objectives' && <ObjectivesStep draft={draft} onChange={setDraft} />}
         {step.id === 'review' && (

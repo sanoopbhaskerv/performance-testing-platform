@@ -14,7 +14,8 @@ import type { Journey, StudioDraft } from './draft';
 
 const journey = (over: Partial<Journey> = {}): Journey => ({
   name: 'browse-users', share: 100, method: 'GET', path: '/api/users',
-  headers: {}, query: {}, body: null, operationId: null, include: true, ...over,
+  headers: {}, query: {}, body: null, steps: [], correlationSuggestions: [],
+  operationId: null, include: true, ...over,
 });
 
 const draft = (over: Partial<StudioDraft> = {}): StudioDraft => ({
@@ -35,6 +36,17 @@ describe('stepsFor', () => {
     for (const type of ['api-load', 'web-experience'] as const) {
       expect(stepsFor(type).at(-1)?.id).toBe('review');
     }
+  });
+
+  it('puts rules between journey review and load', () => {
+    expect(stepsFor('api-load').map((step) => step.id)).toEqual([
+      'sources',
+      'refine',
+      'rules',
+      'load',
+      'objectives',
+      'review',
+    ]);
   });
 });
 

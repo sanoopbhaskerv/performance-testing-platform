@@ -1,4 +1,4 @@
-import type { ImportedScenario } from '../api';
+import type { CorrelationSuggestion, ImportedScenario } from '../api';
 
 /**
  * What the studio holds while somebody builds a test.
@@ -28,15 +28,33 @@ export type TestType = 'api-load' | 'web-experience';
 export interface Journey {
   name: string;
   share: number;
+  method: string | null;
+  path: string | null;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  body: { contentType: string; content: string } | null;
+  steps: JourneyStep[];
+  correlationSuggestions: CorrelationRuleDraft[];
+  /** What the source called this operation, kept so a report can be matched back to it. */
+  operationId: string | null;
+  /** Cleared on the Refine screen to drop a journey without losing it. */
+  include: boolean;
+}
+
+export interface JourneyStep {
+  name: string;
   method: string;
   path: string;
   headers: Record<string, string>;
   query: Record<string, string>;
   body: { contentType: string; content: string } | null;
-  /** What the source called this operation, kept so a report can be matched back to it. */
-  operationId: string | null;
-  /** Cleared on the Refine screen to drop a journey without losing it. */
-  include: boolean;
+  expectStatus: boolean;
+  expectedStatus: number | null;
+  thinkTimeSeconds: number;
+}
+
+export interface CorrelationRuleDraft extends CorrelationSuggestion {
+  decision: 'pending' | 'accepted' | 'rejected';
 }
 
 /**
@@ -115,7 +133,10 @@ export function includedJourneys(draft: StudioDraft): Journey[] {
  * removed is reported as a finding, and a journey silently missing from the table is a finding
  * nobody can act on.
  */
-export function journeysFromImport(scenarios: ImportedScenario[]): Journey[] {
+export function journeysFromImport(
+  scenarios: ImportedScenario[],
+  suggestions: CorrelationSuggestion[] = [],
+): Journey[] {
   return scenarios.map((scenario) => ({
     name: scenario.name,
     share: scenario.weight,
@@ -124,6 +145,20 @@ export function journeysFromImport(scenarios: ImportedScenario[]): Journey[] {
     headers: scenario.headers,
     query: scenario.query,
     body: scenario.body,
+    steps: scenario.steps.map((step) => ({
+      name: step.name,
+      method: step.method,
+      path: step.path,
+      headers: step.headers,
+      query: step.query,
+      body: step.body,
+      expectStatus: false,
+      expectedStatus: null,
+      thinkTimeSeconds: 0,
+    })),
+    correlationSuggestions: suggestions
+      .filter((suggestion) => suggestion.scenarioName === scenario.name)
+      .map((suggestion) => ({ ...suggestion, decision: 'pending' as const })),
     operationId: scenario.operationId,
     include: true,
   }));

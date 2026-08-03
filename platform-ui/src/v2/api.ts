@@ -227,11 +227,51 @@ export interface ImportedScenario {
   name: string;
   weight: number;
   operationId: string | null;
+  method: string | null;
+  path: string | null;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  body: { contentType: string; content: string } | null;
+  steps: ImportedStep[];
+}
+
+export interface ImportedStep {
+  name: string;
   method: string;
   path: string;
   headers: Record<string, string>;
   query: Record<string, string>;
   body: { contentType: string; content: string } | null;
+  extract?: Array<{
+    name: string;
+    from: 'json-body' | 'regex-body' | 'header' | 'set-cookie' | 'status';
+    expression: string;
+    required?: boolean;
+  }>;
+  expect?: Array<{ subject: 'status' | 'body'; operator: 'equals' | 'contains' | 'matches'; value: string | number }>;
+  thinkTime?: string | null;
+}
+
+export interface CorrelationSuggestion {
+  id: string;
+  scenarioName: string;
+  variableName: string;
+  extraction: CorrelationExtractionEvidence;
+  replacements: CorrelationReplacementEvidence[];
+}
+
+export interface CorrelationExtractionEvidence {
+  stepName: string;
+  from: 'json-body' | 'regex-body' | 'header' | 'set-cookie' | 'status';
+  expression: string;
+  valuePreview: string;
+}
+
+export interface CorrelationReplacementEvidence {
+  stepName: string;
+  location: 'path' | 'query' | 'header' | 'body';
+  name: string | null;
+  currentValue: string;
 }
 
 /**
@@ -245,6 +285,7 @@ export interface ImportResponse {
   sourceType: string;
   scenarios: ImportedScenario[];
   findings: ValidationFinding[];
+  correlationSuggestions: CorrelationSuggestion[];
 }
 
 /** RFC 7807 problem detail, which every V2 error uses. */

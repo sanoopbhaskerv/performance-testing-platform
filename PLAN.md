@@ -12,9 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1, S2 and most of S3 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3q for what each delivered. The studio's Rules screen is the last of S3; everything after it is
-still a plan.
+**Status: S1, S2 and S3 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3r for what each delivered. S4, the Validator, is next; everything after it is still a plan.
 
 ---
 
@@ -122,9 +121,9 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | Thresholds | ✅ built — objectives with verdicts |
 | Generated-plan preview | ✅ built |
 | Durable runs, cancel, quotas, authorization | ✅ built — and neither reference tool has any of it |
-| **Correlation rules** | ✅ **built in S3** — §3p. Not yet offered as suggestions in the UI, which is the last of S3 |
-| **Verification rules (assertions)** | ✅ built in S3 — expressible in a document, not yet in the studio |
-| **Think time** | ✅ built in S3 |
+| **Correlation rules** | ✅ **built in S3** — §3p, §3r. Offered as reviewed suggestions with evidence, never applied silently |
+| **Verification rules (assertions)** | ✅ built in S3 — expressible in a document and editable in the Rules screen |
+| **Think time** | ✅ built in S3 — expressible in a document and editable in the Rules screen |
 | **Studio shell** | ✅ built in S1 — §3n |
 | **A report a non-expert can read** | ✅ built in S2 — §3o |
 | **Validator / single-iteration dry run** | ❌ S4, next |
@@ -715,7 +714,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 | Decision | Chosen | Why |
 |---|---|---|
-| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 130 UI tests now. |
+| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 133 UI tests now. |
 | **Recorder** | **Deferred.** Guided capture wizards instead (§5) | A server-side recording browser is large and needs a security review. The wizards get most of the value for almost nothing. |
 | **Live monitoring** | **Deferred.** Existing status, plus elapsed/stage/progress bar | The cost is a runner-image change and re-verification on a cluster. The progress bar is derivable from data the control plane already has — no runner change. |
 | **The novice report** | **Kept** | Pure UI, cheap, and most of what "usable without experience" actually means. |
@@ -731,7 +730,7 @@ does. So web performance costs S8 alone, not S7 + S8.
 |---|---|---|---|---|---|
 | **S1** | Studio shell, and the API path end to end | 1 Start, 2 Sources, 3 Refine, 6 Load, 7 Objectives, 9 Status, 10 Report | Large | ✅ | **done** — `HANDOFF.md` §3n |
 | **S2** | The report a novice can read | 10 Report | Medium | ✅ | **done** — §3o |
-| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **engine + importer done** — §3p, §3q. The Rules screen remains |
+| **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **done** — `HANDOFF.md` §3p, §3q, §3r |
 | **S4** | The Validator | 8 Validate | Medium | ✅ | next |
 | **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | |
@@ -796,7 +795,8 @@ JMeter rendering: ordered samplers in the existing weighted controller, `JSONPos
 The HAR importer's `import.har.journeys.notOrdered` warning is **retired** — inverted in place, per
 `NEXT-SESSION.md` §3, never deleted.
 
-Correlation **suggestions** with evidence, accepted or rejected by the user.
+Correlation **suggestions** with evidence, accepted or rejected by the user. The importer proposes
+candidate extract/replacement pairs only as review items; the studio applies none until accepted.
 
 *Acceptance:* a journey signs in, extracts a session and calls an authenticated endpoint. A
 non-matching extraction produces a **failed** sample, not a fast one — pinned by a test that names the

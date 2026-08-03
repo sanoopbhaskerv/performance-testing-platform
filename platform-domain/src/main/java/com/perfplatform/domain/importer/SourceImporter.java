@@ -44,20 +44,38 @@ public interface SourceImporter {
      * what it could not represent would hand someone a test that looks complete and is not — which
      * is worse than one that plainly needs work.
      *
-     * @param scenarios draft scenarios, in the order the source presented them
-     * @param findings  what a person needs to know: what was stripped, what was guessed at, what
-     *                  still needs deciding. An import can succeed with findings and can produce no
-     *                  scenarios at all
+     * @param scenarios              draft scenarios, in the order the source presented them
+     * @param findings               what a person needs to know: what was stripped, what was
+     *                               guessed at, what still needs deciding. An import can succeed
+     *                               with findings and can produce no scenarios at all
+     * @param correlationSuggestions candidate correlations with evidence. They are suggestions,
+     *                               never edits to the scenarios; a person must accept one before it
+     *                               becomes an extraction and replacement in the specification
      */
-    record ImportResult(List<ScenarioSpec> scenarios, ValidationResult findings) {
+    record ImportResult(
+            List<ScenarioSpec> scenarios,
+            ValidationResult findings,
+            List<CorrelationSuggestion> correlationSuggestions) {
 
         public ImportResult {
             scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
             Objects.requireNonNull(findings, "findings");
+            correlationSuggestions = correlationSuggestions == null
+                    ? List.of()
+                    : List.copyOf(correlationSuggestions);
+        }
+
+        public ImportResult(List<ScenarioSpec> scenarios, ValidationResult findings) {
+            this(scenarios, findings, List.of());
         }
 
         public static ImportResult of(List<ScenarioSpec> scenarios, ValidationResult findings) {
             return new ImportResult(scenarios, findings);
+        }
+
+        public static ImportResult of(List<ScenarioSpec> scenarios, ValidationResult findings,
+                List<CorrelationSuggestion> correlationSuggestions) {
+            return new ImportResult(scenarios, findings, correlationSuggestions);
         }
 
         /** Nothing could be imported. The findings explain why. */
@@ -74,6 +92,42 @@ public interface SourceImporter {
         public boolean isEmpty() {
             return scenarios.isEmpty();
         }
+    }
+
+    /**
+     * A correlation the importer can justify from the source.
+     *
+     * <p>The importer does not mutate the scenario, because correlating the wrong value is worse
+     * than leaving it hard-coded: the journey still looks wired up and sends the wrong thing.
+     * Evidence names the response that supplied the value and every later request location where
+     * the captured value appears.
+     */
+    record CorrelationSuggestion(
+            String id,
+            String scenarioName,
+            String variableName,
+            ExtractionEvidence extraction,
+            List<ReplacementEvidence> replacements) {
+
+        public CorrelationSuggestion {
+            replacements = replacements == null ? List.of() : List.copyOf(replacements);
+        }
+    }
+
+    /** Where the suggested value came from. */
+    record ExtractionEvidence(
+            String stepName,
+            String from,
+            String expression,
+            String valuePreview) {
+    }
+
+    /** Where the suggested value is reused later in the same journey. */
+    record ReplacementEvidence(
+            String stepName,
+            String location,
+            String name,
+            String currentValue) {
     }
 
     /**

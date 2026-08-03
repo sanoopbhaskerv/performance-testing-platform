@@ -223,6 +223,69 @@ class HarImporterTest {
 
             assertThat(names(result)).containsExactly("orders");
         }
+
+        @Test
+        @DisplayName("it proposes correlations with response and request evidence, without applying them")
+        void proposesCorrelationsWithEvidence() {
+            ImportResult result = importer.importFrom(captureWithPages(
+                    """
+                    {"id":"page_1","title":"https://shop.example.com/checkout"}
+                    """,
+                    """
+                    {"pageref":"page_1","request":{"method":"POST",
+                      "url":"https://shop.example.com/api/basket","headers":[]},
+                     "response":{"status":200,"content":{"mimeType":"application/json",
+                       "text":"{\\"basketId\\":\\"basket-123\\"}"}}}
+                    """,
+                    """
+                    {"pageref":"page_1","request":{"method":"POST",
+                      "url":"https://shop.example.com/api/orders",
+                      "headers":[{"name":"Content-Type","value":"application/json"}],
+                      "postData":{"mimeType":"application/json",
+                        "text":"{\\"basketId\\":\\"basket-123\\",\\"quantity\\":1}"}},
+                     "response":{"status":201,"content":{"mimeType":"application/json"}}}
+                    """));
+
+            assertThat(result.correlationSuggestions()).singleElement().satisfies(suggestion -> {
+                assertThat(suggestion.scenarioName()).isEqualTo("checkout");
+                assertThat(suggestion.variableName()).isEqualTo("basketId");
+                assertThat(suggestion.extraction().stepName()).isEqualTo("post-api-basket");
+                assertThat(suggestion.extraction().from()).isEqualTo("json-body");
+                assertThat(suggestion.extraction().expression()).isEqualTo("$.basketId");
+                assertThat(suggestion.extraction().valuePreview()).isEqualTo("basket-123");
+                assertThat(suggestion.replacements()).singleElement().satisfies(replacement -> {
+                    assertThat(replacement.stepName()).isEqualTo("post-api-orders");
+                    assertThat(replacement.location()).isEqualTo("body");
+                    assertThat(replacement.currentValue()).contains("basket-123");
+                });
+            });
+            assertThat(request(result, "post-api-basket").extract()).isEmpty();
+            assertThat(request(result, "post-api-orders").body().content()).contains("basket-123");
+        }
+
+        @Test
+        @DisplayName("token-shaped response values are not echoed as suggestions")
+        void doesNotEchoTokenShapedSuggestions() {
+            ImportResult result = importer.importFrom(captureWithPages(
+                    """
+                    {"id":"page_1","title":"https://shop.example.com/checkout"}
+                    """,
+                    """
+                    {"pageref":"page_1","request":{"method":"POST",
+                      "url":"https://shop.example.com/api/login","headers":[]},
+                     "response":{"status":200,"content":{"mimeType":"application/json",
+                       "text":"{\\"accessToken\\":\\"aGVsbG90aGVyZXRoaXNpc2Fsb25ndG9rZW4x\\"}"}}}
+                    """,
+                    """
+                    {"pageref":"page_1","request":{"method":"GET",
+                      "url":"https://shop.example.com/api/account",
+                      "headers":[{"name":"X-Request-Token",
+                        "value":"aGVsbG90aGVyZXRoaXNpc2Fsb25ndG9rZW4x"}]},
+                     "response":{"status":200,"content":{"mimeType":"application/json"}}}
+                    """));
+
+            assertThat(result.correlationSuggestions()).isEmpty();
+        }
     }
 
     /**

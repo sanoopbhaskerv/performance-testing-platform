@@ -17,8 +17,9 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1, S2 and S3's engine half** — the studio, a report a non-expert can read, run
-> progress, and multi-step journeys with correlation. `HANDOFF.md` §3n–§3p.
+> **Built so far: S1, S2 and S3** — the studio, a report a non-expert can read, run progress,
+> multi-step journeys with correlation, HAR-imported ordered journeys and the Rules screen.
+> `HANDOFF.md` §3n–§3r.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -65,7 +66,7 @@ Reordered by `PLAN.md`; kept here as the inventory. Correlation is done; the res
 
 | Item | Why it matters | Size |
 |---|---|---|
-| **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. **This is `PLAN.md` S4** — next after S3's remaining surfaces. | Medium |
+| **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. **This is `PLAN.md` S4** — next. | Medium |
 | **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. **`PLAN.md` S12**; S2 shaped the report to take one. | Medium |
 | ~~**Jenkins shared library**~~ | **Dropped.** CI triggering is not this organisation's practice; the V2 API remains available for whoever wants it. | — |
 | ~~**Manual correlation and extraction**~~ | **Done in `PLAN.md` S3** — scenarios carry ordered steps, values are extracted and carried forward, and a failed extraction fails the sample rather than reporting good latency. `HANDOFF.md` §3p. | — |
@@ -129,9 +130,9 @@ Each is real, none blocks anything.
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
 - **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload
   belongs.
-- **Journeys cannot be edited by clicking.** S3 made them expressible in YAML, over the API, and
-  importable from a HAR — but the studio has no Rules screen, so correlation must still be written by
-  hand. The remaining half of S3.
+- ~~**Journeys cannot be edited by clicking.**~~ **Done in S3** — the studio has a Rules screen that
+  proposes correlations with evidence, and a person accepts or rejects each one before it affects the
+  specification. Verification and think time are editable per step. `HANDOFF.md` §3r.
 - ~~**The HAR importer still emits sibling scenarios.**~~ **Done in S3** — a capture becomes one
   journey per page with ordered steps, and the `notOrdered` warning was inverted into
   `correlationNeeded`. `HANDOFF.md` §3q.
@@ -146,12 +147,12 @@ Each is real, none blocks anything.
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
 - ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library.
-  **130 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
+  **133 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
   emitter and step rules, the report narrative and run progress.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).
-- **UI lint reports 10 errors, 3 warnings**, all pre-existing in `App.tsx` and the pre-1D parts of
-  `PerformanceConsole.tsx`. Deliberately not fixed as a side effect of other work.
+- **UI lint reports 3 errors, 3 warnings**, all pre-existing in V1's `App.tsx`. Deliberately not
+  fixed as a side effect of other work.
 - **`platform-ui/src/App.css` is imported by nothing.** Rules added there silently do nothing.
 
 ---

@@ -1,6 +1,6 @@
 import { scenariosToYaml } from '../scenarioYaml';
 import type { ImportedScenario } from '../api';
-import type { Journey, ObjectiveDraft, StudioDraft } from './draft';
+import type { Journey, JourneyStep, ObjectiveDraft, StudioDraft } from './draft';
 import { includedJourneys, normalizeShares } from './draft';
 
 /**
@@ -115,6 +115,7 @@ function objectiveLines(draft: StudioDraft, workloadName: string): string[] {
 
 /** A journey in the shape `scenariosToYaml` already knows how to escape. */
 function asScenario(journey: Journey): ImportedScenario {
+  const steps = journey.steps.length > 0 ? materializedSteps(journey) : [];
   return {
     name: journey.name,
     weight: journey.share,
@@ -124,7 +125,88 @@ function asScenario(journey: Journey): ImportedScenario {
     headers: journey.headers,
     query: journey.query,
     body: journey.body,
+    steps,
   };
+}
+
+function materializedSteps(journey: Journey): ImportedScenario['steps'] {
+  const accepted = journey.correlationSuggestions.filter((rule) => rule.decision === 'accepted');
+  return journey.steps.map((step) => {
+    const extract = accepted
+      .filter((rule) => rule.extraction.stepName === step.name)
+      .map((rule) => ({
+        name: rule.variableName,
+        from: rule.extraction.from,
+        expression: rule.extraction.expression,
+        required: true,
+      }));
+
+    return {
+      name: step.name,
+      method: step.method,
+      path: replacePath(step, accepted),
+      headers: replaceMap(step, 'header', accepted),
+      query: replaceMap(step, 'query', accepted),
+      body: replaceBody(step, accepted),
+      extract,
+      expect:
+        step.expectStatus && step.expectedStatus !== null
+          ? [{ subject: 'status', operator: 'equals', value: step.expectedStatus }]
+          : [],
+      thinkTime: step.thinkTimeSeconds > 0 ? humanDuration(step.thinkTimeSeconds) : null,
+    };
+  });
+}
+
+function replacePath(
+  step: JourneyStep,
+  rules: Journey['correlationSuggestions'],
+): string {
+  let path = step.path;
+  for (const rule of rules) {
+    for (const replacement of rule.replacements) {
+      if (replacement.stepName === step.name && replacement.location === 'path') {
+        path = path.replaceAll(replacement.currentValue, `\${${rule.variableName}}`);
+      }
+    }
+  }
+  return path;
+}
+
+function replaceMap(
+  step: JourneyStep,
+  location: 'query' | 'header',
+  rules: Journey['correlationSuggestions'],
+): Record<string, string> {
+  const source = location === 'query' ? step.query : step.headers;
+  const next = { ...source };
+  for (const rule of rules) {
+    for (const replacement of rule.replacements) {
+      if (replacement.stepName === step.name && replacement.location === location && replacement.name) {
+        next[replacement.name] = next[replacement.name].replaceAll(
+          replacement.currentValue,
+          `\${${rule.variableName}}`,
+        );
+      }
+    }
+  }
+  return next;
+}
+
+function replaceBody(
+  step: JourneyStep,
+  rules: Journey['correlationSuggestions'],
+): JourneyStep['body'] {
+  if (!step.body) return null;
+  let content = step.body.content;
+  for (const rule of rules) {
+    for (const replacement of rule.replacements) {
+      if (replacement.stepName === step.name && replacement.location === 'body') {
+        content = content.replaceAll(replacement.currentValue, `\${${rule.variableName}}`);
+      }
+    }
+  }
+  return { ...step.body, content };
 }
 
 /** Raised when a draft cannot describe a test at all. The studio blocks Save rather than emitting one. */

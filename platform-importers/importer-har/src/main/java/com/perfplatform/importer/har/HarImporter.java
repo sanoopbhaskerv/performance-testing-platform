@@ -3,6 +3,9 @@ package com.perfplatform.importer.har;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.perfplatform.domain.importer.SourceImporter;
+import com.perfplatform.domain.importer.SourceImporter.CorrelationSuggestion;
+import com.perfplatform.domain.importer.SourceImporter.ExtractionEvidence;
+import com.perfplatform.domain.importer.SourceImporter.ReplacementEvidence;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.SourceType;
@@ -145,7 +148,7 @@ public final class HarImporter implements SourceImporter {
 
         return scenarios.isEmpty()
                 ? ImportResult.nothing(ValidationResult.of(findings))
-                : ImportResult.of(scenarios, ValidationResult.of(findings));
+                : ImportResult.of(scenarios, ValidationResult.of(findings), reading.suggestions());
     }
 
     /** A request kept for import, and what the capture observed about it. */
@@ -190,9 +193,14 @@ public final class HarImporter implements SourceImporter {
         private int truncated;
         private boolean sawBody;
         private boolean imported;
+        private final List<CorrelationSuggestion> suggestions = new ArrayList<>();
 
         private Reading(List<ValidationFinding> findings) {
             this.findings = findings;
+        }
+
+        private List<CorrelationSuggestion> suggestions() {
+            return suggestions;
         }
 
         private List<ScenarioSpec> read(JsonNode log) {
@@ -436,6 +444,8 @@ public final class HarImporter implements SourceImporter {
                     }
                 }
 
+                suggestions.addAll(suggestCorrelations(name, journey.getValue(), steps));
+
                 scenarios.add(new ScenarioSpec(name, weights[index++], null, null, null,
                         Map.of(), Map.of(), null, steps));
             }
@@ -444,6 +454,161 @@ public final class HarImporter implements SourceImporter {
             multiStepJourneys = (int) scenarios.stream()
                     .filter(scenario -> scenario.steps().size() > 1).count();
             return scenarios;
+        }
+
+        /**
+         * Suggests correlations visible in the capture. Suggestions are evidence, not edits.
+         */
+        private static List<CorrelationSuggestion> suggestCorrelations(String scenarioName,
+                List<Kept> kept, List<StepSpec> steps) {
+            List<CorrelationSuggestion> found = new ArrayList<>();
+            Set<String> usedVariables = new LinkedHashSet<>();
+
+            for (int sourceIndex = 0; sourceIndex < kept.size(); sourceIndex++) {
+                CapturedRequest source = kept.get(sourceIndex).request;
+                StepSpec sourceStep = steps.get(sourceIndex);
+                for (CandidateValue candidate : responseCandidates(source)) {
+                    List<ReplacementEvidence> replacements = new ArrayList<>();
+                    for (int targetIndex = sourceIndex + 1; targetIndex < steps.size(); targetIndex++) {
+                        replacements.addAll(usagesIn(steps.get(targetIndex), candidate.value()));
+                    }
+                    if (replacements.isEmpty()) {
+                        continue;
+                    }
+
+                    String variable = uniqueVariable(candidate.name(), usedVariables);
+                    found.add(new CorrelationSuggestion(
+                            scenarioName + ":" + sourceStep.name() + ":" + variable,
+                            scenarioName,
+                            variable,
+                            new ExtractionEvidence(
+                                    sourceStep.name(),
+                                    candidate.from(),
+                                    candidate.expression(),
+                                    preview(candidate.value())),
+                            replacements));
+                }
+            }
+            return found.size() <= 25 ? found : found.subList(0, 25);
+        }
+
+        private record CandidateValue(String name, String from, String expression, String value) {
+        }
+
+        private static List<CandidateValue> responseCandidates(CapturedRequest request) {
+            List<CandidateValue> values = new ArrayList<>();
+            String body = request.responseBody();
+            if (body != null && request.responseType() != null
+                    && request.responseType().toLowerCase(Locale.ROOT).contains("json")) {
+                try {
+                    collectJsonValues(JSON.readTree(body), "$", values);
+                } catch (Exception ignored) {
+                    // A truncated response body should remove a suggestion, not fail the import.
+                }
+            }
+
+            for (Map.Entry<String, String> header : request.responseHeaders().entrySet()) {
+                if (safeCorrelationValue(header.getKey(), header.getValue())) {
+                    values.add(new CandidateValue(variableName(header.getKey()),
+                            "header", header.getKey(), header.getValue()));
+                }
+            }
+
+            return values.stream()
+                    .filter(value -> safeCorrelationValue(value.name(), value.value()))
+                    .filter(value -> !value.name().isBlank())
+                    .toList();
+        }
+
+        private static void collectJsonValues(JsonNode node, String path,
+                List<CandidateValue> values) {
+            if (node == null || node.isNull()) {
+                return;
+            }
+            if (node.isObject()) {
+                node.fields().forEachRemaining(entry ->
+                        collectJsonValues(entry.getValue(), path + "." + entry.getKey(), values));
+                return;
+            }
+            if (node.isArray()) {
+                for (int i = 0; i < node.size(); i++) {
+                    collectJsonValues(node.get(i), path + "[" + i + "]", values);
+                }
+                return;
+            }
+            if (node.isTextual() || node.isNumber()) {
+                String value = node.asText();
+                String name = path.substring(path.lastIndexOf('.') + 1)
+                        .replaceAll("\\[[0-9]+]$", "");
+                values.add(new CandidateValue(variableName(name), "json-body", path, value));
+            }
+        }
+
+        private static List<ReplacementEvidence> usagesIn(StepSpec step, String value) {
+            List<ReplacementEvidence> usages = new ArrayList<>();
+            if (contains(step.path(), value)) {
+                usages.add(new ReplacementEvidence(step.name(), "path", null, value));
+            }
+            step.query().forEach((name, current) -> {
+                if (contains(current, value)) {
+                    usages.add(new ReplacementEvidence(step.name(), "query", name, current));
+                }
+            });
+            step.headers().forEach((name, current) -> {
+                if (contains(current, value)) {
+                    usages.add(new ReplacementEvidence(step.name(), "header", name, current));
+                }
+            });
+            if (step.body() != null && contains(step.body().content(), value)) {
+                usages.add(new ReplacementEvidence(step.name(), "body", null, value));
+            }
+            return usages;
+        }
+
+        private static boolean contains(String text, String value) {
+            return text != null && value != null && !value.isBlank() && text.contains(value);
+        }
+
+        private static boolean safeCorrelationValue(String name, String value) {
+            if (value == null || value.isBlank() || value.length() < 3 || value.length() > 160) {
+                return false;
+            }
+            if (SecretValueDetector.isCredentialHeader(name)
+                    || SecretValueDetector.looksLikeCredential(value)) {
+                return false;
+            }
+            String lowerName = name == null ? "" : name.toLowerCase(Locale.ROOT);
+            return !(lowerName.contains("password") || lowerName.contains("token")
+                    || lowerName.contains("secret") || lowerName.contains("cookie"));
+        }
+
+        private static String variableName(String raw) {
+            String cleaned = raw == null ? "" : raw
+                    .replaceAll("[^A-Za-z0-9_.-]+", "-")
+                    .replaceAll("^-+|-+$", "");
+            if (cleaned.isBlank()) {
+                return "";
+            }
+            if (!Character.isLetter(cleaned.charAt(0)) && cleaned.charAt(0) != '_') {
+                cleaned = "value-" + cleaned;
+            }
+            return truncate(cleaned, 40);
+        }
+
+        private static String uniqueVariable(String preferred, Set<String> used) {
+            String base = preferred.isBlank() ? "value" : preferred;
+            String candidate = base;
+            for (int suffix = 2; !used.add(candidate); suffix++) {
+                candidate = truncate(base, 36) + "-" + suffix;
+            }
+            return candidate;
+        }
+
+        private static String preview(String value) {
+            if (value == null || value.length() <= 24) {
+                return value == null ? "" : value;
+            }
+            return value.substring(0, 10) + "..." + value.substring(value.length() - 6);
         }
 
         /** A journey's name: the page it came from, or its first call when the capture named none. */
