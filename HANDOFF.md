@@ -72,12 +72,13 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S1 — the studio: shell, sources, refine, load, objectives, review** | **Complete** | see §3n |
 | **S2 — the report a novice can read, and run progress** | **Complete** | see §3o |
 | **S3 — journeys and correlation (engine half)** | **Complete** | see §3p |
-| **S3 — HAR ordered steps, studio Rules screen** | **Not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S3 — HAR imports ordered journeys** | **Complete** | see §3q |
+| **S3 — studio Rules screen** | **Not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S4–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**931 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
+**934 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3).
 
 **130 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
@@ -1237,6 +1238,70 @@ them. Two documents differing only by a step digest differently, verified.
 string reaches every access log between the runner and the target, so the list arguably wants the
 query forms too. Left alone deliberately — widening it is a change to what every existing document
 validates as, not a side effect of adding journeys.
+
+---
+
+## 3q. S3 — the HAR importer builds journeys
+
+**A capture becomes one journey per page, steps in the order the session made them.** Verified over
+HTTP with a capture carrying a plaintext password, a bearer token, a session cookie and an analytics
+beacon: one journey named `checkout`, three ordered steps, and **grep found no byte of any secret in
+the response**.
+
+```
+journey: checkout  weight=100  steps=3
+   post-api-login   POST  /api/login    headers=[Content-Type]  body=no     ← password refused whole
+   api-basket       GET   /api/basket   headers=[Accept]                    ← Authorization, Cookie stripped
+   post-api-orders  POST  /api/orders   headers=[Content-Type]  body=yes
+```
+
+### Two warnings inverted in place, never deleted
+
+- `import.har.journeys.notOrdered` → **`import.har.journeys.correlationNeeded`**. It used to say
+  order was not preserved, which was true when a scenario was one request. Order is preserved now.
+  What is not is **correlation**: the importer can see a response carried an identifier and a later
+  request used one, but not that they are the same thing, and guessing would wire the journey to the
+  wrong value. So no step ever arrives with an extraction the importer invented — pinned by a test.
+- `import.har.duplicates.collapsed` is gone, because nothing collapses any more.
+
+### Repeats are kept, and that is a correction
+
+Sibling scenarios collapsed repeats and raised a weight instead, because independent scenarios needed
+the ratio to live somewhere. **A sequence carries its own ratio**: the basket was fetched twice — once
+before signing in and once after — so the journey fetches it twice. Collapsing it back would both
+change what runs and quietly halve the traffic the capture observed for that call.
+
+The second gets a distinct name (`api-basket-2`) because a step name becomes a result label
+(`workload/scenario/step`). Two steps sharing one would have their samples merged, and a cold fetch
+and a signed-in fetch are worth telling apart.
+
+### Weights stopped coming from observed frequency, deliberately
+
+`import.har.weights.observed` → **`import.har.weights.equal`**. A capture cannot say how often each
+*journey* ran — one session usually visits each page once — and a page that happens to make twenty
+calls is a heavy page, not a popular one. Weighting it twenty times higher would describe traffic
+nobody observed. The per-request frequency is not lost; it moved into the sequence, which is a more
+faithful place for it.
+
+### Truncation changed direction
+
+Was "keep the most frequently observed", which is right for independent scenarios and wrong for a
+sequence: dropping requests out of the middle leaves a journey that never happened, and the steps
+around the gap may depend on what was removed. It now keeps the head in order — a shorter journey
+that is at least a real prefix of the session.
+
+### The API boundary
+
+`ImportResponse.ImportedScenario` gained `steps`. Without it a journey would have arrived at the
+studio as a scenario with no method and no path — the same mistake `operationId` nearly made in 2c,
+and harder to spot here because the object would still have looked valid. A journey also reports a
+null method rather than the `GET` default, which would describe a request it does not make.
+
+### Not done
+
+**The studio has no Rules screen**, so journeys are importable and expressible but still not
+*editable* by clicking: correlation suggestions with evidence, verification and think time are the
+remaining half of S3.
 
 ---
 

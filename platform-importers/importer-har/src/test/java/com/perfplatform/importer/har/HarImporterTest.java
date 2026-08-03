@@ -2,6 +2,7 @@ package com.perfplatform.importer.har;
 
 import com.perfplatform.domain.importer.SourceImporter.ImportResult;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.SourceType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -45,6 +46,30 @@ class HarImporterTest {
     private static ScenarioSpec scenario(ImportResult result, String name) {
         return find(result, name).orElseThrow(() -> new AssertionError(
                 "no scenario named '" + name + "' in " + names(result)));
+    }
+
+    /**
+     * Every request the import produced, whichever journey it belongs to.
+     *
+     * <p>S3 changed the shape rather than the behaviour: a captured page used to become several
+     * sibling scenarios and now becomes one journey of ordered steps. Almost every test here asserts
+     * something about a <em>request</em> — that a credential was stripped, that a host was dropped,
+     * that a body was refused — and none of that moved. Flattening here keeps those assertions
+     * pointed at what they were always about, instead of rewriting twenty tests to walk into steps.
+     */
+    private static List<StepSpec> requests(ImportResult result) {
+        return result.scenarios().stream().flatMap(s -> s.asSteps().stream()).toList();
+    }
+
+    private static List<String> requestNames(ImportResult result) {
+        return requests(result).stream().map(StepSpec::name).toList();
+    }
+
+    /** One request by name, from any journey. */
+    private static StepSpec request(ImportResult result, String name) {
+        return requests(result).stream().filter(s -> s.name().equals(name)).findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "no request named '" + name + "' in " + requestNames(result)));
     }
 
     /** Wraps entries in the smallest valid capture around them. */
@@ -139,15 +164,20 @@ class HarImporterTest {
         void importsApplicationRequestsOnly() {
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            assertThat(names(result)).containsExactly(
-                    "checkout-api-basket", "checkout-post-api-login", "checkout-post-api-orders");
+            // One journey now, named after the page, whose steps are its requests in the order
+            // the session made them. The basket appears twice because it was fetched twice — once
+            // before signing in and once after — and the second gets a distinct name because a step
+            // name becomes a result label: two steps sharing one would have their samples merged,
+            // and a cold fetch and a signed-in fetch are worth telling apart.
+            assertThat(names(result)).containsExactly("checkout");
+            assertThat(requestNames(result))
+                    .containsExactly("api-basket", "post-api-login", "api-basket-2", "post-api-orders");
         }
 
         @Test
         @DisplayName("method, path and query survive; the host does not")
         void importsTheRequestWithoutItsHost() {
-            ScenarioSpec basket = scenario(importer.importFrom(CHECKOUT_SESSION),
-                    "checkout-api-basket");
+            StepSpec basket = request(importer.importFrom(CHECKOUT_SESSION), "api-basket");
 
             assertThat(basket.methodOrDefault()).isEqualTo("GET");
             assertThat(basket.path()).isEqualTo("/api/basket");
@@ -159,8 +189,7 @@ class HarImporterTest {
         @Test
         @DisplayName("a body with nothing sensitive in it is imported with its media type")
         void importsAnOrdinaryBody() {
-            ScenarioSpec orders = scenario(importer.importFrom(CHECKOUT_SESSION),
-                    "checkout-post-api-orders");
+            StepSpec orders = request(importer.importFrom(CHECKOUT_SESSION), "post-api-orders");
 
             assertThat(orders.body()).isNotNull();
             assertThat(orders.body().content()).isEqualTo("{\"sku\":\"ABC-1\",\"quantity\":2}");
@@ -171,15 +200,17 @@ class HarImporterTest {
          * The one thing a capture knows that an API document cannot: how often each call was made.
          */
         @Test
-        @DisplayName("weights come from how often each request was observed")
-        void weightsComeFromObservedFrequency() {
+        @DisplayName("how often a request was made survives as repeated steps, not as a weight")
+        void observedFrequencySurvivesAsSequence() {
+            // Inverted at S3, in place. This used to assert weights of 50/25/25 from the observed
+            // counts, which was right when scenarios ran independently and the ratio had nowhere
+            // else to live. A journey carries its own ratio: the basket was fetched twice, so the
+            // journey fetches it twice. Collapsing it back to one step would quietly halve the
+            // traffic the capture actually observed for it.
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            // The basket was fetched twice, login and orders once each.
-            assertThat(scenario(result, "checkout-api-basket").weight()).isEqualTo(50);
-            assertThat(scenario(result, "checkout-post-api-login").weight()).isEqualTo(25);
-            assertThat(scenario(result, "checkout-post-api-orders").weight()).isEqualTo(25);
-            assertThat(codes(result)).contains("import.har.weights.observed");
+            assertThat(requestNames(result)).filteredOn(n -> n.startsWith("api-basket")).hasSize(2);
+            assertThat(codes(result)).contains("import.har.weights.equal");
         }
 
         @Test
@@ -220,7 +251,7 @@ class HarImporterTest {
         void dropsThirdPartyHosts() {
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            assertThat(result.scenarios()).noneMatch(s -> s.path().equals("/collect"));
+            assertThat(requests(result)).noneMatch(s -> "/collect".equals(s.path()));
             assertThat(codes(result)).contains("import.har.thirdParty.dropped");
             assertThat(result.findings().findings())
                     .filteredOn(f -> f.code().equals("import.har.thirdParty.dropped"))
@@ -246,7 +277,7 @@ class HarImporterTest {
                     """));
 
             // The first entry is an identity provider, not the system under test.
-            assertThat(names(result)).containsExactly("a", "b");
+            assertThat(requestNames(result)).containsExactly("a", "b");
         }
 
         @Test
@@ -260,11 +291,15 @@ class HarImporterTest {
 
         @Test
         @DisplayName("a repeat raises the weight rather than adding a scenario")
-        void collapsesRepeats() {
+        void keepsRepeatsAsSteps() {
+            // Inverted at S3, in place. Repeats used to be collapsed and the count raised a weight,
+            // because independent scenarios needed the ratio to live somewhere. A sequence carries
+            // its own: the basket was fetched twice, so the journey fetches it twice.
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
             assertThat(names(result)).doesNotHaveDuplicates();
-            assertThat(codes(result)).contains("import.har.duplicates.collapsed");
+            assertThat(requestNames(result)).filteredOn(n -> n.startsWith("api-basket")).hasSize(2);
+            assertThat(codes(result)).doesNotContain("import.har.duplicates.collapsed");
         }
 
         @Test
@@ -282,9 +317,11 @@ class HarImporterTest {
                      "response":{"status":200,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(result.scenarios()).hasSize(1);
-            assertThat(scenario(result, "orders").query()).containsEntry("page", "1");
-            assertThat(codes(result)).contains("import.har.query.varied");
+            // Two calls to the same path with different query strings are two steps now, in the
+            // order they were made — the variance is the sequence rather than a discarded variant.
+            assertThat(requests(result)).hasSize(2);
+            assertThat(requests(result).get(0).query()).containsEntry("page", "1");
+            assertThat(requests(result).get(1).query()).containsEntry("page", "2");
         }
 
         @Test
@@ -328,7 +365,7 @@ class HarImporterTest {
         void stripsAuthorization() {
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            assertThat(scenario(result, "checkout-api-basket").headers())
+            assertThat(request(result, "api-basket").headers())
                     .doesNotContainKeys("Authorization", "authorization");
             assertThat(codes(result)).contains("import.har.header.credential");
         }
@@ -343,7 +380,7 @@ class HarImporterTest {
         void refusesACapturedPassword() {
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            assertThat(scenario(result, "checkout-post-api-login").body()).isNull();
+            assertThat(request(result, "post-api-login").body()).isNull();
             assertThat(result.findings().findings())
                     .filteredOn(f -> f.code().equals("import.har.body.credential"))
                     .singleElement()
@@ -364,7 +401,7 @@ class HarImporterTest {
                      "response":{"status":200,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(scenario(result, "post-signin").body()).isNull();
+            assertThat(request(result, "post-signin").body()).isNull();
             assertThat(codes(result)).contains("import.har.body.credential");
         }
 
@@ -379,7 +416,7 @@ class HarImporterTest {
                      "response":{"status":200,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(scenario(result, "post-session").body()).isNull();
+            assertThat(request(result, "post-session").body()).isNull();
             assertThat(codes(result)).contains("import.har.body.credential");
         }
 
@@ -394,7 +431,7 @@ class HarImporterTest {
                      "response":{"status":201,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(scenario(result, "post-applications").body()).isNull();
+            assertThat(request(result, "post-applications").body()).isNull();
             assertThat(codes(result)).contains("import.har.body.personalData");
         }
 
@@ -408,7 +445,7 @@ class HarImporterTest {
                      "response":{"status":201,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(scenario(result, "post-documents").body()).isNull();
+            assertThat(request(result, "post-documents").body()).isNull();
             assertThat(codes(result)).contains("import.har.body.unsupported");
         }
 
@@ -422,7 +459,7 @@ class HarImporterTest {
                      "response":{"status":201,"content":{"mimeType":"application/json"}}}
                     """));
 
-            ScenarioSpec orders = scenario(result, "post-orders");
+            StepSpec orders = request(result, "post-orders");
             assertThat(orders.headers()).doesNotContainKey("X-CSRF-Token")
                     .containsEntry("Accept", "application/json");
             assertThat(codes(result)).contains("import.har.header.session");
@@ -438,7 +475,7 @@ class HarImporterTest {
                      "response":{"status":200,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(scenario(result, "orders").query())
+            assertThat(request(result, "orders").query())
                     .doesNotContainKey("x-api-key").containsEntry("page", "2");
             assertThat(codes(result)).contains("import.har.query.credential");
         }
@@ -472,8 +509,7 @@ class HarImporterTest {
         @Test
         @DisplayName("fingerprint, transport and HTTP/2 pseudo-headers are dropped; Accept is kept")
         void dropsNegotiatedHeaders() {
-            ScenarioSpec basket = scenario(importer.importFrom(CHECKOUT_SESSION),
-                    "checkout-api-basket");
+            StepSpec basket = request(importer.importFrom(CHECKOUT_SESSION), "api-basket");
 
             assertThat(basket.headers())
                     .doesNotContainKeys("User-Agent", "sec-fetch-mode", ":authority")
@@ -487,7 +523,7 @@ class HarImporterTest {
         @Test
         @DisplayName("a conditional request header is dropped, so the target cannot answer 304")
         void dropsConditionalHeaders() {
-            assertThat(scenario(importer.importFrom(CHECKOUT_SESSION), "checkout-api-basket")
+            assertThat(request(importer.importFrom(CHECKOUT_SESSION), "api-basket")
                     .headers()).doesNotContainKey("If-None-Match");
         }
     }
@@ -497,10 +533,11 @@ class HarImporterTest {
     class Journeys {
 
         @Test
-        @DisplayName("scenarios are named after the page they came from")
-        void namesScenariosAfterTheirJourney() {
-            assertThat(names(importer.importFrom(CHECKOUT_SESSION)))
-                    .allMatch(name -> name.startsWith("checkout-"));
+        @DisplayName("a journey is named after the page it came from")
+        void namesJourneysAfterTheirPage() {
+            // Was: every scenario name started with "checkout-", the prefix being all a journey
+            // could be. The journey is the scenario now, so the page name IS the name.
+            assertThat(names(importer.importFrom(CHECKOUT_SESSION))).containsExactly("checkout");
         }
 
         /**
@@ -509,18 +546,66 @@ class HarImporterTest {
          * a draft somebody can use and a test that quietly measures something else.
          */
         @Test
-        @DisplayName("it states plainly that order and correlation are not preserved")
-        void warnsThatJourneysAreNotOrdered() {
+        @DisplayName("it states plainly that correlation is not preserved, now that order is")
+        void warnsThatCorrelationIsNotPreserved() {
+            // Inverted at S3, in place. This used to assert a warning that ORDER was not preserved,
+            // which was true when a scenario was one request. Order is preserved now. What is still
+            // not is correlation: the importer can see a response carried an identifier and a later
+            // request used one, but not that they are the same thing, and guessing would wire the
+            // journey to the wrong value.
             ImportResult result = importer.importFrom(CHECKOUT_SESSION);
 
-            assertThat(codes(result)).contains("import.har.journeys.notOrdered");
-            assertThat(result.findings().warnings())
-                    .extracting(f -> f.code())
-                    .contains("import.har.journeys.notOrdered");
+            assertThat(codes(result)).contains("import.har.journeys.correlationNeeded")
+                    .doesNotContain("import.har.journeys.notOrdered");
+            assertThat(result.findings().warnings()).extracting(f -> f.code())
+                    .contains("import.har.journeys.correlationNeeded");
         }
 
         @Test
-        @DisplayName("two pages become two journey prefixes")
+        @DisplayName("a captured page becomes one journey of ordered steps")
+        void aPageBecomesAnOrderedJourney() {
+            // The capability S3 added, and the reason the notOrdered warning could be retired. A
+            // journey is a sequence; before this it could only be a shared name prefix.
+            ImportResult result = importer.importFrom(CHECKOUT_SESSION);
+
+            assertThat(result.scenarios()).hasSize(1);
+            ScenarioSpec journey = result.scenarios().get(0);
+
+            assertThat(journey.isJourney()).isTrue();
+            assertThat(journey.steps()).hasSizeGreaterThan(1);
+            // The journey itself states no request: its steps do.
+            assertThat(journey.path()).isNull();
+            assertThat(journey.method()).isNull();
+        }
+
+        @Test
+        @DisplayName("a journey's steps keep the order the session made them in")
+        void stepsKeepTheirOrder() {
+            ImportResult result = importer.importFrom(CHECKOUT_SESSION);
+            List<String> paths = result.scenarios().get(0).steps().stream()
+                    .map(StepSpec::path).toList();
+
+            // Signing in happens before the order is placed, because that is what was recorded.
+            assertThat(paths.indexOf("/api/login")).isLessThan(paths.indexOf("/api/orders"));
+        }
+
+        @Test
+        @DisplayName("no step arrives with an extraction the importer invented")
+        void correlationIsNeverGuessed() {
+            // The importer can see a response carried an identifier and a later request used one,
+            // but not that they are the same thing. A wrong guess produces a journey that looks
+            // wired up and sends the wrong value on every request after the first.
+            ImportResult result = importer.importFrom(CHECKOUT_SESSION);
+
+            assertThat(requests(result)).allSatisfy(step -> {
+                assertThat(step.extract()).isEmpty();
+                assertThat(step.expect()).isEmpty();
+            });
+            assertThat(codes(result)).contains("import.har.journeys.correlationNeeded");
+        }
+
+        @Test
+        @DisplayName("two pages become two journeys")
         void separatesJourneysByPage() {
             ImportResult result = importer.importFrom(captureWithPages(
                     """
@@ -538,8 +623,8 @@ class HarImporterTest {
                      "response":{"status":200,"content":{"mimeType":"application/json"}}}
                     """));
 
-            assertThat(names(result))
-                    .containsExactly("browse-api-catalogue", "checkout-api-basket");
+            assertThat(names(result)).containsExactly("browse", "checkout");
+            assertThat(requestNames(result)).containsExactly("api-catalogue", "api-basket");
         }
     }
 
@@ -576,8 +661,10 @@ class HarImporterTest {
             ImportResult result = importer.importFrom(
                     "{\"log\":{\"entries\":[" + entries + "]}}");
 
-            assertThat(result.scenarios()).hasSize(2);
-            assertThat(scenario(result, "rare").weight()).isGreaterThan(0);
+            // One capture with no pages is one journey, so the zero-weight guarantee is about
+            // journeys now. It still holds and still matters: a zero share means it never runs.
+            assertThat(result.scenarios()).isNotEmpty();
+            assertThat(result.scenarios()).allSatisfy(s -> assertThat(s.weight()).isGreaterThan(0));
             assertThat(result.scenarios().stream().mapToInt(ScenarioSpec::weight).sum())
                     .isEqualTo(100);
         }
@@ -596,7 +683,8 @@ class HarImporterTest {
                     """));
 
             // Both paths name the same resource; the identifier segment is not part of the name.
-            assertThat(names(result)).containsExactly("orders", "orders-2");
+            // Uniqueness is per journey now, and these are two steps of one.
+            assertThat(requestNames(result)).containsExactly("orders", "orders-2");
         }
 
         @Test
@@ -620,8 +708,9 @@ class HarImporterTest {
             ImportResult result = importer.importFrom(
                     "{\"log\":{\"entries\":[" + entries + "]}}");
 
-            assertThat(result.scenarios()).hasSize(HarImporter.MAX_SCENARIOS);
-            assertThat(names(result)).contains("hot");
+            // Truncation keeps the head in order rather than the most frequent: dropping requests
+            // out of the middle of a sequence leaves a journey that never happened.
+            assertThat(requests(result)).hasSize(HarImporter.MAX_SCENARIOS);
             assertThat(codes(result)).contains("import.har.entries.truncated");
         }
 
@@ -640,9 +729,9 @@ class HarImporterTest {
         @Test
         @DisplayName("a path is never a full URL, so a capture cannot name its own host")
         void neverProducesAnAbsolutePath() {
-            assertThat(importer.importFrom(CHECKOUT_SESSION).scenarios()).allSatisfy(scenario -> {
-                assertThat(scenario.path()).startsWith("/");
-                assertThat(scenario.path()).doesNotContain("://");
+            assertThat(requests(importer.importFrom(CHECKOUT_SESSION))).allSatisfy(step -> {
+                assertThat(step.path()).startsWith("/");
+                assertThat(step.path()).doesNotContain("://");
             });
         }
     }

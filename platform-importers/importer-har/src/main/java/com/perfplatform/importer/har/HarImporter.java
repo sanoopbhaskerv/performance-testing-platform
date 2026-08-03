@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.perfplatform.domain.importer.SourceImporter;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.SourceType;
 import com.perfplatform.domain.validation.SecretValueDetector;
 import com.perfplatform.domain.validation.SensitiveFieldDetector;
@@ -44,12 +45,26 @@ import java.util.Set;
  * scenarios are: CLAUDE.md §23 requires review before load execution, and a person can only review
  * what they have been told.
  *
- * <h2>What it cannot preserve, and says so</h2>
- * A journey is a sequence of correlated requests. A {@code ScenarioSpec} is one request, and the
- * platform's load model executes scenarios independently in weighted proportion. So a captured
- * journey becomes several scenarios sharing a name prefix, and a warning states plainly that their
- * order and their correlation are not preserved. Grouping them by name is the most this model can
- * carry today; pretending otherwise would describe a test that does not exist.
+ * <h2>A captured page becomes an ordered journey</h2>
+ * A browser records which page each request belonged to, which is the closest thing a capture has to
+ * a statement of intent. Each page group becomes one scenario whose {@code steps} are its requests
+ * <b>in the order they were made</b>. Until S3 a {@code ScenarioSpec} was a single request, so a
+ * journey could only survive as several scenarios sharing a name prefix, with a warning that their
+ * order was lost. It is not lost any more.
+ *
+ * <h2>What it still cannot do, and says so</h2>
+ * <b>Correlation is not inferred.</b> The importer can see that a response contained an identifier
+ * and that a later request used one, but not that they are the same thing — and guessing wrongly
+ * produces a journey that looks wired up and sends the wrong value. So a step that needs a value
+ * from an earlier response still needs an {@code extract} added, and a finding says so on every
+ * import that produced a multi-step journey.
+ *
+ * <h2>Repeats inside a journey are kept</h2>
+ * Sibling scenarios collapsed repeats of the same call and raised a weight instead, because the load
+ * model ran them independently and the ratio had to live somewhere. A sequence carries its own
+ * ratio: a journey that fetched the basket twice fetched it twice, and collapsing that would change
+ * what runs. Collapsing still applies <em>across</em> journeys, where two captures of the same page
+ * genuinely are the same journey observed twice.
  */
 public final class HarImporter implements SourceImporter {
 
@@ -170,6 +185,8 @@ public final class HarImporter implements SourceImporter {
         private int sessionHeaders;
         private int credentialQueryParameters;
         private int journeyCount;
+        private int multiStepJourneys;
+        private final Set<String> usedStepNames = new LinkedHashSet<>();
         private int truncated;
         private boolean sawBody;
         private boolean imported;
@@ -188,12 +205,17 @@ public final class HarImporter implements SourceImporter {
                 return List.of();
             }
 
-            List<Kept> kept = collapseRepeats(candidates);
+            // Deliberately NOT collapsed. Sibling scenarios collapsed repeats and raised a weight
+            // instead, because independent scenarios needed the ratio to live somewhere. A sequence
+            // carries its own: a journey that fetched the basket twice fetched it twice, and
+            // collapsing that would both change what runs and quietly halve the traffic the capture
+            // observed for it. The repeats stay, in the order they happened.
+            List<Kept> kept = candidates.stream().map(Kept::new).toList();
             kept = truncate(kept);
             journeyCount = (int) kept.stream()
                     .map(entry -> journeyOf(entry.request)).distinct().count();
 
-            return build(kept);
+            return buildJourneys(kept);
         }
 
         // ── Reading ──────────────────────────────────────────────────────
@@ -338,56 +360,126 @@ public final class HarImporter implements SourceImporter {
             return new ArrayList<>(bySignature.values());
         }
 
-        /** Keeps the most frequently observed requests, in capture order. */
+        /**
+         * Keeps the first requests, in capture order.
+         *
+         * <p>Was "keep the most frequently observed", which is right when scenarios run
+         * independently and wrong for a sequence: dropping requests out of the middle of a journey
+         * leaves one that never happened, and the steps around the gap may depend on what was
+         * removed. Truncating the tail leaves a shorter journey that is at least a real prefix of
+         * the session, and the finding says how much was lost.
+         */
         private List<Kept> truncate(List<Kept> kept) {
             if (kept.size() <= MAX_SCENARIOS) {
                 return kept;
             }
             truncated = kept.size() - MAX_SCENARIOS;
-
-            Set<Kept> survivors = new LinkedHashSet<>(kept.stream()
-                    .sorted(Comparator.comparingInt((Kept entry) -> entry.occurrences).reversed())
-                    .limit(MAX_SCENARIOS)
-                    .toList());
-            return kept.stream().filter(survivors::contains).toList();
+            return kept.subList(0, MAX_SCENARIOS);
         }
 
         // ── Building ─────────────────────────────────────────────────────
 
-        private List<ScenarioSpec> build(List<Kept> kept) {
-            int[] weights = distribute(kept.stream().mapToInt(entry -> entry.occurrences).toArray());
-
-            // Names are resolved first, once. A finding that addressed a scenario by a name the
-            // draft does not contain would be worse than one with no path at all.
-            List<String> names = kept.stream().map(entry -> nameFor(entry.request)).toList();
-
-            List<ScenarioSpec> scenarios = new ArrayList<>(kept.size());
-            for (int i = 0; i < kept.size(); i++) {
-                Kept entry = kept.get(i);
-                CapturedRequest request = entry.request;
-                String name = names.get(i);
-
-                scenarios.add(new ScenarioSpec(
-                        name,
-                        weights[i],
-                        null,
-                        request.method(),
-                        request.path(),
-                        sanitizeHeaders(request),
-                        sanitizeQuery(request),
-                        sanitizeBody(request, name)));
-
-                if (entry.queryVariants > 0) {
-                    findings.add(ValidationFinding.info("import.har.query.varied",
-                            "/scenarios/" + name,
-                            "'" + request.method() + " " + request.path() + "' was called with "
-                                    + (entry.queryVariants + 1) + " different sets of query "
-                                    + "parameters. The first was imported; vary the rest with a "
-                                    + "dataset if the difference matters."));
-                }
+        /**
+         * One scenario per captured page, whose steps are its requests in order.
+         *
+         * <p>Grouping is by the capture's own page reference, preserved in encounter order so the
+         * journeys read the way the session ran. A capture with no pages produces one journey, which
+         * is the honest reading: the tool recorded no boundaries, so inventing some from timing gaps
+         * would be a guess presented as structure.
+         */
+        private List<ScenarioSpec> buildJourneys(List<Kept> kept) {
+            Map<String, List<Kept>> byJourney = new LinkedHashMap<>();
+            for (Kept entry : kept) {
+                byJourney.computeIfAbsent(journeyOf(entry.request), key -> new ArrayList<>())
+                        .add(entry);
             }
+
+            // A journey's share of traffic is how often the journey ran, and a capture almost never
+            // says: one session usually visits each page once. So the observed per-request counts
+            // are NOT reused as journey weights — a page that happens to make twenty calls is a
+            // heavy page, not a popular one, and weighting it twenty times higher would describe
+            // traffic nobody observed. Equal shares, and a finding says why.
+            int[] weights = distribute(byJourney.values().stream().mapToInt(steps -> 1).toArray());
+
+            List<ScenarioSpec> scenarios = new ArrayList<>(byJourney.size());
+            int index = 0;
+            for (Map.Entry<String, List<Kept>> journey : byJourney.entrySet()) {
+                String name = journeyName(journey.getKey(), journey.getValue());
+                // Reset per journey: two journeys that both fetch the basket should both call that
+                // step 'basket'. A step name is what a reader matches against the request they
+                // remember making, and a global counter would turn the second one into 'basket-2'
+                // for no reason they can see.
+                usedStepNames.clear();
+                List<StepSpec> steps = new ArrayList<>(journey.getValue().size());
+
+                for (Kept entry : journey.getValue()) {
+                    CapturedRequest request = entry.request;
+                    String stepName = stepNameFor(request);
+                    steps.add(new StepSpec(
+                            stepName,
+                            request.method(),
+                            request.path(),
+                            sanitizeHeaders(request),
+                            sanitizeQuery(request),
+                            sanitizeBody(request, name + "/" + stepName),
+                            List.of(),
+                            List.of(),
+                            null));
+
+                    if (entry.queryVariants > 0) {
+                        findings.add(ValidationFinding.info("import.har.query.varied",
+                                "/scenarios/" + name + "/steps/" + stepName,
+                                "'" + request.method() + " " + request.path() + "' was called with "
+                                        + (entry.queryVariants + 1) + " different sets of query "
+                                        + "parameters. The first was imported; vary the rest with a "
+                                        + "dataset if the difference matters."));
+                    }
+                }
+
+                scenarios.add(new ScenarioSpec(name, weights[index++], null, null, null,
+                        Map.of(), Map.of(), null, steps));
+            }
+
             imported = true;
+            multiStepJourneys = (int) scenarios.stream()
+                    .filter(scenario -> scenario.steps().size() > 1).count();
             return scenarios;
+        }
+
+        /** A journey's name: the page it came from, or its first call when the capture named none. */
+        private String journeyName(String journey, List<Kept> steps) {
+            String base = journey.isEmpty()
+                    ? callName(steps.get(0).request)
+                    : journey;
+            if (base.isEmpty()) {
+                base = "journey";
+            }
+            String candidate = truncate(base, MAX_NAME_LENGTH);
+            for (int suffix = 2; !usedNames.add(candidate); suffix++) {
+                String tail = "-" + suffix;
+                candidate = truncate(base, MAX_NAME_LENGTH - tail.length()) + tail;
+            }
+            return candidate;
+        }
+
+        /**
+         * A step's name, unique within its journey.
+         *
+         * <p>Scoped per journey rather than globally: two journeys that both fetch the basket should
+         * both call that step {@code basket}, because the step name is what a reader matches against
+         * the request they remember making.
+         */
+        private String stepNameFor(CapturedRequest request) {
+            String base = callName(request);
+            if (base.isEmpty()) {
+                base = "request";
+            }
+            String candidate = truncate(base, MAX_NAME_LENGTH);
+            for (int suffix = 2; !usedStepNames.add(candidate); suffix++) {
+                String tail = "-" + suffix;
+                candidate = truncate(base, MAX_NAME_LENGTH - tail.length()) + tail;
+            }
+            return candidate;
         }
 
         /**
@@ -709,24 +801,39 @@ public final class HarImporter implements SourceImporter {
                                 + "target. Declare these under spec.authentication instead."));
             }
 
-            if (journeyCount > 0) {
-                findings.add(ValidationFinding.warning("import.har.journeys.notOrdered",
+            // Inverted at S3, in place. This used to warn that order was NOT preserved, because a
+            // scenario was a single request and a journey could only survive as a name prefix.
+            // Journeys are ordered steps now. What remains unpreserved is correlation, and that is
+            // what this says instead — the failure it prevents is a journey that looks wired up and
+            // sends a stale identifier on every request after the first.
+            if (multiStepJourneys > 0) {
+                findings.add(ValidationFinding.warning("import.har.journeys.correlationNeeded",
                         "/scenarios",
-                        journeyCount + " candidate journey(s) were identified from the capture's "
-                                + "pages, and scenarios are named after the journey they came from. "
-                                + "Their order and their correlation are NOT preserved: the "
-                                + "platform runs scenarios independently in weighted proportion, so "
-                                + "a request that needs an id from an earlier response will not "
-                                + "have one.",
-                        "Keep the requests that stand alone. For a genuine sequence, model the "
-                                + "steps that matter and supply their data from a dataset."));
+                        multiStepJourneys + " journey(s) were imported as ordered steps, so the "
+                                + "sequence the capture recorded is preserved. Their CORRELATION is "
+                                + "not: this importer can see that a response contained an "
+                                + "identifier and that a later request used one, but not that they "
+                                + "are the same thing, and guessing would wire the journey to the "
+                                + "wrong value.",
+                        "Review each journey and add an 'extract' to the step that produces a value "
+                                + "a later step needs. Without it the later step sends whatever the "
+                                + "capture happened to record, which was valid for one session and "
+                                + "will not be valid again."));
+            }
+            if (journeyCount > 0) {
+                findings.add(ValidationFinding.info("import.har.journeys.identified", "/scenarios",
+                        journeyCount + " journey(s) were identified from the capture's own pages. "
+                                + "Requests are grouped and ordered as the browser recorded them."));
             }
             if (imported) {
-                findings.add(ValidationFinding.info("import.har.weights.observed", "/scenarios",
-                        "Scenario weights come from how often each request was observed in the "
-                                + "capture — the one thing a recording knows that an API document "
-                                + "does not. It is still a single session, so it describes one "
-                                + "person's behaviour rather than production traffic."));
+                findings.add(ValidationFinding.info("import.har.weights.equal", "/scenarios",
+                        "Journeys are given equal shares of the traffic, and you should set them to "
+                                + "the mix you expect in production. A capture cannot say how often "
+                                + "each journey ran — one session usually visits each page once — "
+                                + "and a page that happens to make twenty calls is a heavy page, "
+                                + "not a popular one. How often each request WITHIN a journey was "
+                                + "made is preserved: the capture's repeats are kept as repeated "
+                                + "steps, which is the ratio the recording actually observed."));
             }
 
             if (assetsDropped > 0) {
@@ -740,13 +847,6 @@ public final class HarImporter implements SourceImporter {
                         failuresDropped + " request(s) did not succeed when they were captured and "
                                 + "were not imported. Replaying a known failure would add it to the "
                                 + "run's error rate and measure an error path."));
-            }
-            if (duplicatesCollapsed > 0) {
-                findings.add(ValidationFinding.info("import.har.duplicates.collapsed",
-                        "/log/entries",
-                        duplicatesCollapsed + " repeat(s) of calls already imported were collapsed. "
-                                + "Each repeat raised that scenario's weight rather than adding a "
-                                + "scenario."));
             }
             if (unreadable > 0) {
                 findings.add(ValidationFinding.info("import.har.entries.unreadable",

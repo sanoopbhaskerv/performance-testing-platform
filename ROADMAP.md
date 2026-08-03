@@ -129,11 +129,12 @@ Each is real, none blocks anything.
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
 - **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload
   belongs.
-- **Journeys cannot be built by clicking.** S3 made multi-step scenarios with correlation
-  expressible in YAML and over the API, but the studio has no Rules screen yet and its Sources/Refine
-  screens still produce single-request scenarios. Owned by the rest of S3.
-- **The HAR importer still emits sibling scenarios, not ordered steps**, so its
-  `import.har.journeys.notOrdered` warning still stands and must not be retired. Also the rest of S3.
+- **Journeys cannot be edited by clicking.** S3 made them expressible in YAML, over the API, and
+  importable from a HAR — but the studio has no Rules screen, so correlation must still be written by
+  hand. The remaining half of S3.
+- ~~**The HAR importer still emits sibling scenarios.**~~ **Done in S3** — a capture becomes one
+  journey per page with ordered steps, and the `notOrdered` warning was inverted into
+  `correlationNeeded`. `HANDOFF.md` §3q.
 - **The studio asks for the team name.** Nothing reports the caller's own team: `TeamDirectory` maps
   name to id and not back, and no endpoint exposes it. Owned by `PLAN.md` S5.
 - **The credential-name list is header-shaped.** `x-api-key` is refused as a query parameter but

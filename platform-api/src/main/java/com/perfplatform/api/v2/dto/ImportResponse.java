@@ -1,6 +1,7 @@
 package com.perfplatform.api.v2.dto;
 
 import com.perfplatform.domain.importer.SourceImporter.ImportResult;
+import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -48,6 +49,26 @@ public record ImportResponse(
             String path,
             Map<String, String> headers,
             Map<String, String> query,
+            RequestBodyResponse body,
+            /**
+             * The ordered requests, when this scenario is a journey; empty when it states one
+             * request directly.
+             *
+             * <p>Added with S3. Without it a journey would arrive at the studio as a scenario with
+             * no method and no path — which is how {@code operationId} nearly stopped at this
+             * boundary in 2c, and the same mistake would be harder to spot here because the
+             * scenario would still look like a valid object.
+             */
+            List<ImportedStep> steps) {
+    }
+
+    /** One request within an imported journey. */
+    public record ImportedStep(
+            String name,
+            String method,
+            String path,
+            Map<String, String> headers,
+            Map<String, String> query,
             RequestBodyResponse body) {
     }
 
@@ -71,14 +92,29 @@ public record ImportResponse(
                 scenario.name(),
                 scenario.weight(),
                 scenario.operationId(),
-                scenario.methodOrDefault(),
+                // A journey states no method of its own; reporting the GET default here would
+                // describe a request it does not make.
+                scenario.isJourney() ? null : scenario.methodOrDefault(),
                 scenario.path(),
                 scenario.headers(),
                 scenario.query(),
-                scenario.body() == null
-                        ? null
-                        : new RequestBodyResponse(
-                                scenario.body().contentTypeOrDefault(),
-                                scenario.body().content()));
+                bodyFrom(scenario.body()),
+                scenario.steps().stream().map(ImportResponse::stepFrom).toList());
+    }
+
+    private static ImportedStep stepFrom(PerformanceTestSpecification.StepSpec step) {
+        return new ImportedStep(
+                step.name(),
+                step.methodOrDefault(),
+                step.path(),
+                step.headers(),
+                step.query(),
+                bodyFrom(step.body()));
+    }
+
+    private static RequestBodyResponse bodyFrom(ScenarioSpec.RequestBody body) {
+        return body == null
+                ? null
+                : new RequestBodyResponse(body.contentTypeOrDefault(), body.content());
     }
 }

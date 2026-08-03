@@ -38,7 +38,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **931 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
+Expect **934 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
@@ -103,18 +103,19 @@ that exposes it. Nothing lands API-only.
   a browser against a running control plane.
 - **S2** (§3o) — the report opens with the answer in a sentence, every metric explains itself where
   it appears, and a running test shows where it is in its plan.
-- **S3, engine half** (§3p) — a test can sign in. Scenarios carry ordered steps, values are extracted
+- **S3, engine and importer** (§3p, §3q) — a test can sign in, and a HAR capture becomes an
+  ordered journey. A test can sign in. Scenarios carry ordered steps, values are extracted
   and carried forward, and a broken correlation fails loudly instead of reporting excellent latency.
   Proven with two real runs differing only by one JSON path.
 
-**931 Java tests, 130 UI tests.**
+**934 Java tests, 130 UI tests.**
 
-**Next: finish S3's surfaces**, then S4.
-1. **The HAR importer should emit ordered steps** rather than sibling scenarios, retiring its
-   `import.har.journeys.notOrdered` warning (invert the test in place, never delete it).
-2. **The studio needs a Rules screen** — correlation suggestions with evidence, verification and
-   think time. Journeys are expressible in YAML and over the API today, not yet by clicking.
-3. Then **S4, the Validator**: one iteration against the real target before a load slot is booked.
+**Next: the studio's Rules screen**, the last of S3, then S4.
+1. **The Rules screen** — correlation suggestions with evidence (which response a value came from,
+   which requests use it), accepted or rejected by a person and never applied silently. Plus
+   verification and think time. Journeys are importable and expressible today, not yet editable by
+   clicking. `PLAN.md` §7.
+2. Then **S4, the Validator**: one iteration against the real target before a load slot is booked.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
