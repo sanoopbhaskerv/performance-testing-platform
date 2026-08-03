@@ -63,7 +63,8 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | 2g — dataset binding and partitioning | **Complete** | see §3l |
 | 2h — dataset storage and delivery | **Complete** | see §3m |
 | **S1 — the studio: shell, sources, refine, load, objectives, review** | **Complete** | see §3n |
-| **S2–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S2 — the report a novice can read, and run progress** | **Complete** | see §3o |
+| **S3–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
@@ -1080,6 +1081,73 @@ number somebody invented and then trusts.
   report's novice rewrite.
 - **`web-experience` is choosable but not runnable.** The card, the steps and the browser-specific
   wording exist; the engine behind it is S6.
+
+---
+
+## 3o. S2 — the report a novice can read, and run progress
+
+**The report now opens with the answer, and a running test says how much longer.** Verified against a
+real JMeter run of 2,221 requests, not a fixture.
+
+### The answer, in a sentence
+
+> **This test did not pass: 2 of 2 targets were missed.**
+> Error rate · s2-report-check-load: 1.485% of 2221 requests failed, against a ceiling of 1%.
+> Response time · s2-report-check-load: p95 was 584ms against a ceiling of 400ms.
+> 2,221 requests were sent, reaching 5 users at once. 1.49% failed.
+> The slowest journey was s2-report-check-load/submit-payment, at 584 ms.
+
+Everything below it is unchanged — the expert report is still the one that settles arguments.
+`narrative.ts` is a pure function, so what it will say is testable without rendering anything, and
+the tests pin the property that matters: **it can never read as more reassuring than the data.** A
+synthetic run says so first and quotes no figure at all; an indeterminate verdict never becomes a
+pass; a run missing a shard says that before any verdict.
+
+### Two things a real run found that the tests did not
+
+1. **An error-rate breach would have read "1485.00% of requests failed".** `ObjectiveOutcome`'s
+   `observed` and `threshold` are **scaled per metric** — an error rate arrives in thousandths, so
+   1.485% is the number 1485 against 1000 for a 1% ceiling. Formatting them client-side meant
+   knowing each metric's scale and keeping that knowledge current as metrics are added. Fixed by
+   using the server's own `detail` string, which already words it correctly: the server computes the
+   verdict and the sentence explaining it in one place, so using both makes them impossible to
+   disagree.
+2. **Two different p95s appeared on one screen.** The summary quoted the whole-test aggregate
+   (533 ms) directly above an objective quoting 584 ms. Both are right — a workload-scoped objective
+   takes the **highest** percentile among its journeys, so a workload passes only if every journey
+   would have (`ObjectiveEvaluator.combine`, argued in its own javadoc) — but a reader who cannot
+   reconcile two numbers stops trusting both. The summary now omits its latency clause when an
+   objective already reports one. **Each number appears in exactly one place.**
+
+### Progress, without a runner change
+
+`progress.ts` derives where a run is from the plan's stage arithmetic and the recorded `startedAt` —
+data the platform already holds. Verified live mid-run: *"Holding steady — 5 users · about 20 seconds
+to go · 50 seconds elapsed of a planned 1 minute 10 seconds"*, `aria-valuenow="71"`, and
+`aria-valuetext` carrying the whole sentence rather than a bare percentage.
+
+**It stops claiming a percentage when the percentage stops meaning anything.** A plan knows its
+stages; it does not know about image pulls or a target that will not answer. Once a run outlasts its
+plan the bar holds and the label changes to *"Taking longer than planned"* — a progress bar that lies
+at the end is worse than none. Clock skew between the run's recorded start and the browser is floored
+at zero, so a negative-width bar is impossible.
+
+Live throughput, latency and error rate are a different thing and need a runner that publishes
+progress. That is **S7**, and it is the increment that changes the runner image.
+
+### Explanations where the numbers are
+
+Every column of the latency table carries what it means — "nineteen in twenty requests were faster
+than this" rather than "the 95th percentile", available on hover and to a screen reader. A glossary
+is a page nobody opens, and the moment somebody needs to know what a 95th percentile is, is the
+moment they are looking at one.
+
+### Not done
+
+- **No baseline comparison yet.** The report's structure is shaped to take one (S12).
+- **The Browser pane's screenshot capture stopped responding** during verification. Every claim above
+  is from reading the rendered DOM, which is stronger evidence anyway; there are no screenshots of
+  the final report.
 
 ---
 

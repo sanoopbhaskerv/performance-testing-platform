@@ -29,6 +29,7 @@ import { V2Client, describeError, isTerminal } from './api';
 import RunReport from './RunReport';
 import ImportPanel from './ImportPanel';
 import Studio from './studio/Studio';
+import RunProgressBar from './RunProgressBar';
 import { objectiveLabel } from './labels';
 import './console.css';
 
@@ -731,6 +732,11 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           </header>
 
           <p className="muted">{STATUS_COPY[selectedRun.status].hint}</p>
+
+          {/* Where a run is in its plan. Derived from the stage arithmetic and the recorded start,
+              so it costs no new measurement and no runner change — live throughput and latency are
+              S7, which does need one. */}
+          <RunProgressBar run={selectedRun} report={report} />
 
           {/* On the run as well as on its report. The report is what gets screenshotted, but this
               panel is where someone first looks at a result. */}

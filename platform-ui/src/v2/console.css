@@ -774,3 +774,105 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ── The answer, and progress ────────────────────────────────────────────
+ *
+ * Added with S2. Both exist for the reader who has not run a performance test before: one says what
+ * the result means, the other says how much longer to wait.
+ */
+
+.v2 .answer {
+  border-left: 3px solid var(--pf-border);
+  padding: var(--pf-space-4) 0 var(--pf-space-4) var(--pf-space-5);
+  margin-bottom: var(--pf-space-5);
+}
+
+.v2 .answer-good { border-left-color: var(--pf-verdict-pass-border); }
+.v2 .answer-bad { border-left-color: var(--pf-verdict-fail-border); }
+.v2 .answer-unknown { border-left-color: var(--pf-verdict-unknown-border); }
+
+/* The sentence someone reads first, so it is the largest text in the report. */
+.v2 .answer-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-3);
+  margin: 0;
+  font-size: 1rem;
+  font-weight: var(--pf-weight-strong);
+  line-height: 1.45;
+}
+
+.v2 .answer-detail {
+  margin: var(--pf-space-3) 0 0;
+  font-size: var(--pf-text-md);
+  line-height: 1.55;
+  opacity: var(--pf-text-muted-opacity);
+}
+
+/* A dotted underline marks a term that explains itself, which is the established convention for
+ * one — a plain header gives no hint that hovering would help. */
+.v2 .column-label {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  cursor: help;
+}
+
+.v2 .run-progress {
+  margin: var(--pf-space-5) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.v2 .run-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pf-space-4);
+  font-size: var(--pf-text-md);
+}
+
+.v2 .run-progress-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+  font-weight: var(--pf-weight-strong);
+}
+
+.v2 .run-progress-track {
+  height: 8px;
+  border-radius: var(--pf-radius-pill);
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border-subtle);
+  overflow: hidden;
+}
+
+.v2 .run-progress-fill {
+  height: 100%;
+  background: var(--pf-series-1);
+  transition: width 0.6s linear;
+}
+
+/* Past its planned finish the bar stops reading as progress and starts reading as a wait. */
+.v2 .run-progress-track.overrun .run-progress-fill {
+  background: var(--pf-status-wait-fg);
+}
+
+.v2 .run-progress-note {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+  line-height: 1.5;
+}
+
+/* Forced-colors mode replaces backgrounds, which would erase a bar drawn as a coloured block. */
+@media (forced-colors: active) {
+  .v2 .run-progress-fill {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}
+
+/* A bar that animates its width is motion. The number beside it carries the same information. */
+@media (prefers-reduced-motion: reduce) {
+  .v2 .run-progress-fill { transition: none; }
+}

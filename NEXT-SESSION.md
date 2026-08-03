@@ -99,9 +99,12 @@ that exposes it. Nothing lands API-only.
 source → review journeys → set load → set objectives → the platform validates live → Save. Verified
 end to end in a browser against a running control plane. **88 UI tests.**
 
-**The next increment is S2 — the report a novice can read**, plus the status page gaining elapsed
-time, current stage and a progress bar. No runner-image change: all of it is derivable from the
-plan's stage arithmetic and the shard's persisted `startedAt`. `PLAN.md` §11.
+**S2 is complete** (`HANDOFF.md` §3o). The report opens with the answer in a sentence, every metric
+explains itself where it appears, and a running test shows where it is in its plan. **130 UI tests.**
+
+**The next increment is S3 — journeys and rules: multi-step scenarios, correlation, verification and
+think time.** It is the largest single gap left: a journey is one request today, so nothing can sign
+in and carry a session forward. `PLAN.md` §11.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
