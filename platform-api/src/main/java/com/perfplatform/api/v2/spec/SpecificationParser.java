@@ -8,6 +8,7 @@ import com.perfplatform.domain.spec.HumanDuration;
 import com.perfplatform.domain.spec.LoadModelType;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.AuthenticationSpec;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.BrowserProfile;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.EnvironmentSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.GovernanceSpec;
@@ -220,7 +221,7 @@ public final class SpecificationParser {
     }
 
     private SourceSpec source(JsonNode node, String path, List<ValidationFinding> findings) {
-        rejectUnknownFields(node, path, Set.of("name", "type", "uri", "git"), findings);
+        rejectUnknownFields(node, path, Set.of("name", "type", "uri", "digest", "git"), findings);
 
         SourceSpec.GitSource git = null;
         JsonNode gitNode = node.get("git");
@@ -242,6 +243,7 @@ public final class SpecificationParser {
                 text(node, "name", path + "/name", findings),
                 enumValue(node, "type", path + "/type", SourceType::from, findings),
                 text(node, "uri", path + "/uri", findings),
+                text(node, "digest", path + "/digest", findings),
                 git);
     }
 
@@ -292,7 +294,7 @@ public final class SpecificationParser {
     private WorkloadSpec workload(JsonNode node, String path, List<ValidationFinding> findings) {
         rejectUnknownFields(node, path,
                 Set.of("name", "type", "engine", "sourceRef", "authRef", "model", "scenarios",
-                        "startWhen", "browserUsers", "iterationsPerUser"),
+                        "startWhen", "browserUsers", "iterationsPerUser", "browserProfile"),
                 findings);
 
         StartCondition startWhen = null;
@@ -319,7 +321,24 @@ public final class SpecificationParser {
                 each(node.get("scenarios"), path + "/scenarios", this::scenario, findings),
                 startWhen,
                 integer(node, "browserUsers", path + "/browserUsers", findings),
-                integer(node, "iterationsPerUser", path + "/iterationsPerUser", findings));
+                integer(node, "iterationsPerUser", path + "/iterationsPerUser", findings),
+                browserProfile(node.get("browserProfile"), path + "/browserProfile", findings));
+    }
+
+    private BrowserProfile browserProfile(JsonNode node, String path,
+            List<ValidationFinding> findings) {
+        if (isAbsent(node)) {
+            return null;
+        }
+        if (!node.isObject()) {
+            findings.add(typeError(path, "an object"));
+            return null;
+        }
+        rejectUnknownFields(node, path, Set.of("device", "network", "cpuThrottle"), findings);
+        return new BrowserProfile(
+                text(node, "device", path + "/device", findings),
+                text(node, "network", path + "/network", findings),
+                integer(node, "cpuThrottle", path + "/cpuThrottle", findings));
     }
 
     private LoadModel loadModel(JsonNode node, String path, List<ValidationFinding> findings) {
@@ -663,8 +682,8 @@ public final class SpecificationParser {
         } catch (IllegalArgumentException e) {
             findings.add(ValidationFinding.error("spec.parse.threshold.invalid", path,
                     e.getMessage(),
-                    "Always state the unit: 750ms, 8s or 1%. A unit-less threshold would have to "
-                            + "be guessed, which changes whether the test passes."));
+                    "Always state the unit: 750ms, 8s, 1%, or 0.1score. A unit-less threshold "
+                            + "would have to be guessed, which changes whether the test passes."));
             return null;
         }
     }

@@ -39,9 +39,10 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S6a
-focused verification is green, and `mvn test-compile` passes across all modules. A full API
-validation test still has the known unrelated manual-request fixture mismatch described below.
+The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S6
+focused verification is green, and `mvn test-compile` passes across all modules. A broad affected
+`mvn test` still hits sandbox environment limits: Mockito inline cannot self-attach to the Homebrew
+JDK 21 VM, and dry-run tests that start local sockets fail with `Socket Operation not permitted`.
 Docker must be running for the full suite because Testcontainers uses PostgreSQL and MinIO. If a
 PostgreSQL module fails wholesale with `An error occurred while setting up the SSL connection`, that
 is a known flaky start — retry once. **If any integration test reports `Skipped`, that is a false
@@ -120,12 +121,15 @@ that exposes it. Nothing lands API-only.
 - **S6a** (§3u) — production-readiness validation for broker-backed `run://session`: kind smoke
   procedure with a stub broker Service, mounted broker-client Secret, runner session Secret
   creation/cleanup checks and a failed-acquisition runbook.
+- **S6** (§3v) — browser-only Playwright execution behind the engine SPI, artifact-backed script
+  digests, browser profiles, Core Web Vitals objectives and explicit rejection of mixed-engine specs
+  until hybrid orchestration exists.
 
-**S4 baseline: 941 Java tests, 133 UI tests. S6a focused verification is green.**
+**S4 baseline: 941 Java tests, 133 UI tests. S6 focused verification is green.**
 
-**Next: S6, the browser engine and Core Web Vitals.** Add Playwright execution behind the existing
-SPI, store uploaded/pasted Playwright scripts immutably by content digest, run browser-only web
-performance tests in pinned Kubernetes runner Jobs, and surface Core Web Vitals in the studio/report.
+**Next: S7, live monitoring.** Add runner progress snapshots, merge them in the reconciler, and
+surface throughput, latency, errors, objective progress and shard heartbeat age in the Monitor
+screen.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -139,27 +143,22 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ **S5 added runtime
    credential references, `SecretResolver`, and broker-backed `run://session`.** Corporate identity
    and non-Kubernetes secret managers remain later pause-condition decisions.
-3. **A run has one plan with one engine** — `EngineDispatchingPlanCompiler.primaryEngine()` takes the
-   first workload's engine and silently ignores the rest, so the shipped `hybrid.yaml` would drop its
-   browser workload with no error. **S9.**
+3. **A run still has one plan with one engine.** S6 changed
+   `EngineDispatchingPlanCompiler.primaryEngine()` to reject mixed-engine and hybrid specs instead
+   of silently taking the first workload. Real coordinated hybrid execution remains **S9/S11**.
 
 ### The caveat to carry forward
 
-2h changed the runner image's entrypoint (it now fetches dataset partitions), and that change has
-**not been run on a cluster**. The local-JMeter path is verified with real load — including S3's
-journeys. Before trusting the Kubernetes path with a dataset, re-run
-`docs/operations/local-kubernetes-run.md`.
+2h changed the JMeter runner image's entrypoint (it now fetches dataset partitions), and that change
+has **not been run on a cluster**. S6 added a separate Playwright runner image contract, but did not
+build or run it on kind. The local-JMeter path is verified with real load — including S3's journeys.
+Before trusting either Kubernetes runner path, re-run `docs/operations/local-kubernetes-run.md`.
 
-Nothing since 2h has changed the runner image: S1–S6a are control-plane, UI, orchestration,
-manifest and documentation work. **S7** is still the next increment that changes the runner image for progress
-snapshots. Re-run the kind procedure then too.
+### Current environment caveat
 
-### Current test caveat
-
-The broad `SpecificationValidationServiceTest` class still has an unrelated manual-request fixture
-mismatch: it expects `/api/users` and `/api/payments`, while the current fixture contains
-`/api/students/1`. Full `mvn clean verify` fails there until that work is reconciled. S6a focused
-checks and `mvn test-compile` are green.
+A broad affected `mvn test` still fails in this sandbox for environment reasons: Mockito inline
+cannot self-attach to the Homebrew JDK 21 VM, and dry-run tests that bind local sockets hit
+`Socket Operation not permitted`. Focused S6 checks and `mvn test-compile` are green.
 
 ### Datasets, in one paragraph
 
@@ -171,14 +170,15 @@ refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
 
 ### What is already done — do not rebuild
 
-Increments 0 through 2h, then S1–S6a. The canonical specification, durable run orchestration, the
+Increments 0 through 2h, then S1–S6. The canonical specification, durable run orchestration, the
 JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact
 store, the runner image, report and artifact download, synthetic-run marking, **four source
 importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
 (shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
 progress**, **multi-step journeys with reviewed correlation rules**, **a live Validator before
 Save**, **S5 runtime credentials, broker-backed sessions and cleanup**, and **S6a broker-path
-production-readiness docs**. `HANDOFF.md` §3–§3u is the account of each.
+production-readiness docs**, plus **S6 browser-only Playwright/Core Web Vitals support**.
+`HANDOFF.md` §3–§3v is the account of each.
 
 ## 3. Rules that do not bend
 
@@ -206,7 +206,7 @@ production-readiness docs**. `HANDOFF.md` §3–§3u is the account of each.
 
   ```bash
   grep -ohE "9[0-9]{2} (Java )?tests|1[0-9]{2} UI tests" HANDOFF.md NEXT-SESSION.md ROADMAP.md PLAN.md | sort -u
-  grep -n "S6\|browser engine\|Core Web Vitals" HANDOFF.md PLAN.md       # the same thing is outstanding
+  grep -n "S7\|live monitoring" HANDOFF.md PLAN.md                       # the same next increment is outstanding
   grep -n "next" NEXT-SESSION.md ROADMAP.md | grep -i "increment\|S[0-9]"   # the same next move
   ```
 - Do not push, tag, merge or publish without explicit authorization.

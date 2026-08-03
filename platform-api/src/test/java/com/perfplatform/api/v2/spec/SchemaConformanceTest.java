@@ -173,8 +173,6 @@ class SchemaConformanceTest {
             new RequiredFieldSite("api-only.yaml", "/spec/workloads/0/scenarios/0",
                     "/$defs/scenario/required"),
             new RequiredFieldSite("api-only.yaml", "/spec/objectives/0", "/$defs/objective/required"),
-            new RequiredFieldSite("browser-only.yaml", "/spec/sources/0/git",
-                    "/$defs/source/properties/git/required"),
             new RequiredFieldSite("hybrid.yaml", "/spec/workloads/1/startWhen",
                     "/$defs/workload/properties/startWhen/required"));
 

@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 
 /**
  * A typed objective threshold parsed from its authored form: {@code 750ms}, {@code 8s},
- * {@code 1%}.
+ * {@code 1%}, {@code 0.1score}.
  *
  * <p>Objectives are the pass/fail contract of a performance test, so a threshold must never be
  * compared as text. Parsing it into a value and a unit at specification time means an unreadable
@@ -25,11 +25,13 @@ public record Threshold(BigDecimal value, Unit unit) {
         /** A latency or duration, normalized to milliseconds. */
         MILLISECONDS,
         /** A rate expressed as a percentage, such as an error-rate ceiling. */
-        PERCENT
+        PERCENT,
+        /** A unit interval score, normalized to milli-score so comparisons stay integral. */
+        SCORE
     }
 
     private static final Pattern PATTERN =
-            Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|s|%)$");
+            Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|s|%|score)$");
 
     public Threshold {
         if (value == null) {
@@ -43,6 +45,9 @@ public record Threshold(BigDecimal value, Unit unit) {
         }
         if (unit == Unit.PERCENT && value.compareTo(BigDecimal.valueOf(100)) > 0) {
             throw new IllegalArgumentException("A percentage threshold must not exceed 100");
+        }
+        if (unit == Unit.SCORE && value.compareTo(BigDecimal.valueOf(1000)) > 0) {
+            throw new IllegalArgumentException("A score threshold must not exceed 1");
         }
         value = value.stripTrailingZeros();
     }
@@ -61,8 +66,8 @@ public record Threshold(BigDecimal value, Unit unit) {
         Matcher matcher = PATTERN.matcher(text);
         if (!matcher.matches()) {
             throw new IllegalArgumentException(
-                    "Threshold '" + raw + "' must be a number followed by ms, s or % "
-                            + "(for example 750ms, 8s or 1%)");
+                    "Threshold '" + raw + "' must be a number followed by ms, s, %, or score "
+                            + "(for example 750ms, 8s, 1%, or 0.1score)");
         }
 
         BigDecimal amount = new BigDecimal(matcher.group(1));
@@ -70,17 +75,24 @@ public record Threshold(BigDecimal value, Unit unit) {
             case "ms" -> new Threshold(amount, Unit.MILLISECONDS);
             case "s" -> new Threshold(amount.multiply(BigDecimal.valueOf(1000)), Unit.MILLISECONDS);
             case "%" -> new Threshold(amount, Unit.PERCENT);
+            case "score" -> new Threshold(amount.multiply(BigDecimal.valueOf(1000)), Unit.SCORE);
             default -> throw new IllegalStateException("Unreachable unit: " + matcher.group(2));
         };
     }
 
-    /** Canonical text form. Milliseconds and percent render exactly, so digests are stable. */
+    /** Canonical text form. Values render exactly, so digests are stable. */
     public String canonicalForm() {
-        BigDecimal normalized = value.stripTrailingZeros();
+        BigDecimal normalized = unit == Unit.SCORE
+                ? value.divide(BigDecimal.valueOf(1000)).stripTrailingZeros()
+                : value.stripTrailingZeros();
         if (normalized.scale() < 0) {
             normalized = normalized.setScale(0, RoundingMode.UNNECESSARY);
         }
-        return normalized.toPlainString() + (unit == Unit.PERCENT ? "%" : "ms");
+        return normalized.toPlainString() + switch (unit) {
+            case PERCENT -> "%";
+            case SCORE -> "score";
+            case MILLISECONDS -> "ms";
+        };
     }
 
     @Override

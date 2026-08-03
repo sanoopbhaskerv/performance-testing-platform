@@ -95,7 +95,7 @@ class SpecificationValidationServiceTest {
             var scenarios = spec.spec().workloads().get(0).scenarios();
 
             assertThat(scenarios).extracting(s -> s.methodOrDefault() + " " + s.path())
-                    .containsExactly("GET /api/users", "POST /api/payments");
+                    .containsExactly("GET /api/students/1", "PUT /api/students/1");
             assertThat(scenarios).allMatch(s -> s.hasExplicitRequest());
         }
 
@@ -361,11 +361,8 @@ class SpecificationValidationServiceTest {
                         "sources": [{
                           "name": "proposal-browser",
                           "type": "playwright",
-                          "git": {
-                            "repository": "ssh://bitbucket/proposal-e2e.git",
-                            "ref": "8f121c7a9d4e2b6c1f0a3e5d7c9b8a4f6e2d1c0b",
-                            "path": "tests/performance/proposal-journey.spec.ts"
-                          }
+                          "uri": "artifact://playwright-sources/sha256-a9e8/proposal-journey.spec.ts",
+                          "digest": "sha256:a9e8d7c6b5a4938271605f4e3d2c1b0aa0b1c2d3e4f5061728394a5b6c7d8e9f"
                         }],
                         "workloads": [{
                           "name": "browser-experience",
@@ -373,13 +370,28 @@ class SpecificationValidationServiceTest {
                           "engine": "playwright",
                           "sourceRef": "proposal-browser",
                           "browserUsers": 5,
-                          "iterationsPerUser": 3
+                          "iterationsPerUser": 3,
+                          "browserProfile": {
+                            "device": "mobile",
+                            "network": "slow-4g",
+                            "cpuThrottle": 4
+                          }
                         }],
                         "objectives": [{
                           "metric": "browser.journey.duration",
                           "scope": "browser-experience",
                           "percentile": 95,
                           "threshold": "8s"
+                        }, {
+                          "metric": "web.lcp",
+                          "scope": "browser-experience",
+                          "percentile": 95,
+                          "threshold": "2500ms"
+                        }, {
+                          "metric": "web.cls",
+                          "scope": "browser-experience",
+                          "percentile": 95,
+                          "threshold": "0.1score"
                         }],
                         "governance": {
                           "maxDuration": "30m",

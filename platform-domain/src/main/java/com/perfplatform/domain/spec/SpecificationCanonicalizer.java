@@ -124,6 +124,7 @@ public final class SpecificationCanonicalizer {
             field(out, prefix + ".name", source.name());
             field(out, prefix + ".type", name(source.type()));
             field(out, prefix + ".uri", source.uri());
+            field(out, prefix + ".digest", source.digest());
             var git = source.git();
             if (git == null) {
                 field(out, prefix + ".git", null);
@@ -237,6 +238,15 @@ public final class SpecificationCanonicalizer {
 
             field(out, prefix + ".browserUsers", number(workload.browserUsers()));
             field(out, prefix + ".iterationsPerUser", number(workload.iterationsPerUser()));
+            var browserProfile = workload.browserProfile();
+            if (browserProfile == null) {
+                field(out, prefix + ".browserProfile", null);
+            } else {
+                field(out, prefix + ".browserProfile.device", browserProfile.device());
+                field(out, prefix + ".browserProfile.network", browserProfile.network());
+                field(out, prefix + ".browserProfile.cpuThrottle",
+                        number(browserProfile.cpuThrottle()));
+            }
         }
     }
 

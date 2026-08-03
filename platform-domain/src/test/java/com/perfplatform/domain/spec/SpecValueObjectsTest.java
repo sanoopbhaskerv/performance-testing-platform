@@ -106,6 +106,16 @@ class SpecValueObjectsTest {
         }
 
         @Test
+        @DisplayName("score thresholds normalize to milli-score")
+        void normalizesScores() {
+            Threshold threshold = Threshold.parse("0.1score");
+
+            assertThat(threshold.unit()).isEqualTo(Threshold.Unit.SCORE);
+            assertThat(threshold.value()).isEqualByComparingTo(BigDecimal.valueOf(100));
+            assertThat(threshold.canonicalForm()).isEqualTo("0.1score");
+        }
+
+        @Test
         @DisplayName("fractional values are supported")
         void supportsFractionalValues() {
             assertThat(Threshold.parse("0.5%").canonicalForm()).isEqualTo("0.5%");
@@ -130,6 +140,14 @@ class SpecValueObjectsTest {
             assertThatThrownBy(() -> Threshold.parse("150%"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("must not exceed 100");
+        }
+
+        @Test
+        @DisplayName("a score above one is rejected")
+        void rejectsImpossibleScore() {
+            assertThatThrownBy(() -> Threshold.parse("1.5score"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must not exceed 1");
         }
 
         @Test

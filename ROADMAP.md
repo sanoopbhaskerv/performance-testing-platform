@@ -17,11 +17,12 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S5 plus S6a** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S6** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
-> delivery and lifecycle cleanup, plus a kind-level broker smoke and failed-acquisition runbook.
-> `HANDOFF.md` §3n–§3u.
+> delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook, plus
+> browser-only Playwright execution behind the SPI and Core Web Vitals objective evaluation.
+> `HANDOFF.md` §3n–§3v.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -33,8 +34,8 @@ immutably per version, verified against the columns a test declares, sliced per 
 HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
-was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and five of those six plus the S6a
-readiness slice are built. Everything below is still an accurate inventory of what exists and what
+was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
+slice are built. Everything below is still an accurate inventory of what exists and what
 does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
@@ -69,7 +70,7 @@ Reordered by `PLAN.md`; kept here as the inventory. Correlation is done; the res
 
 | Item | Why it matters | Size |
 |---|---|---|
-| ~~**Dry-run preflight**~~ | **Done in S4** for protocol workloads. One iteration of each API journey runs against the resolved target before saving, so a wrong path or broken correlation fails in seconds instead of after a load run. Browser validation waits for S6. | — |
+| ~~**Dry-run preflight**~~ | **Done in S4** for protocol workloads. One iteration of each API journey runs against the resolved target before saving, so a wrong path or broken correlation fails in seconds instead of after a load run. Browser dry-run validation remains later work after the S6 browser execution foundation. | — |
 | **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. **`PLAN.md` S12**; S2 shaped the report to take one. | Medium |
 | ~~**Jenkins shared library**~~ | **Dropped.** CI triggering is not this organisation's practice; the V2 API remains available for whoever wants it. | — |
 | ~~**Manual correlation and extraction**~~ | **Done in `PLAN.md` S3** — scenarios carry ordered steps, values are extracted and carried forward, and a failed extraction fails the sample rather than reporting good latency. `HANDOFF.md` §3p. | — |
@@ -93,8 +94,8 @@ restricted runner image; normalise browser results into the same model as protoc
 coordinate a small browser cohort during JMeter steady state. Default browser concurrency 5, policy
 maximum 20 — **not** 1,000, and never equated with protocol virtual users.
 
-The engine SPI was built for this and has not been exercised by a second engine, so expect the first
-real test of whether the abstraction holds.
+The engine SPI is now exercised by JMeter and Playwright for browser-only runs. Coordinated hybrid
+execution still waits for the S9/S11 multi-plan work.
 
 ---
 
@@ -131,6 +132,9 @@ Each is real, none blocks anything.
   count rises is calibration (`docs/operations/runner-calibration.md`).
 - **The runner image's dataset fetch has not run on a cluster.** Added by 2h and verified only
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
+- **The Playwright runner image is scaffolded, not cluster-proven.** S6 added the pinned
+  Playwright/Lighthouse image and output contract, but the material script wrapper still needs a real
+  kind/EKS run before production trust.
 - **No console UI for datasets.** They are API-only; the studio's Sources step is where an upload
   belongs.
 - ~~**Journeys cannot be edited by clicking.**~~ **Done in S3** — the studio has a Rules screen that

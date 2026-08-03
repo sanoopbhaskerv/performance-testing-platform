@@ -11,7 +11,9 @@ import com.perfplatform.engine.spi.EnginePlan;
 import com.perfplatform.engine.spi.ExecutionEngineProvider;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Compiles a specification by handing it to the engine it names.
@@ -58,16 +60,26 @@ public final class EngineDispatchingPlanCompiler implements ExecutionPlanCompile
                 now);
     }
 
-    /** The engine of the first workload that declares one. */
+    /** The single engine this increment can compile; coordinated hybrid plans arrive later. */
     private static String primaryEngine(PerformanceTestSpecification specification) {
         if (specification.spec() == null) {
             throw new IllegalArgumentException("The specification has no body to compile");
         }
-        return specification.spec().workloads().stream()
+        Set<String> declared = specification.spec().workloads().stream()
                 .map(WorkloadSpec::engine)
                 .filter(engine -> engine != null && !engine.isBlank())
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "No workload declares an engine, so no runner image can be selected"));
+                .map(engine -> engine.trim().toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (declared.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "No workload declares an engine, so no runner image can be selected");
+        }
+        if (declared.size() > 1) {
+            throw new IllegalArgumentException(
+                    "This release compiles one engine per execution plan. Mixed-engine or hybrid "
+                            + "specifications declared " + declared
+                            + "; coordinated hybrid execution is deferred to S9.");
+        }
+        return declared.iterator().next();
     }
 }

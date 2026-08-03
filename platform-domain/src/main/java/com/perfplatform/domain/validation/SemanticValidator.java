@@ -49,6 +49,9 @@ public final class SemanticValidator {
     /** An immutable git ref: a full or abbreviated commit SHA, never a branch. */
     private static final Pattern COMMIT_SHA = Pattern.compile("^[0-9a-f]{7,40}$");
 
+    /** Content-addressed artifact digest for uploaded or pasted source material. */
+    private static final Pattern SHA256_DIGEST = Pattern.compile("^sha256:[0-9a-f]{64}$");
+
     private static final int MAX_NAME_LENGTH = 63;
 
     private SemanticValidator() {
@@ -185,12 +188,25 @@ public final class SemanticValidator {
     private static void validatePlaywrightSource(SourceSpec source, String path,
             List<ValidationFinding> findings) {
         var git = source.git();
-        if (git == null) {
-            findings.add(ValidationFinding.error("spec.source.git.missing", path + "/git",
-                    "A Playwright source requires git coordinates.",
-                    "Provide repository, ref and path."));
+        boolean hasArtifact = !isBlank(source.uri());
+        boolean hasGit = git != null;
+
+        if (!hasArtifact && !hasGit) {
+            findings.add(ValidationFinding.error("spec.source.playwright.material.missing", path,
+                    "A Playwright source requires either a stored artifact URI and digest, or git coordinates.",
+                    "For this release, upload or paste the reviewed script and reference its "
+                            + "artifact:// URI with a sha256 digest."));
             return;
         }
+
+        if (hasArtifact) {
+            validateSourceDigest(source.digest(), path + "/digest", findings);
+        }
+
+        if (!hasGit) {
+            return;
+        }
+
         if (isBlank(git.repository())) {
             findings.add(ValidationFinding.error("spec.source.git.repository.missing",
                     path + "/git/repository", "A repository is required.", null));
@@ -218,6 +234,22 @@ public final class SemanticValidator {
                     path + "/git/ref",
                     "Ref '" + git.ref() + "' is not an immutable commit SHA.",
                     "Pin to a commit SHA. A branch or tag can move after review."));
+        }
+    }
+
+    private static void validateSourceDigest(String digest, String path,
+            List<ValidationFinding> findings) {
+        if (isBlank(digest)) {
+            findings.add(ValidationFinding.error("spec.source.playwright.digest.missing", path,
+                    "A stored Playwright source requires a SHA-256 digest.",
+                    "Store the exact reviewed script as an immutable artifact and include "
+                            + "digest: sha256:<64 lowercase hex characters>."));
+            return;
+        }
+        if (!SHA256_DIGEST.matcher(digest.trim()).matches()) {
+            findings.add(ValidationFinding.error("spec.source.playwright.digest.invalid", path,
+                    "The Playwright source digest must be written as sha256:<64 lowercase hex characters>.",
+                    "Recompute the digest over the exact uploaded or pasted script content."));
         }
     }
 
@@ -526,6 +558,13 @@ public final class SemanticValidator {
                     path + "/browserUsers",
                     "browserUsers is ignored for a protocol workload.",
                     "Remove it, or change the workload type to browser."));
+        }
+
+        if (workload.browserProfile() != null) {
+            findings.add(ValidationFinding.warning("spec.workload.browserProfile.ignored",
+                    path + "/browserProfile",
+                    "browserProfile is ignored for a protocol workload.",
+                    "Move it to a browser workload, or remove it from this workload."));
         }
     }
 
@@ -1067,6 +1106,43 @@ public final class SemanticValidator {
             findings.add(ValidationFinding.warning("spec.workload.model.ignored", path + "/model",
                     "A staged load model is ignored for a browser workload.",
                     "Browser concurrency is set with browserUsers, not with load stages."));
+        }
+
+        validateBrowserProfile(workload, path, findings);
+    }
+
+    private static void validateBrowserProfile(WorkloadSpec workload, String path,
+            List<ValidationFinding> findings) {
+        var profile = workload.browserProfile();
+        if (profile == null) {
+            return;
+        }
+        if (isBlank(profile.device())) {
+            findings.add(ValidationFinding.error("spec.workload.browserProfile.device.missing",
+                    path + "/browserProfile/device",
+                    "A browser profile device must not be blank.",
+                    "Use mobile, desktop, or a named Playwright device profile."));
+        }
+        if (isBlank(profile.network())) {
+            findings.add(ValidationFinding.error("spec.workload.browserProfile.network.missing",
+                    path + "/browserProfile/network",
+                    "A browser profile network must not be blank.",
+                    "Use slow-4g, fast-4g, wifi, or none."));
+        } else {
+            String network = profile.network().trim();
+            if (!Set.of("slow-4g", "fast-4g", "wifi", "none").contains(network)) {
+                findings.add(ValidationFinding.error(
+                        "spec.workload.browserProfile.network.unsupported",
+                        path + "/browserProfile/network",
+                        "Browser network profile '" + profile.network() + "' is not supported.",
+                        "Supported profiles are slow-4g, fast-4g, wifi, and none."));
+            }
+        }
+        if (profile.cpuThrottle() != null && profile.cpuThrottle() <= 0) {
+            findings.add(ValidationFinding.error(
+                    "spec.workload.browserProfile.cpuThrottle.invalid",
+                    path + "/browserProfile/cpuThrottle",
+                    "cpuThrottle must be greater than zero.", null));
         }
     }
 

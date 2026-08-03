@@ -24,6 +24,7 @@ import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.DatasetSpec;
+import com.perfplatform.domain.spec.WorkloadType;
 import com.perfplatform.domain.target.TargetAddress;
 import com.perfplatform.engine.spi.ExecutionEngineProvider;
 import com.perfplatform.engine.spi.RenderedWorkload;
@@ -482,9 +483,13 @@ public final class RunWorkloadService {
             return List.of();
         }
         List<String> labels = new ArrayList<>();
-        specification.spec().workloads().forEach(workload ->
-                workload.scenarios().forEach(scenario ->
-                        labels.add(workload.name() + "/" + scenario.name())));
+        specification.spec().workloads().forEach(workload -> {
+            if (workload.type() == WorkloadType.BROWSER && workload.name() != null) {
+                labels.add(workload.name());
+            }
+            workload.scenarios().forEach(scenario ->
+                    labels.add(workload.name() + "/" + scenario.name()));
+        });
         return List.copyOf(labels);
     }
 

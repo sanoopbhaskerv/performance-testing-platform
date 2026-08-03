@@ -296,6 +296,30 @@ class SemanticValidatorTest {
         }
 
         @Test
+        @DisplayName("a Playwright source may be a stored artifact with a digest")
+        void acceptsPlaywrightArtifact() {
+            var source = new SourceSpec("browser", SourceType.PLAYWRIGHT,
+                    "artifact://playwright-sources/journey.spec.ts",
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    null);
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source))).codes())
+                    .doesNotContain("spec.source.playwright.material.missing",
+                            "spec.source.playwright.digest.missing",
+                            "spec.source.playwright.digest.invalid");
+        }
+
+        @Test
+        @DisplayName("a Playwright artifact without a digest is rejected")
+        void rejectsPlaywrightArtifactWithoutDigest() {
+            var source = new SourceSpec("browser", SourceType.PLAYWRIGHT,
+                    "artifact://playwright-sources/journey.spec.ts", null, null);
+
+            assertThat(SemanticValidator.validate(withSources(List.of(source))).codes())
+                    .contains("spec.source.playwright.digest.missing");
+        }
+
+        @Test
         @DisplayName("a path escaping the checked-out workspace is rejected")
         void rejectsPathTraversal() {
             var source = new SourceSpec("browser", SourceType.PLAYWRIGHT, null,

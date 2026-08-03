@@ -12,9 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S5 and S6a are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3u for what each delivered. S6, the browser engine and Core Web Vitals, is next; everything
-after it is still a plan.
+**Status: S1 through S6 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3v for what each delivered. S7, live monitoring, is next; everything after it is still a plan.
 
 ---
 
@@ -129,7 +128,7 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | **Validator / single-iteration dry run** | ✅ built in S4 — live protocol validation before Save |
 | **Arrival-rate load profile** | ❌ S8. Only staged concurrency today |
 | **Recorder** | ❌ S10. Release 1 ships guided capture wizards (§5) |
-| **Browser engine, Core Web Vitals** | ❌ S6 |
+| **Browser engine, Core Web Vitals** | ✅ built in S6 — `HANDOFF.md` §3v |
 
 The table above was the state when this plan was written. Most of the gaps are closed; what
 remains is marked with the increment that owns it.
@@ -144,11 +143,10 @@ Found by reading the code, not the docs:
 2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ S5 added runtime
    credential handling, `SecretResolver`, broker-backed `run://session`, mounted session partitions
    and production cleanup.
-3. **A run has one plan with one engine.**
+3. **A run still has one plan with one engine.**
    [`EngineDispatchingPlanCompiler.primaryEngine()`](platform-orchestration/src/main/java/com/perfplatform/orchestration/plan/EngineDispatchingPlanCompiler.java:62)
-   takes the first workload's engine and **silently ignores the rest**. Triggering the shipped
-   `hybrid.yaml` today compiles only JMeter and drops the browser workload with no error and no
-   finding.
+   now rejects mixed-engine and hybrid specifications at plan compile time instead of silently
+   taking the first workload. Real coordinated hybrid execution remains S9/S11.
 
 ---
 
@@ -727,7 +725,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 **The structural saving that makes this affordable:** a browser-only web performance test is **one
 workload, one engine, one plan**. It does not need S9's multi-plan refactor at all — only the hybrid
-does. So web performance costs S8 alone, not S7 + S8.
+does. So web performance costs S6 alone, not S7 + S8.
 
 | # | Increment | Studio surface | Size | Rel. 1 | State |
 |---|---|---|---|---|---|
@@ -737,8 +735,8 @@ does. So web performance costs S8 alone, not S7 + S8.
 | **S4** | The Validator | 8 Validate | Medium | ✅ | **done** — `HANDOFF.md` §3s |
 | **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | **done** — `HANDOFF.md` §3t |
 | **S6a** | Broker path production-readiness validation | Operations | Small | ✅ | **done** — `HANDOFF.md` §3u |
-| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | next |
-| **S7** | Live monitoring | 9 Monitor | Large | — | |
+| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | **done** — `HANDOFF.md` §3v |
+| **S7** | Live monitoring | 9 Monitor | Large | — | next |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |
 | **S9** | One run, many workloads | structural | Large | — | |
 | **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | |
@@ -811,7 +809,8 @@ failure.
 §8. One iteration, every request and response inspectable, no load slot consumed, subject to the
 target allowlist and per-team rate limiting.
 
-Built in S4 for protocol workloads. Browser validation waits for S6, when browser execution exists.
+Built in S4 for protocol workloads. Browser dry-run validation remains future work after the S6
+browser execution foundation.
 
 *Acceptance:* a journey with a wrong path, a broken correlation or a missing credential is caught in
 seconds, with the offending request named.
@@ -831,6 +830,11 @@ test that counts them. No credential value in any manifest, plan, artifact, even
 grep as `RunnerJobManifestTest` already does.
 
 ### S6 — the browser engine and Core Web Vitals
+
+Built in S6 for browser-only workloads: Playwright is registered behind the engine SPI, uploaded or
+pasted scripts are represented by immutable artifact digests, browser profiles are canonicalized,
+Core Web Vitals evaluate through the normal objective model, and mixed-engine specs are rejected
+explicitly until S9/S11.
 
 `PlaywrightEngineProvider` behind the existing SPI. Pinned `mcr.microsoft.com/playwright` runner
 image, non-root, all capabilities dropped, joining the `runnerImages` allowlist —

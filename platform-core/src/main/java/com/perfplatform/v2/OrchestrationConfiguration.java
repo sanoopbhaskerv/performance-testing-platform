@@ -34,6 +34,7 @@ import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import com.perfplatform.engine.jmeter.JmeterEngineProvider;
 import com.perfplatform.engine.jmeter.LocalJmeterExecutionProvider;
+import com.perfplatform.engine.playwright.PlaywrightEngineProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
@@ -173,6 +174,11 @@ public class OrchestrationConfiguration {
     @Bean
     public com.perfplatform.engine.spi.ExecutionEngineProvider jmeterEngineProvider() {
         return new JmeterEngineProvider();
+    }
+
+    @Bean
+    public com.perfplatform.engine.spi.ExecutionEngineProvider playwrightEngineProvider() {
+        return new PlaywrightEngineProvider();
     }
 
     /**

@@ -107,10 +107,18 @@ public record PerformanceTestSpecification(
     /**
      * Imported material a workload compiles from.
      *
-     * @param uri a stored artifact reference for document sources; null for git-backed sources
-     * @param git repository coordinates for a Playwright source; null otherwise
+     * @param uri a stored artifact reference for document sources, including uploaded/pasted
+     *            Playwright scripts
+     * @param digest SHA-256 digest of uploaded/pasted Playwright source content; null for sources
+     *               whose immutability is carried by another coordinate such as a git commit
+     * @param git repository coordinates for a future Playwright source mode; null otherwise
      */
-    public record SourceSpec(String name, SourceType type, String uri, GitSource git) {
+    public record SourceSpec(String name, SourceType type, String uri, String digest, GitSource git) {
+
+        /** The shape that predates content-addressed Playwright script artifacts. */
+        public SourceSpec(String name, SourceType type, String uri, GitSource git) {
+            this(name, type, uri, null, git);
+        }
 
         /**
          * @param ref an immutable commit SHA. A moving branch is rejected for an approved
@@ -191,7 +199,8 @@ public record PerformanceTestSpecification(
             List<ScenarioSpec> scenarios,
             StartCondition startWhen,
             Integer browserUsers,
-            Integer iterationsPerUser) {
+            Integer iterationsPerUser,
+            BrowserProfile browserProfile) {
 
         public WorkloadSpec {
             scenarios = immutable(scenarios);
@@ -228,10 +237,45 @@ public record PerformanceTestSpecification(
 
         /** The shape that predates workload-level authentication. */
         public WorkloadSpec(String name, WorkloadType type, String engine, String sourceRef,
+                String authRef,
+                LoadModel model, List<ScenarioSpec> scenarios, StartCondition startWhen,
+                Integer browserUsers, Integer iterationsPerUser) {
+            this(name, type, engine, sourceRef, authRef, model, scenarios, startWhen,
+                    browserUsers, iterationsPerUser, null);
+        }
+
+        /** The shape that predates workload-level authentication and browser profiles. */
+        public WorkloadSpec(String name, WorkloadType type, String engine, String sourceRef,
                 LoadModel model, List<ScenarioSpec> scenarios, StartCondition startWhen,
                 Integer browserUsers, Integer iterationsPerUser) {
             this(name, type, engine, sourceRef, null, model, scenarios, startWhen,
-                    browserUsers, iterationsPerUser);
+                    browserUsers, iterationsPerUser, null);
+        }
+    }
+
+    /**
+     * Browser measurement conditions.
+     *
+     * <p>A web vital has no meaning without its device, network and CPU profile. A run on a
+     * throttled mobile profile and a run on an unthrottled desktop profile must not be compared as
+     * if they measured the same experience.
+     *
+     * @param device mobile, desktop or a named Playwright device
+     * @param network slow-4g, fast-4g, wifi or none
+     * @param cpuThrottle CPU throttle multiplier; null means the engine default
+     */
+    public record BrowserProfile(String device, String network, Integer cpuThrottle) {
+
+        public String deviceOrDefault() {
+            return device == null || device.isBlank() ? "mobile" : device.trim();
+        }
+
+        public String networkOrDefault() {
+            return network == null || network.isBlank() ? "slow-4g" : network.trim();
+        }
+
+        public int cpuThrottleOrDefault() {
+            return cpuThrottle == null ? 4 : cpuThrottle;
         }
     }
 

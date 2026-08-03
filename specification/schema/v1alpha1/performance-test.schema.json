@@ -50,13 +50,14 @@
     },
     "threshold": {
       "type": "string",
-      "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(ms|s|%)$",
+      "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(ms|s|%|score)$",
       "description": "An objective threshold with an explicit unit. A unit-less value is rejected rather than assumed, because a mis-scaled threshold silently changes a test's pass/fail outcome.",
       "examples": [
         "750ms",
         "8s",
         "1%",
-        "0.5%"
+        "0.5%",
+        "0.1score"
       ]
     },
     "secretRef": {
@@ -199,7 +200,12 @@
         },
         "uri": {
           "type": "string",
-          "description": "Stored artifact reference for document sources, e.g. artifact://proposal/openapi.yaml."
+          "description": "Stored artifact reference for document sources, including reviewed Playwright scripts."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of uploaded or pasted Playwright script content. Required with artifact-backed Playwright sources so the reviewed source is immutable."
         },
         "git": {
           "type": "object",
@@ -244,8 +250,18 @@
             ]
           },
           "then": {
-            "required": [
-              "git"
+            "anyOf": [
+              {
+                "required": [
+                  "git"
+                ]
+              },
+              {
+                "required": [
+                  "uri",
+                  "digest"
+                ]
+              }
             ]
           }
         },
@@ -422,6 +438,31 @@
         "iterationsPerUser": {
           "type": "integer",
           "minimum": 1
+        },
+        "browserProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Browser measurement profile. Web-vital objectives are only comparable when device, network and CPU throttling are stable.",
+          "properties": {
+            "device": {
+              "type": "string",
+              "minLength": 1,
+              "description": "mobile, desktop or a named Playwright device."
+            },
+            "network": {
+              "type": "string",
+              "enum": [
+                "slow-4g",
+                "fast-4g",
+                "wifi",
+                "none"
+              ]
+            },
+            "cpuThrottle": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       },
       "allOf": [
@@ -619,7 +660,16 @@
           "examples": [
             "http.response.time",
             "http.error.rate",
-            "browser.journey.duration"
+            "http.throughput",
+            "browser.journey.duration",
+            "browser.step.duration",
+            "browser.error.rate",
+            "web.lcp",
+            "web.inp",
+            "web.cls",
+            "web.ttfb",
+            "web.tbt",
+            "web.lighthouse.score"
           ]
         },
         "scope": {

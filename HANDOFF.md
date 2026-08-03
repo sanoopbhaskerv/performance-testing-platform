@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S6a. Increments 0–2h, S1–S5 and S6a are complete.
+**Last updated:** Studio increment S6. Increments 0–2h and S1–S6 are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -17,12 +17,14 @@ Twelve increments, S1–S12, each shipping a backend capability *and* its studio
 S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what happens next**;
 `ROADMAP.md` remains the inventory of what exists.
 
-**S1 through S5 and S6a are built** (§3n–§3u). A test can be described by clicking, its report opens with
+**S1 through S6 are built** (§3n–§3v). A test can be described by clicking, its report opens with
 the answer in a sentence, a running test shows where it is in its plan, a journey can sign in, carry
 a session forward, review correlation rules before they are applied, validate one live protocol
 iteration before save, and production session acquisition now has secure `run://session` delivery,
 lifecycle cleanup, a broker provider seam, run-facing operator docs and a kind-level broker smoke
-procedure.
+procedure. Browser-only Playwright workloads now compile through the engine SPI, carry immutable
+script digests and browser profiles, and evaluate Core Web Vitals in the same objective model as
+protocol results.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
@@ -42,7 +44,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S6, the browser engine and Core Web Vitals**.
+`NEXT-SESSION.md` §2 has the immediate task: **S7, live monitoring**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -80,7 +82,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S4 — the Validator** | **Complete** | see §3s |
 | **S5 — Targets, credentials and sessions** | **Complete** | see §3t |
 | **S6a — broker path production-readiness validation** | **Complete** | see §3u |
-| **S6 — the browser engine and Core Web Vitals** | **Next** | [`PLAN.md`](PLAN.md) §11 |
+| **S6 — the browser engine and Core Web Vitals** | **Complete** | see §3v |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
@@ -88,10 +90,10 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h,
 931 at S3 engine, 936 after S3 Rules, 941 after S4 Validator).
 
-S6a focused verification is green: `mvn test-compile`, focused broker/orchestration tests, focused
-Kubernetes provider/Secret lifecycle tests, focused `ProductionSafetyGuardTest`, and Helm rendering
-of both the production broker overlay and the kind smoke values. Full `SpecificationValidationServiceTest`
-still hits the known unrelated manual-request fixture mismatch described below.
+S6 focused verification is green: `mvn test-compile`, focused browser-engine/domain/results/
+orchestration/core tests, focused parser/schema tests, and the UI test suite. A broad affected
+`mvn test` still hits environment limits in this sandbox: Mockito inline cannot self-attach to the
+Homebrew JDK 21 VM, and dry-run socket tests cannot bind.
 
 **133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
@@ -109,8 +111,7 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S6, the browser engine and Core Web Vitals.** `NEXT-SESSION.md` §2 has the
-detail.
+**Immediate next action: S7, live monitoring.** `NEXT-SESSION.md` §2 has the detail.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -120,10 +121,10 @@ detail.
    added runtime credential handling, `SecretResolver`, broker-backed `run://session`, mounted
    session partitions and production cleanup.** Real enterprise identity and non-Kubernetes secret
    managers remain later pause-condition decisions.
-3. **A run has one plan with one engine.** `EngineDispatchingPlanCompiler.primaryEngine()` takes the
-   first workload that declares an engine and **silently ignores the rest** — so triggering the
-   shipped `specification/examples/valid/hybrid.yaml` compiles only JMeter and drops the browser
-   workload with no error and no finding. **S9.**
+3. **A run still has one plan with one engine.** S6 changed
+   `EngineDispatchingPlanCompiler.primaryEngine()` to refuse mixed-engine and hybrid specifications
+   at plan compile time instead of silently taking the first workload. Real coordinated hybrid
+   execution remains **S9/S11**.
 
 ---
 
@@ -1104,8 +1105,8 @@ number somebody invented and then trusts.
   sessions; this now belongs with the later identity/V1-removal audit.
 - **The status page is unchanged.** Elapsed, current stage and a progress bar are S2, along with the
   report's novice rewrite.
-- **`web-experience` is choosable but not runnable.** The card, the steps and the browser-specific
-  wording exist; the engine behind it is S6.
+- **`web-experience` was choosable but not runnable in S1.** S6 added the browser-only Playwright
+  engine foundation and Core Web Vitals objective support.
 
 ---
 
@@ -1459,11 +1460,9 @@ run-facing operational documentation.
 
 ### Deliberately left for S6 and later
 
-- Browser execution, browser validation and Core Web Vitals are S6.
+- Browser execution and Core Web Vitals were picked up in S6. Browser dry-run validation remains
+  future work.
 - Corporate OIDC and non-Kubernetes secret managers remain pause-condition decisions.
-- The full `SpecificationValidationServiceTest` class still fails on the unrelated manual-request
-  fixture mismatch: it expects `/api/users` and `/api/payments`, while the current demo fixture has
-  `/api/students/1`.
 - A production broker and real broker client Secret were not deployed; S5 proves the adapter
   contract, mounted reference path and Helm wiring.
 
@@ -1472,7 +1471,7 @@ run-facing operational documentation.
 ## 3u. S6a — broker path production-readiness validation
 
 **S6a is complete as a production-readiness validation slice for broker-backed `run://session`.**
-It does not implement the browser engine; it closes the operational validation gap before S6 starts.
+It did not implement the browser engine; it closed the operational validation gap before S6.
 
 ### What shipped
 
@@ -1519,10 +1518,60 @@ It does not implement the browser engine; it closes the operational validation g
   operator-level procedure documented in `docs/operations/local-kubernetes-run.md` and
   `docs/operations/kind-session-broker-smoke.md`.
 
-### Deliberately left for S6
+### Closed by S6
 
-- Browser execution, browser validation and Core Web Vitals remain S6.
+- Browser execution and Core Web Vitals were picked up in §3v.
 - No real enterprise broker, real broker client credential or production target was introduced.
+
+---
+
+## 3v. S6 — browser engine and Core Web Vitals
+
+**S6 is complete for browser-only Playwright execution behind the engine SPI and Core Web Vitals
+objective evaluation.** It keeps release 1 to one workload, one engine and one plan; mixed-engine
+hybrid execution is now rejected explicitly until the S9/S11 multi-plan work.
+
+### What shipped
+
+- `engines/engine-playwright` adds `PlaywrightEngineProvider` with the pinned
+  `mcr.microsoft.com/playwright:v1.50.0-noble` runner image, browser capabilities, browser-user
+  policy validation, deterministic plan compilation and runner shard rendering.
+- `PlaywrightResultParser` normalizes journey duration, step duration, error rows and web-vital
+  samples from the runner CSV contract into `NormalizedRunResult`.
+- `SourceSpec` now carries an optional immutable `sha256:` digest, and Playwright sources may be
+  artifact-backed by `uri` plus digest instead of git coordinates. Git-pinned import stays S10.
+- Browser workloads now carry `browserProfile` (`device`, `network`, `cpuThrottle`), canonicalized
+  into the specification digest and validated semantically.
+- `ObjectiveEvaluator`, schema examples and UI labels now understand browser journey/step metrics,
+  `browser.error.rate`, `web.lcp`, `web.inp`, `web.cls`, `web.ttfb`, `web.tbt` and
+  `web.lighthouse.score`. Score thresholds use the explicit `score` unit.
+- `EngineDispatchingPlanCompiler` now refuses mixed-engine or hybrid specifications instead of
+  silently compiling only the first engine.
+- `runner-images/playwright-runner` defines the pinned Playwright/Lighthouse runner image and output
+  contract. It emits `results.csv`, `runner-manifest.json` and a summary artifact shape; the material
+  script execution wrapper still needs cluster calibration before production use.
+
+### Verification
+
+- `JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home mvn -B -pl platform-domain,platform-engine-spi,engines/engine-playwright,platform-results,platform-orchestration,platform-api,platform-core -am test-compile` — passed.
+- `mvn -B -pl platform-api -am -Dtest=SpecificationValidationServiceTest,SchemaConformanceTest -Dsurefire.failIfNoSpecifiedTests=false test` — passed, 79 parser/schema tests.
+- `mvn -B -pl platform-domain,engines/engine-playwright,platform-results,platform-orchestration,platform-core -am -Dtest=SpecValueObjectsTest,SemanticValidatorTest,PlaywrightEngineProviderTest,RunAnalysisTest,EngineDispatchingPlanCompilerTest,ModuleDependencyRulesTest,ModuleWiringTest -Dsurefire.failIfNoSpecifiedTests=false test` — passed.
+- `yarn test` in `platform-ui` — passed, 133 tests.
+
+### Not run
+
+- A broad affected `mvn test` was attempted and reached known environment limits in this sandbox:
+  Mockito inline cannot self-attach to the Homebrew JDK 21 VM, and dry-run tests that start local
+  sockets fail with `Socket Operation not permitted`.
+- The Playwright runner image was not built, loaded into kind or run against a live browser target in
+  this session.
+
+### Deliberately left for S7 and later
+
+- Live progress snapshots from runners are S7.
+- Arrival-rate sizing is S8.
+- Multi-plan hybrid orchestration is S9/S11.
+- Git-pinned Playwright import and the recorder remain S10.
 
 ---
 
@@ -1604,9 +1653,9 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: S6, the browser engine and Core Web Vitals.** Add Playwright execution behind the existing
-SPI, store uploaded/pasted Playwright scripts immutably by content digest, run browser-only web
-performance tests in pinned Kubernetes runner Jobs and surface Core Web Vitals in the studio/report.
+**Next: S7, live monitoring.** Add runner progress snapshots, merge them in the reconciler and
+surface throughput, latency, errors, objective progress and shard heartbeat age in the Monitor
+screen.
 
 Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
 `docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static
@@ -1614,8 +1663,9 @@ pieces render, but the full kind cluster run was not executed in S6a.
 
 Already done, so **do not** repeat from earlier plans: the report endpoint, artifact download with
 per-request authorization and digest verification, persisted run metrics, the Kubernetes provider,
-the S3 artifact store, importers, datasets, the studio screens through S5, broker-backed
-`run://session` delivery and S6a's production-readiness runbook.
+the S3 artifact store, importers, datasets, the studio screens through S6, broker-backed
+`run://session` delivery, S6a's production-readiness runbook and browser-only Playwright/Core Web
+Vitals support.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.

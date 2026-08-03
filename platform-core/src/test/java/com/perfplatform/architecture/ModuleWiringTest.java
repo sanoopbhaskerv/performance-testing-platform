@@ -2,6 +2,7 @@ package com.perfplatform.architecture;
 
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.engine.jmeter.JmeterEngineProvider;
+import com.perfplatform.engine.playwright.PlaywrightEngineProvider;
 import com.perfplatform.engine.spi.ExecutionEngineProvider;
 import com.perfplatform.engine.spi.WorkloadKind;
 import com.perfplatform.results.metrics.PercentileCalculator;
@@ -37,12 +38,15 @@ class ModuleWiringTest {
     }
 
     @Test
-    @DisplayName("an engine is usable through the SPI without referencing its concrete type")
-    void engineIsReachableThroughTheSpi() {
-        ExecutionEngineProvider provider = new JmeterEngineProvider();
+    @DisplayName("engines are usable through the SPI without referencing their concrete types downstream")
+    void enginesAreReachableThroughTheSpi() {
+        ExecutionEngineProvider jmeter = new JmeterEngineProvider();
+        ExecutionEngineProvider playwright = new PlaywrightEngineProvider();
 
-        assertThat(provider.engineId()).isEqualTo("jmeter");
-        assertThat(provider.capabilities().supports(WorkloadKind.PROTOCOL)).isTrue();
+        assertThat(jmeter.engineId()).isEqualTo("jmeter");
+        assertThat(jmeter.capabilities().supports(WorkloadKind.PROTOCOL)).isTrue();
+        assertThat(playwright.engineId()).isEqualTo("playwright");
+        assertThat(playwright.capabilities().supports(WorkloadKind.BROWSER)).isTrue();
     }
 
     @Test

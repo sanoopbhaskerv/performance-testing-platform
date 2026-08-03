@@ -41,6 +41,15 @@ public final class ObjectiveEvaluator {
     public static final String RESPONSE_TIME = "http.response.time";
     public static final String ERROR_RATE = "http.error.rate";
     public static final String THROUGHPUT = "http.throughput";
+    public static final String BROWSER_JOURNEY_DURATION = "browser.journey.duration";
+    public static final String BROWSER_STEP_DURATION = "browser.step.duration";
+    public static final String BROWSER_ERROR_RATE = "browser.error.rate";
+    public static final String WEB_LCP = "web.lcp";
+    public static final String WEB_INP = "web.inp";
+    public static final String WEB_CLS = "web.cls";
+    public static final String WEB_TTFB = "web.ttfb";
+    public static final String WEB_TBT = "web.tbt";
+    public static final String WEB_LIGHTHOUSE_SCORE = "web.lighthouse.score";
 
     private ObjectiveEvaluator() {
     }
@@ -88,18 +97,23 @@ public final class ObjectiveEvaluator {
                             + "describes, so this objective cannot be judged.");
         }
 
-        Optional<OperationMetrics> metrics = scopeMetrics(result, scope);
+        Optional<OperationMetrics> metrics = scopeMetrics(result, objective.metric(), scope);
         if (metrics.isEmpty() || !metrics.get().hasSamples()) {
             return indeterminate(objectiveId, objective.metric(), scope, thresholdValue,
                     "No samples were recorded for '" + scope + "', so there is nothing to judge.");
         }
 
         return switch (objective.metric()) {
-            case RESPONSE_TIME -> evaluateResponseTime(
-                    objectiveId, objective, scope, metrics.get(), thresholdValue);
-            case ERROR_RATE -> evaluateErrorRate(
+            case RESPONSE_TIME, BROWSER_JOURNEY_DURATION, BROWSER_STEP_DURATION,
+                    WEB_LCP, WEB_INP, WEB_TTFB, WEB_TBT -> evaluateCeiling(
+                            objectiveId, objective, scope, metrics.get(), thresholdValue, "ms");
+            case WEB_CLS -> evaluateCeiling(
+                    objectiveId, objective, scope, metrics.get(), thresholdValue, "score");
+            case ERROR_RATE, BROWSER_ERROR_RATE -> evaluateErrorRate(
                     objectiveId, objective, scope, metrics.get(), threshold);
             case THROUGHPUT -> evaluateThroughput(
+                    objectiveId, objective, scope, metrics.get(), thresholdValue);
+            case WEB_LIGHTHOUSE_SCORE -> evaluateScoreFloor(
                     objectiveId, objective, scope, metrics.get(), thresholdValue);
             default -> indeterminate(objectiveId, objective.metric(), scope, thresholdValue,
                     "Metric '" + objective.metric() + "' is not evaluated by this release. "
@@ -108,18 +122,18 @@ public final class ObjectiveEvaluator {
     }
 
     /** A latency ceiling: the measured percentile must not exceed the threshold. */
-    private static ObjectiveOutcome evaluateResponseTime(String objectiveId, ObjectiveSpec objective,
-            String scope, OperationMetrics metrics, long thresholdMillis) {
+    private static ObjectiveOutcome evaluateCeiling(String objectiveId, ObjectiveSpec objective,
+            String scope, OperationMetrics metrics, long thresholdValue, String unit) {
 
         int percentile = objective.percentile() == null ? 95 : objective.percentile();
         long observed = percentileOf(metrics, percentile);
 
-        boolean met = observed <= thresholdMillis;
+        boolean met = observed <= thresholdValue;
         return new ObjectiveOutcome(objectiveId, objective.metric(), scope,
                 met ? Verdict.PASS : Verdict.BREACH,
-                observed, thresholdMillis,
-                "p" + percentile + " was " + observed + "ms against a ceiling of "
-                        + thresholdMillis + "ms.");
+                observed, thresholdValue,
+                "p" + percentile + " was " + displayValue(observed, unit)
+                        + " against a ceiling of " + displayValue(thresholdValue, unit) + ".");
     }
 
     /**
@@ -159,6 +173,20 @@ public final class ObjectiveEvaluator {
                         + thresholdValue + ".");
     }
 
+    /** A browser-quality score floor: higher is better. */
+    private static ObjectiveOutcome evaluateScoreFloor(String objectiveId, ObjectiveSpec objective,
+            String scope, OperationMetrics metrics, long thresholdValue) {
+
+        int percentile = objective.percentile() == null ? 50 : objective.percentile();
+        long observed = percentileOf(metrics, percentile);
+        boolean met = observed >= thresholdValue;
+        return new ObjectiveOutcome(objectiveId, objective.metric(), scope,
+                met ? Verdict.PASS : Verdict.BREACH,
+                observed, thresholdValue,
+                "p" + percentile + " score was " + observed + "% against a floor of "
+                        + thresholdValue + "%.");
+    }
+
     /**
      * The measurements an objective's scope refers to.
      *
@@ -171,7 +199,12 @@ public final class ObjectiveEvaluator {
      * indeterminate. It is not quietly widened to the whole run: a mistyped scope would then be
      * judged against traffic it was never written about, and would pass or fail for the wrong reason.
      */
-    private static Optional<OperationMetrics> scopeMetrics(NormalizedRunResult result, String scope) {
+    private static Optional<OperationMetrics> scopeMetrics(NormalizedRunResult result,
+            String metric, String scope) {
+        if (isWebVitalMetric(metric)) {
+            return metricScopedMetrics(result, metric, scope);
+        }
+
         if (OperationMetrics.ALL.equals(scope)) {
             return Optional.of(result.overall());
         }
@@ -189,6 +222,44 @@ public final class ObjectiveEvaluator {
         return withinWorkload.isEmpty()
                 ? Optional.empty()
                 : Optional.of(combine(scope, withinWorkload));
+    }
+
+    private static Optional<OperationMetrics> metricScopedMetrics(NormalizedRunResult result,
+            String metric, String scope) {
+        String metricPrefix = metric + "@";
+        if (OperationMetrics.ALL.equals(scope)) {
+            List<OperationMetrics> allForMetric = result.byOperation().entrySet().stream()
+                    .filter(entry -> entry.getKey().startsWith(metricPrefix))
+                    .map(java.util.Map.Entry::getValue)
+                    .toList();
+            return allForMetric.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(combine(scope, allForMetric));
+        }
+
+        String exactName = metricPrefix + scope;
+        Optional<OperationMetrics> exact = result.operation(exactName);
+        if (exact.isPresent()) {
+            return exact;
+        }
+
+        List<OperationMetrics> withinScope = result.byOperation().entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(exactName + "/"))
+                .map(java.util.Map.Entry::getValue)
+                .toList();
+
+        return withinScope.isEmpty()
+                ? Optional.empty()
+                : Optional.of(combine(scope, withinScope));
+    }
+
+    private static boolean isWebVitalMetric(String metric) {
+        return WEB_LCP.equals(metric)
+                || WEB_INP.equals(metric)
+                || WEB_CLS.equals(metric)
+                || WEB_TTFB.equals(metric)
+                || WEB_TBT.equals(metric)
+                || WEB_LIGHTHOUSE_SCORE.equals(metric);
     }
 
     /**
@@ -276,5 +347,12 @@ public final class ObjectiveEvaluator {
 
     private static String format(long milliPercent) {
         return BigDecimal.valueOf(milliPercent, 3).stripTrailingZeros().toPlainString();
+    }
+
+    private static String displayValue(long value, String unit) {
+        if ("score".equals(unit)) {
+            return BigDecimal.valueOf(value, 3).stripTrailingZeros().toPlainString() + "score";
+        }
+        return value + unit;
     }
 }

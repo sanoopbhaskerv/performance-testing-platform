@@ -149,6 +149,13 @@ class ModuleDependencyRulesTest {
     }
 
     @Test
+    @DisplayName("engine-playwright goes through the SPI and never touches Spring, persistence or run state")
+    void playwrightEngineIsIsolated() {
+        assertNoImports("engines/engine-playwright",
+                allOf(SPRING, PERSISTENCE, WEB, KUBERNETES, PLATFORM_CORE_V1));
+    }
+
+    @Test
     @DisplayName("platform-results stays deterministic — no Spring, JPA or Kubernetes")
     void resultsIsFreeOfInfrastructure() {
         assertNoImports("platform-results",

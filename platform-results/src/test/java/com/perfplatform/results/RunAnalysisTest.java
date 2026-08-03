@@ -191,6 +191,26 @@ class RunAnalysisTest {
         }
 
         @Test
+        @DisplayName("web-vital objectives resolve metric-prefixed browser samples")
+        void webVitalObjectivesResolveMetricScopes() {
+            SampleSet set = samples("web.lcp@browser-experience/home", 1800, 2200)
+                    .merge(samples("web.cls@browser-experience/home", 50, 95))
+                    .merge(samples("web.lighthouse.score@browser-experience/home", 92, 94));
+
+            Analysis analysis = analyzer.analyze(RUN, "playwright", 1, 1, set, List.of(
+                    new ObjectiveSpec("web.lcp", "browser-experience", 95,
+                            Threshold.parse("2500ms")),
+                    new ObjectiveSpec("web.cls", "browser-experience", 95,
+                            Threshold.parse("0.1score")),
+                    new ObjectiveSpec("web.lighthouse.score", "browser-experience", null,
+                            Threshold.parse("90%"))));
+
+            assertThat(analysis.outcomes()).extracting(outcome -> outcome.verdict())
+                    .containsExactly(Verdict.PASS, Verdict.PASS, Verdict.PASS);
+            assertThat(analysis.outcomes().get(1).detail()).contains("0.1score");
+        }
+
+        @Test
         @DisplayName("a run with no objectives is successful — it asked no questions")
         void noObjectivesIsSuccessful() {
             Analysis analysis = analyzer.analyze(RUN, ENGINE, 1, 1,
@@ -256,7 +276,7 @@ class RunAnalysisTest {
         @DisplayName("an unrecognized metric is reported, not assumed")
         void unknownMetricIsReported() {
             Analysis analysis = analyzer.analyze(RUN, ENGINE, 1, 1, samples("search", 10),
-                    List.of(new ObjectiveSpec("browser.web.vitals.lcp", null, null,
+                    List.of(new ObjectiveSpec("custom.browser.metric", null, null,
                             Threshold.parse("2s"))));
 
             assertThat(analysis.outcomes()).singleElement().satisfies(outcome -> {

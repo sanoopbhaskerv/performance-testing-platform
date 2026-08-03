@@ -90,6 +90,7 @@
     <module>platform-orchestration</module>
     <module>platform-api</module>
     <module>engines/engine-jmeter</module>
+    <module>engines/engine-playwright</module>
     <module>runners/runner-kubernetes</module>
     <module>platform-importers/importer-curl</module>
     <module>platform-importers/importer-openapi</module>
@@ -141,6 +142,11 @@
       <dependency>
         <groupId>com.perfplatform</groupId>
         <artifactId>engine-jmeter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>engine-playwright</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

@@ -13,6 +13,15 @@ const METRIC_LABELS: Record<string, string> = {
   'http.response.time': 'Response time',
   'http.error.rate': 'Error rate',
   'http.throughput': 'Throughput',
+  'browser.journey.duration': 'Browser journey duration',
+  'browser.step.duration': 'Browser step duration',
+  'browser.error.rate': 'Browser error rate',
+  'web.lcp': 'Largest Contentful Paint',
+  'web.inp': 'Interaction to Next Paint',
+  'web.cls': 'Cumulative Layout Shift',
+  'web.ttfb': 'Time to First Byte',
+  'web.tbt': 'Total Blocking Time',
+  'web.lighthouse.score': 'Lighthouse score',
 };
 
 /**
