@@ -72,23 +72,51 @@ For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole 
 
 ## 2. What to do next
 
-**`ROADMAP.md` is the full list. Read §0 of it first — it says where to stop.**
+**Read [`PLAN.md`](PLAN.md) first. It is the decision about what happens next**; `ROADMAP.md` is now
+the inventory of what exists, and `HANDOFF.md` §3 is the account of how each piece was built.
 
-The short version: **the foundation is complete** (CLAUDE.md §32, with team authorization enforced
-against a development identity provider until Increment 4), and **the dataset loose thread is now
-closed** — Increment 2h uploaded, stored, verified and delivered them (`HANDOFF.md` §3m). A consumer
-can onboard an API from four kinds of source, give it real data, run it and read a report, without
-writing JMX.
+**The direction: turn this into a Performance Studio.** One UI where someone with **no performance
+testing experience** configures a test, watches it run live, and reads a report they can act on. Two
+first-class capabilities — **API load testing** (one or many APIs) and **web performance testing**
+(record a journey, upload a HAR, or bring a Playwright script; Core Web Vitals) — plus the pairing of
+the two, which is the flagship: *is the page still fast when the backend is at 500 users?*
 
-**A good place to stop.** Everything left is a new chapter rather than an unfinished one:
-dry-run preflight, baseline comparisons, correlation and extraction, Playwright, enterprise
-identity, assisted authoring — all in `ROADMAP.md` §§2–5, each with a size and a reason. None is
-urgent, and none should be started because it is next in a list.
+`PLAN.md` sequences this as **S1–S11**, each shipping a backend capability **and** the studio screen
+that exposes it. Nothing lands API-only.
 
-**The one caveat to carry forward:** 2h changed the runner image's entrypoint (it now fetches
-dataset partitions), and that change has **not been run on a cluster**. The local-JMeter path is
-verified with real load. Before trusting the Kubernetes path with a dataset, re-run
-`docs/operations/local-kubernetes-run.md`.
+### Release 1 is S1–S6. Decisions are made — do not relitigate them
+
+| Decision | Chosen |
+|---|---|
+| **vitest** | **Approved.** Add it in S1. §31 pause cleared. |
+| **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
+| **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
+| **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
+| **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
+
+**The next increment is S1 — studio shell, and the API path end to end.** Screens: Start, Sources,
+Refine, Load, Objectives, Status, Report, wired to what already exists (four importers, datasets,
+load stages, objectives, runs). Add vitest first.
+
+**The saving that makes release 1 affordable:** a browser-**only** web performance test is one
+workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
+
+### The three facts S1 onward has to work around
+
+Found by reading the code, and each is recorded in `PLAN.md` §2:
+
+1. **A journey is one request.** No correlation, so no login. Fixed in S3.
+2. **`spec.authentication` is parsed, validated and used by nothing.** Fixed in S5.
+3. **A run has one plan with one engine** — `EngineDispatchingPlanCompiler.primaryEngine()` takes the
+   first workload's engine and silently ignores the rest, so the shipped `hybrid.yaml` would drop its
+   browser workload with no error. Fixed in S7.
+
+### The caveat to carry forward
+
+2h changed the runner image's entrypoint (it now fetches dataset partitions), and that change has
+**not been run on a cluster**. The local-JMeter path is verified with real load. Before trusting the
+Kubernetes path with a dataset, re-run `docs/operations/local-kubernetes-run.md`. S2 changes the
+runner image again (progress snapshots), so the same procedure applies then.
 
 ### Datasets, in one paragraph
 

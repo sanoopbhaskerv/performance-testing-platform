@@ -10,6 +10,13 @@ than a surprise.
 
 ## 0. Where to stop
 
+> **Superseded, in part, by [`PLAN.md`](PLAN.md).** The user has chosen a direction: turn the
+> platform into a **Performance Studio** — one UI where someone with no performance testing
+> experience configures an API load test or a web performance test and reads a report they can act
+> on. `PLAN.md` sequences that as twelve increments (S1–S12), of which **S1–S6 are release 1**, and
+> reorders most of what follows in this file. **Read `PLAN.md` first.** This file remains the
+> inventory of what exists and what does not; `PLAN.md` is the decision about what happens next.
+
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
 Increment 4 and needs a decision this project has not been given).
@@ -19,8 +26,9 @@ immutably per version, verified against the columns a test declares, sliced per 
 (`HANDOFF.md` §3m). A consumer can now onboard an API from a cURL command, an OpenAPI document, a
 HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
-**Recommendation: this is a good place to stop.** Everything below is a new chapter rather than an
-unfinished one. Pick one deliberately, or not at all.
+~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
+was chosen. It has been: `PLAN.md`, release 1 (S1–S6). Everything below is still an accurate
+inventory of what exists and what does not.
 
 **One thing to carry forward, wherever you go next:** 2h changed the runner image's entrypoint, and
 that change has not been run on a cluster. The local path is verified with real load. Re-run
@@ -57,6 +65,15 @@ Worth doing, in this order, none urgent.
 ---
 
 ## 3. Increment 3 — Playwright and hybrid runs
+
+**Absorbed into [`PLAN.md`](PLAN.md).** Increment 3's content is now **S6** (the browser engine, Core
+Web Vitals and Lighthouse diagnostics — in release 1), **S10** (the server-side recorder and
+git-pinned Playwright import), **S11** (web performance under load) and **S12** (scale and
+BrowserStack). `PLAN.md` also folds in the remaining §2 items above — correlation lands in S3,
+dry-run preflight becomes S4's Validator, baseline comparison becomes S12. The Jenkins shared
+library is dropped: CI triggering is not current practice.
+
+The description below stands as background on the chapter's contract.
 
 A clean, large chapter. CLAUDE.md §21 has the full contract. In short: import an existing Playwright
 test by repository, immutable commit SHA and path — never a moving branch; run it in a pinned,
@@ -107,9 +124,9 @@ Each is real, none blocks anything.
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
   `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
-- **`platform-ui` has no test runner.** No vitest, no jest. `scenarioYaml.ts` (YAML escaping,
-  indentation detection, block extent) is real logic pinned only by a browser walkthrough. Adding
-  vitest is a §31 pause condition — **ask first**.
+- **`platform-ui` has no test runner** — no vitest, no jest, so `scenarioYaml.ts` (YAML escaping,
+  indentation detection, block extent) is pinned only by a browser walkthrough. **Resolved: vitest is
+  approved** and lands in `PLAN.md` S1. The §31 pause is cleared.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).
 - **UI lint reports 10 errors, 3 warnings**, all pre-existing in `App.tsx` and the pre-1D parts of
