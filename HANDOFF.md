@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S5. Increments 0–2h and S1–S5 are complete.
+**Last updated:** Studio increment S6a. Increments 0–2h, S1–S5 and S6a are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -17,11 +17,12 @@ Twelve increments, S1–S12, each shipping a backend capability *and* its studio
 S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what happens next**;
 `ROADMAP.md` remains the inventory of what exists.
 
-**S1 through S5 are built** (§3n–§3t). A test can be described by clicking, its report opens with
+**S1 through S5 and S6a are built** (§3n–§3u). A test can be described by clicking, its report opens with
 the answer in a sentence, a running test shows where it is in its plan, a journey can sign in, carry
 a session forward, review correlation rules before they are applied, validate one live protocol
 iteration before save, and production session acquisition now has secure `run://session` delivery,
-lifecycle cleanup, a broker provider seam and run-facing operator docs.
+lifecycle cleanup, a broker provider seam, run-facing operator docs and a kind-level broker smoke
+procedure.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
@@ -78,6 +79,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S3 — studio Rules screen** | **Complete** | see §3r |
 | **S4 — the Validator** | **Complete** | see §3s |
 | **S5 — Targets, credentials and sessions** | **Complete** | see §3t |
+| **S6a — broker path production-readiness validation** | **Complete** | see §3u |
 | **S6 — the browser engine and Core Web Vitals** | **Next** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
@@ -86,11 +88,10 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h,
 931 at S3 engine, 936 after S3 Rules, 941 after S4 Validator).
 
-S5 focused verification is green: `mvn test-compile`, `mvn test -pl platform-orchestration -am`,
-focused `ProductionSafetyGuardTest`, focused Kubernetes provider tests, focused published-example
-validation for `session-broker-api.yaml`, and Helm rendering of the session-broker production
-overlay. Full `SpecificationValidationServiceTest` still hits the known unrelated manual-request
-fixture mismatch described below.
+S6a focused verification is green: `mvn test-compile`, focused broker/orchestration tests, focused
+Kubernetes provider/Secret lifecycle tests, focused `ProductionSafetyGuardTest`, and Helm rendering
+of both the production broker overlay and the kind smoke values. Full `SpecificationValidationServiceTest`
+still hits the known unrelated manual-request fixture mismatch described below.
 
 **133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
@@ -622,9 +623,9 @@ the pattern is unreliable; the reliable enumeration is to diff which classes sto
 `Tests run: 0` across Surefire versions.
 
 **Fixed by pinning Surefire 3.5.3** in the root pom (3.1.2, 3.2.5, 3.3.1, 3.5.0 and 3.5.2 all
-misattribute; 3.5.3 does not). Verified across the full reactor: same 803 tests, 0 skipped, BUILD
-SUCCESS, per-module totals byte-identical, and the 7 affected classes now report their own counts
-with no class newly reporting 0. The 18 classes where *every* test is nested still report
+misattribute; 3.5.3 does not). Verified across the full reactor: the S2-era full-test count stayed
+unchanged, 0 skipped, BUILD SUCCESS, per-module totals byte-identical, and the 7 affected classes
+now report their own counts with no class newly reporting 0. The 18 classes where *every* test is nested still report
 `Tests run: 0` for the outer container, which is correct. `importer-openapi`'s all-`@Nested`
 convention is fine as a style but is not load-bearing.
 
@@ -1086,8 +1087,8 @@ number somebody invented and then trusts.
   injecting one. Overriding three declarations moves the button and the load bar; the breach and pass
   pills do not move, because a palette that rendered a breach in a reassuring green would make the
   studio lie in its own house style.
-- **vitest**, approved by the user, clearing the §31 pause. **88 UI tests at the close of S1**,
-  where there were none before it. (130 now — S2 and S3 added more.)
+- **vitest**, approved by the user, clearing the §31 pause. The S1 UI-test count started at 88,
+  where there were none before it; later increments increased it.
   Tests get their own `tsconfig.test.json` in the build: test code needs Node's types and application
   code must not have them.
 - The **YAML editor stays**, behind *Write it as YAML*. Removing it would turn the studio's gaps into
@@ -1468,6 +1469,63 @@ run-facing operational documentation.
 
 ---
 
+## 3u. S6a — broker path production-readiness validation
+
+**S6a is complete as a production-readiness validation slice for broker-backed `run://session`.**
+It does not implement the browser engine; it closes the operational validation gap before S6 starts.
+
+### What shipped
+
+- `docs/operations/kind-session-broker-smoke.md` — a repeatable kind-level smoke procedure that adds
+  a stub broker Service, a mounted broker-client Secret, a broker-backed Helm override, a short
+  authenticated smoke specification and checks for runner session Secret creation and cleanup.
+- `docs/operations/run-session-acquisition.md` now links that smoke and includes an operational
+  runbook for failed acquisition: provider settings, mounted Secret resolution, broker reachability
+  and contract errors, runner session Secret delivery and lifecycle cleanup.
+- `docs/operations/local-kubernetes-run.md` now points operators from the base Kubernetes smoke to
+  the broker-specific smoke when changing session acquisition or runner Secret lifecycle code.
+
+### Acceptance coverage
+
+- **Stub broker Service:** the kind smoke defines an in-cluster `session-broker` Service that checks
+  the broker-client bearer credential, logs operation/run/correlation evidence and returns valid
+  session leases.
+- **Mounted client Secret:** the smoke creates `session-broker-client` out of band and installs the
+  chart with `secretResolver.mountedSecrets` plus `clientCredentialSecretRef:
+  k8s://session-broker-client/token`.
+- **Runner session Secret creation:** the smoke checks for `perf-<run-prefix>-0-sessions`, its
+  delete-after annotation and the Job's read-only `/workspace/sessions.csv` mount.
+- **Cleanup:** the smoke checks normal terminal cleanup and documents how to force the TTL sweeper
+  path by scaling the control plane down until the delete-after timestamp has passed.
+- **No secret leakage:** the smoke explicitly greps Deployment and Job YAML for the synthetic broker
+  token and synthetic session value; both are expected to be absent.
+
+### Verification
+
+- `JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home mvn -B -f pom.xml test-compile` — passed.
+- Focused broker/orchestration and runner tests:
+  `mvn -B -f pom.xml test -pl platform-orchestration,runners/runner-kubernetes,platform-core -am -Dtest=ExternalSessionBrokerSessionAcquisitionProviderTest,MountedFileSecretResolverTest,RunReconcilerTest,KubernetesExecutionProviderTest,RunnerJobManifestTest,KubernetesEphemeralSecretCleanerTest,ProductionSafetyGuardTest,RunnerLifecycleCleanupSchedulerTest -Dsurefire.failIfNoSpecifiedTests=false`.
+  First sandbox run failed because Fabric8's mock server could not bind a socket. Rerun with approved
+  local socket access passed orchestration and runner tests; `ProductionSafetyGuardTest` then hit
+  stale bytecode and passed after a clean focused run.
+- `mvn -B -f pom.xml clean test -pl platform-core -am -Dtest=ProductionSafetyGuardTest -Dsurefire.failIfNoSpecifiedTests=false` — passed.
+- `helm template perf helm/performance-platform -f helm/performance-platform/examples/session-broker-production-values.yaml` — passed.
+- `helm template perf helm/performance-platform -f /tmp/perf-session-broker-values.yaml --show-only templates/deployment.yaml` — passed for the exact kind smoke values from the new guide.
+
+### Not run
+
+- The full kind smoke was not executed in this session. Docker is available, but no kind cluster
+  existed; creating the cluster, building/loading images and deploying support services remains the
+  operator-level procedure documented in `docs/operations/local-kubernetes-run.md` and
+  `docs/operations/kind-session-broker-smoke.md`.
+
+### Deliberately left for S6
+
+- Browser execution, browser validation and Core Web Vitals remain S6.
+- No real enterprise broker, real broker client credential or production target was introduced.
+
+---
+
 ## 4. Design decisions made in 1B and 1C (do not relitigate)
 
 ### From 1B
@@ -1546,25 +1604,18 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Finish 1E's physical half first.** The control plane can create runner Jobs, but nothing has ever
-run in one:
+**Next: S6, the browser engine and Core Web Vitals.** Add Playwright execution behind the existing
+SPI, store uploaded/pasted Playwright scripts immutably by content digest, run browser-only web
+performance tests in pinned Kubernetes runner Jobs and surface Core Web Vitals in the studio/report.
 
-1. **Build the JMeter runner image.** `perfplatform/jmeter-runner:<tag>` — reads `PERF_*` from its
-   environment, fetches the plan by `PERF_WORKLOAD_KEY`, runs JMeter, uploads `results.jtl`,
-   `jmeter.log` and a `runner-manifest.json` echoing `PERF_PLAN_DIGEST`. Non-root, read-only root
-   filesystem, everything written under `PERF_WORKSPACE`. Include `ConcurrencyThreadGroup` so load
-   stages stop being stepwise.
-2. **Run it once on kind or minikube.** Everything in 1E is verified against a mock API server and
-   MinIO. That is the right way to test the contract and it is not the same as having run.
-3. **Calibrate**, then raise shard count above 1. See `docs/operations/runner-calibration.md`.
-
-**Then Increment 2 — importers.** OpenAPI, Postman, HAR, cURL and a manual builder. The manual case
-now has its simplest form already (a scenario's `method` and `path`), so an importer's job is to
-produce those plus headers, query parameters and bodies, which the specification still cannot express.
+Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
+`docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static
+pieces render, but the full kind cluster run was not executed in S6a.
 
 Already done, so **do not** repeat from earlier plans: the report endpoint, artifact download with
 per-request authorization and digest verification, persisted run metrics, the Kubernetes provider,
-the S3 artifact store, and `BaselineExecutionPlanCompiler`'s deletion.
+the S3 artifact store, importers, datasets, the studio screens through S5, broker-backed
+`run://session` delivery and S6a's production-readiness runbook.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.

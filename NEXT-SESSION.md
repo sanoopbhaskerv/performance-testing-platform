@@ -39,7 +39,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S5
+The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S6a
 focused verification is green, and `mvn test-compile` passes across all modules. A full API
 validation test still has the known unrelated manual-request fixture mismatch described below.
 Docker must be running for the full suite because Testcontainers uses PostgreSQL and MinIO. If a
@@ -117,8 +117,11 @@ that exposes it. Nothing lands API-only.
 - **S5** (§3t) — targets, credentials and sessions: runtime credential references, `SecretResolver`,
   broker-backed `run://session`, mounted session partitions, lifecycle cleanup, Helm RBAC and
   production docs.
+- **S6a** (§3u) — production-readiness validation for broker-backed `run://session`: kind smoke
+  procedure with a stub broker Service, mounted broker-client Secret, runner session Secret
+  creation/cleanup checks and a failed-acquisition runbook.
 
-**S4 baseline: 941 Java tests, 133 UI tests. S5 focused verification is green.**
+**S4 baseline: 941 Java tests, 133 UI tests. S6a focused verification is green.**
 
 **Next: S6, the browser engine and Core Web Vitals.** Add Playwright execution behind the existing
 SPI, store uploaded/pasted Playwright scripts immutably by content digest, run browser-only web
@@ -147,15 +150,15 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 journeys. Before trusting the Kubernetes path with a dataset, re-run
 `docs/operations/local-kubernetes-run.md`.
 
-Nothing since 2h has changed the runner image: S1–S5 are control-plane, UI, orchestration and
-manifest work. **S7** is still the next increment that changes the runner image for progress
+Nothing since 2h has changed the runner image: S1–S6a are control-plane, UI, orchestration,
+manifest and documentation work. **S7** is still the next increment that changes the runner image for progress
 snapshots. Re-run the kind procedure then too.
 
 ### Current test caveat
 
 The broad `SpecificationValidationServiceTest` class still has an unrelated manual-request fixture
 mismatch: it expects `/api/users` and `/api/payments`, while the current fixture contains
-`/api/students/1`. Full `mvn clean verify` fails there until that work is reconciled. S5 focused
+`/api/students/1`. Full `mvn clean verify` fails there until that work is reconciled. S6a focused
 checks and `mvn test-compile` are green.
 
 ### Datasets, in one paragraph
@@ -168,14 +171,14 @@ refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
 
 ### What is already done — do not rebuild
 
-Increments 0 through 2h, then S1–S5. The canonical specification, durable run orchestration, the
+Increments 0 through 2h, then S1–S6a. The canonical specification, durable run orchestration, the
 JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact
 store, the runner image, report and artifact download, synthetic-run marking, **four source
 importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
 (shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
 progress**, **multi-step journeys with reviewed correlation rules**, **a live Validator before
-Save**, and **S5 runtime credentials, broker-backed sessions and cleanup**. `HANDOFF.md` §3–§3t is
-the account of each.
+Save**, **S5 runtime credentials, broker-backed sessions and cleanup**, and **S6a broker-path
+production-readiness docs**. `HANDOFF.md` §3–§3u is the account of each.
 
 ## 3. Rules that do not bend
 

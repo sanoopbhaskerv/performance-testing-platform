@@ -12,8 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S5 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3t for what each delivered. S6, the browser engine and Core Web Vitals, is next; everything
+**Status: S1 through S5 and S6a are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3u for what each delivered. S6, the browser engine and Core Web Vitals, is next; everything
 after it is still a plan.
 
 ---
@@ -736,6 +736,7 @@ does. So web performance costs S8 alone, not S7 + S8.
 | **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **done** — `HANDOFF.md` §3p, §3q, §3r |
 | **S4** | The Validator | 8 Validate | Medium | ✅ | **done** — `HANDOFF.md` §3s |
 | **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | **done** — `HANDOFF.md` §3t |
+| **S6a** | Broker path production-readiness validation | Operations | Small | ✅ | **done** — `HANDOFF.md` §3u |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | next |
 | **S7** | Live monitoring | 9 Monitor | Large | — | |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |

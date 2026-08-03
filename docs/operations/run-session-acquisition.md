@@ -169,3 +169,131 @@ Use the full overlay in [session-broker-production-values.yaml](../../helm/perfo
 
 S5 production session delivery still depends on the wider production posture: Kubernetes execution, durable object storage, pinned runner images, scoped runner RBAC and a non-development identity provider.
 
+## Production readiness smoke
+
+Before trusting broker-backed `run://session` in a production-like cluster, run
+[kind smoke: broker-backed run://session](kind-session-broker-smoke.md). It exercises the real Helm
+mount, the `external-session-broker` provider, the Kubernetes runner Secret and both normal and TTL
+cleanup paths against a stub broker Service.
+
+## Diagnosing failed acquisition
+
+Start with the run events:
+
+```bash
+curl -s -H "X-API-Key: $KEY" \
+  localhost:18080/api/v2/test-runs/<runId>/events
+```
+
+Most acquisition failures surface as `PROVISIONING_FAILED`. The user-facing reason is sanitized on
+purpose; use cluster evidence to find the concrete cause.
+
+### 1. Provider configuration
+
+```bash
+kubectl -n <platform-namespace> get deploy <release>-performance-platform \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+  | grep PLATFORM_ORCHESTRATION_SESSIONACQUISITION
+```
+
+Expected production settings:
+
+- `PROVIDER=external-session-broker`;
+- `ENDPOINT` points at the approved broker Service or URL;
+- `CLIENTCREDENTIALSECRETREF` is a `k8s://...` reference;
+- the trigger body did not include `credentials.session`.
+
+If `runtime-credential` is active under a production profile, startup should fail. Do not work around
+that by seeding a session in the trigger request.
+
+### 2. Mounted client Secret
+
+```bash
+kubectl -n <platform-namespace> get deploy <release>-performance-platform \
+  -o jsonpath='{.spec.template.spec.volumes[*].secret.secretName}'; echo
+
+kubectl -n <platform-namespace> exec deploy/<release>-performance-platform -- \
+  sh -c 'test -s /var/run/perfplatform/secrets/session-broker-client/token'
+```
+
+Failure signatures:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `mounted-file resolver supports only k8s:// references` | `clientCredentialSecretRef` uses an unsupported scheme | Use `k8s://secret-name/key` for the mounted-file resolver |
+| `mounted file is not readable` | Secret was not mounted, key is wrong or mount root differs | Create the Secret out of band and include it in `secretResolver.mountedSecrets` |
+| `mounted file is empty` | Secret key exists but has no value | Recreate the Secret with a non-empty broker client credential |
+
+Never print the mounted file contents in a ticket or runbook transcript.
+
+### 3. Broker reachability and contract
+
+From the control-plane namespace:
+
+```bash
+kubectl -n <platform-namespace> run broker-probe --rm -i --restart=Never \
+  --image=curlimages/curl:8.11.1 -- \
+  curl -sS -o /tmp/response.json -w 'status=%{http_code}\n' \
+  -H 'Authorization: Bearer probe' \
+  -H 'Content-Type: application/json' \
+  <broker-url>/v1/sessions:acquire
+```
+
+Use a real probe token only in a private terminal. For the checked-in kind smoke, the token is
+synthetic.
+
+Failure signatures:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| DNS or connection timeout | Service name, namespace, NetworkPolicy or egress route is wrong | Fix endpoint or allow egress from the control-plane namespace |
+| HTTP 401/403 | mounted broker credential is wrong or broker rejects the client identity | Rotate/fix the mounted Secret or broker policy |
+| HTTP 404 | `loginPath`/`refreshPath` mismatch | Use `/v1/sessions:acquire` and `/v1/sessions:refresh`, or configure broker-specific paths |
+| Invalid JSON or missing fields | broker response does not match `session-broker-contract.md` | Fix broker response: `sessionId`, `sessionValue`, `expiresAt` |
+| `expires before the requested validity window` | broker lease is too short for the run deadline | Increase lease duration or reduce the test duration |
+
+Broker logs may include run id, authentication name and status. They must not include
+`sessionValue`, cookies or client credential material.
+
+### 4. Runner session Secret
+
+After the run leaves `QUEUED`, find runner-owned Secrets by run id:
+
+```bash
+kubectl -n <runner-namespace> get secrets \
+  -l app.kubernetes.io/managed-by=performance-testing-platform,perfplatform.ameriprise.com/run-id=<runId>
+```
+
+Expected:
+
+- a `perf-<run-prefix>-<shard>-sessions` Secret exists while the Job is active;
+- it has `secret-expires-at` and `secret-delete-after` annotations;
+- the runner Job mounts it read-only as `/workspace/sessions.csv`;
+- the Job YAML contains the Secret name and `PERF_SESSION_FILES=sessions.csv`, not the session value.
+
+If no session Secret exists, check broker acquisition first. If the Secret exists but the Pod is stuck
+in `ContainerCreating`, inspect Pod events:
+
+```bash
+kubectl -n <runner-namespace> describe pod -l perfplatform.ameriprise.com/run-id=<runId>
+```
+
+Missing Secret mount errors usually mean the Secret was deleted before the Pod started. That points
+to an incorrect `secret-delete-after`, an overly short broker lease or a clock problem.
+
+### 5. Cleanup
+
+Normal terminal observation deletes runner session Secrets immediately. If a Secret remains:
+
+```bash
+kubectl -n <runner-namespace> get secret <secret-name> -o yaml \
+  | grep 'perfplatform.ameriprise.com/secret-delete-after'
+
+kubectl -n <platform-namespace> logs deploy/<release>-performance-platform \
+  | grep 'Runner lifecycle cleanup'
+```
+
+If `lifecycleCleanup.enabled=false`, stranded session Secrets remain until an operator deletes them.
+Production-like installs should keep cleanup enabled. The cleanup Role is namespace-scoped and only
+selects runner-managed Secrets with the delete-after annotation; do not broaden it to cluster-wide
+Secret deletion.

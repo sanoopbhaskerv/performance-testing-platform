@@ -3,6 +3,11 @@
 This is the procedure that first proved the Kubernetes execution path works end to end, and the one
 to repeat after changing the runner image, the Job manifest or the artifact store.
 
+For the production `run://session` path, run the dedicated
+[kind broker-backed session smoke](kind-session-broker-smoke.md) after this base Kubernetes path is
+working. It adds a stub session broker Service, a mounted broker-client Secret and checks runner
+session Secret creation and cleanup.
+
 **It found three real defects that Docker and a mock API server did not.** They are recorded at the
 bottom, because the point of writing this down is that the next person runs it rather than assuming.
 

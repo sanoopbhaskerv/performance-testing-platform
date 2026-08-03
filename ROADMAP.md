@@ -17,10 +17,11 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S5** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S5 plus S6a** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
-> delivery and lifecycle cleanup. `HANDOFF.md` §3n–§3t.
+> delivery and lifecycle cleanup, plus a kind-level broker smoke and failed-acquisition runbook.
+> `HANDOFF.md` §3n–§3u.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -32,8 +33,9 @@ immutably per version, verified against the columns a test declares, sliced per 
 HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
-was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and five of those six are built. Everything
-below is still an accurate inventory of what exists and what does not.
+was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and five of those six plus the S6a
+readiness slice are built. Everything below is still an accurate inventory of what exists and what
+does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
 credentials/session blocker, but the API half still needs a focused removal audit because
@@ -143,6 +145,10 @@ Each is real, none blocks anything.
 - ~~**Production `run://session` needed a provider and delivery contract.**~~ **Done in S5**:
   `ExternalSessionBrokerSessionAcquisitionProvider`, mounted `SecretResolver`, per-shard
   `sessions.csv`, Helm RBAC and docs. `HANDOFF.md` §3t.
+- ~~**Production broker path needed a kind-level readiness smoke and acquisition runbook.**~~
+  **Done in S6a**: `docs/operations/kind-session-broker-smoke.md` adds the stub broker Service,
+  mounted broker-client Secret and runner session Secret creation/cleanup checks; the failed
+  acquisition runbook lives in `docs/operations/run-session-acquisition.md`. `HANDOFF.md` §3u.
 - **The credential-name list is header-shaped.** `x-api-key` is refused as a query parameter but
   `api_key`, `access_token` and `token` are not, so `?api_key=short-value` passes. A query string
   reaches every access log between the runner and the target. Uncovered during S3 and deliberately
