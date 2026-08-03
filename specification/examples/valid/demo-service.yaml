@@ -45,54 +45,35 @@ spec:
             targetUsers: 0
 
       scenarios:
-        # The fast read path: 5-25ms, almost never fails.
-        - name: browse-users
-          weight: 80
+        # A stable seeded record makes this route runnable after a fresh database migration.
+        - name: retrieve-student
+          weight: 65
           method: GET
-          path: /api/users
-          query:
-            # Appended to the path and encoded, so a value containing a space or an
-            # ampersand cannot silently change which parameters the target sees.
-            page: "1"
-            pageSize: "25"
+          path: /api/students/1
           headers:
-            # Ordinary headers only. Authorization, Cookie and the like are refused —
-            # authentication belongs in spec.authentication as a reference the runner
-            # resolves at execution time, so it never appears in this document.
             Accept: application/json
 
-        # The slow write path: 150-600ms, and fails about 5% of the time by design. This is what
-        # makes the report interesting — and what makes the error-rate objective below breach.
-        - name: submit-payment
-          weight: 20
-          method: POST
-          path: /api/payments
+        - name: update-student
+          weight: 35
+          method: PUT
+          path: /api/students/1
           body:
-            # Sent as a raw body with this Content-Type. Every virtual user submits the
-            # same payload for now; one row per iteration needs dataset partitioning,
-            # which is deliberately not faked with a placeholder here.
             contentType: application/json
             content: |
-              {"amount": 4999, "currency": "GBP", "method": "card"}
+              {"firstName":"Demo","lastName":"Student","email":"demo.student@example.test","program":"Performance Engineering"}
 
   objectives:
-    # The demo service's payment path alone runs to ~600ms, so a 400ms ceiling across the whole
-    # workload is expected to breach. That is the point: a report that always passes teaches nothing
-    # about what a breach looks like.
     - metric: http.response.time
       scope: demo-load
       percentile: 95
-      threshold: 400ms
+      threshold: 250ms
 
-    # Expected to breach too — the demo service fails ~5% of payment requests deliberately.
     - metric: http.error.rate
       scope: demo-load
       threshold: 1%
 
-    # Scoped to the fast journey alone, and expected to pass. Objectives are evaluated per workload
-    # and per scenario, so one report can show both a breach and a pass.
     - metric: http.response.time
-      scope: demo-load/browse-users
+      scope: demo-load/retrieve-student
       percentile: 95
       threshold: 250ms
 

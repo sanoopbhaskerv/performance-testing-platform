@@ -28,10 +28,8 @@ targets:
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 
-  # The bundled demo service (demo-service/, port 8081). A real target with
-  # deliberately uneven behaviour — /api/users answers in 5-25ms, POST
-  # /api/payments in 150-600ms and fails about 5% of the time — so a run against
-  # it produces a report worth reading rather than a flat line.
+  # The bundled demo service (demo-service/, port 8081). It provides PostgreSQL-backed
+  # student create, retrieve and update routes under /api/students.
   #
   # Start it with:
   #   java -jar demo-service/target/demo-service-1.0.0.jar

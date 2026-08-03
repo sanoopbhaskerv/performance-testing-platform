@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:students;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: demo
+  flyway:
+    create-schemas: true
+    default-schema: demo
+    schemas: demo
