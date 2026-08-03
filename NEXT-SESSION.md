@@ -3,7 +3,8 @@
 **Read `HANDOFF.md` first** (state, decisions, gotchas), then this. `CLAUDE.md` is the contract.
 
 Branch `feature/platform-v2-foundation`. **Nothing is pushed** — pushing, tagging and opening a PR
-each need explicit authorization (CLAUDE.md §6).
+each need explicit authorization (CLAUDE.md §6). Every increment now ends with updated handoff
+documents and a commit unless the user explicitly says not to commit.
 
 ---
 
@@ -38,10 +39,13 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **941 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
-uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
-setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
-reports `Skipped`, that is a false green: investigate, do not accept it.**
+The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S5
+focused verification is green, and `mvn test-compile` passes across all modules. A full API
+validation test still has the known unrelated manual-request fixture mismatch described below.
+Docker must be running for the full suite because Testcontainers uses PostgreSQL and MinIO. If a
+PostgreSQL module fails wholesale with `An error occurred while setting up the SSL connection`, that
+is a known flaky start — retry once. **If any integration test reports `Skipped`, that is a false
+green: investigate, do not accept it.**
 
 ```bash
 cd platform-ui && npm test && npm run lint && npm run build   # 3 errors, 3 warnings, all pre-existing in V1's App.tsx
@@ -94,7 +98,7 @@ that exposes it. Nothing lands API-only.
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
 | **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
-| **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. The UI half is cheap; the API half is blocked until S5 replaces the team YAML that V2 reads for identity and targets. `PLAN.md` §0, "On V1". |
+| **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. S5 removed the credentials/session blocker, but removal still needs a focused audit because development identity remains local-only and V1 endpoints must stay operational until that increment is explicitly picked up. |
 
 ### What is built
 
@@ -108,12 +112,17 @@ that exposes it. Nothing lands API-only.
   extracted and carried forward, and a broken correlation fails loudly instead of reporting
   excellent latency. Proposed correlations are accepted or rejected by a person and never applied
   silently.
+- **S4** (§3s) — the Validator runs one real protocol iteration before Save and shows request,
+  response, extraction and assertion evidence.
+- **S5** (§3t) — targets, credentials and sessions: runtime credential references, `SecretResolver`,
+  broker-backed `run://session`, mounted session partitions, lifecycle cleanup, Helm RBAC and
+  production docs.
 
-**941 Java tests, 133 UI tests.**
+**S4 baseline: 941 Java tests, 133 UI tests. S5 focused verification is green.**
 
-**Next: S5, Targets, credentials and sessions.** Replace the remaining V1/YAML seams that V2 uses
-for identity and targets, add runtime credential references, and make authenticated tests work
-without storing credential values.
+**Next: S6, the browser engine and Core Web Vitals.** Add Playwright execution behind the existing
+SPI, store uploaded/pasted Playwright scripts immutably by content digest, run browser-only web
+performance tests in pinned Kubernetes runner Jobs, and surface Core Web Vitals in the studio/report.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -124,8 +133,9 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 
 1. ~~**A journey is one request.**~~ **Fixed in S3.** Scenarios carry ordered steps with extraction
    and assertions.
-2. **`spec.authentication` is parsed, validated and used by nothing.** No `SecretResolver` exists.
-   **S5** — and it is also what blocks V1's removal.
+2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ **S5 added runtime
+   credential references, `SecretResolver`, and broker-backed `run://session`.** Corporate identity
+   and non-Kubernetes secret managers remain later pause-condition decisions.
 3. **A run has one plan with one engine** — `EngineDispatchingPlanCompiler.primaryEngine()` takes the
    first workload's engine and silently ignores the rest, so the shipped `hybrid.yaml` would drop its
    browser workload with no error. **S9.**
@@ -137,17 +147,16 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 journeys. Before trusting the Kubernetes path with a dataset, re-run
 `docs/operations/local-kubernetes-run.md`.
 
-Nothing since has touched the runner image: S1–S3 are control-plane and UI work, and **S7** is the
-next increment that changes it (progress snapshots for live monitoring). Re-run the kind procedure
-then too.
+Nothing since 2h has changed the runner image: S1–S5 are control-plane, UI, orchestration and
+manifest work. **S7** is still the next increment that changes the runner image for progress
+snapshots. Re-run the kind procedure then too.
 
-### Current dirty-worktree caveat
+### Current test caveat
 
-Unrelated student-demo changes are present and not committed. They change
-`specification/examples/valid/demo-service.yaml` to `/api/students/1`, while
-`SpecificationValidationServiceTest.preservesManualRequests` still expects `/api/users` and
-`/api/payments`. Full `mvn clean verify` fails there until that work is reconciled. S4's focused
-backend/UI checks are green.
+The broad `SpecificationValidationServiceTest` class still has an unrelated manual-request fixture
+mismatch: it expects `/api/users` and `/api/payments`, while the current fixture contains
+`/api/students/1`. Full `mvn clean verify` fails there until that work is reconciled. S5 focused
+checks and `mvn test-compile` are green.
 
 ### Datasets, in one paragraph
 
@@ -159,14 +168,14 @@ refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
 
 ### What is already done — do not rebuild
 
-Increments 0 through 2h, then S1–S3. The canonical specification, durable run orchestration, the
+Increments 0 through 2h, then S1–S5. The canonical specification, durable run orchestration, the
 JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact
 store, the runner image, report and artifact download, synthetic-run marking, **four source
 importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
 (shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
-progress**, **multi-step journeys with reviewed correlation rules**, and **a live Validator before
-Save**. `HANDOFF.md` §3–§3s is the
-account of each.
+progress**, **multi-step journeys with reviewed correlation rules**, **a live Validator before
+Save**, and **S5 runtime credentials, broker-backed sessions and cleanup**. `HANDOFF.md` §3–§3t is
+the account of each.
 
 ## 3. Rules that do not bend
 
@@ -194,15 +203,14 @@ account of each.
 
   ```bash
   grep -ohE "9[0-9]{2} (Java )?tests|1[0-9]{2} UI tests" HANDOFF.md NEXT-SESSION.md ROADMAP.md PLAN.md | sort -u
-  grep -n "S5\|Targets\|credentials\|sessions" HANDOFF.md PLAN.md       # the same thing is outstanding
+  grep -n "S6\|browser engine\|Core Web Vitals" HANDOFF.md PLAN.md       # the same thing is outstanding
   grep -n "next" NEXT-SESSION.md ROADMAP.md | grep -i "increment\|S[0-9]"   # the same next move
   ```
 - Do not push, tag, merge or publish without explicit authorization.
 - **V1 still works and still must, for now.** Its removal is authorized but deferred until after the
-  studio build phases, and its API cannot go until S5 — `DevelopmentCallerContextProvider`,
-  `TeamYamlTargetResolver` and `TeamRegistrySynchronizer` all read V1's `TeamConfigLoader`, so V2 has
-  no identity and no targets without it. Until then `/api/v1/**` and the **Legacy (v1)** tab are the
-  check.
+  studio build phases. S5 removed the credentials/session blocker, but V1 removal still needs an
+  explicit increment and audit of development identity, team sync and target resolution. Until then
+  `/api/v1/**` and the **Legacy (v1)** tab are the check.
 - Tests named `KNOWN DEFECT` / `KNOWN GAP` / `KNOWN SECURITY GAP` assert behaviour that is wrong on
   purpose. Invert them in place when the owning increment fixes them; never delete one to go green.
 - Pause and ask before: a new unapproved dependency, k6, a secret manager, an identity provider, a

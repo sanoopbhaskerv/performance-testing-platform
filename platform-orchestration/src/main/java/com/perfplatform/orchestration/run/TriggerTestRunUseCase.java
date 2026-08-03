@@ -232,6 +232,13 @@ public final class TriggerTestRunUseCase {
                 continue;
             }
             String ref = auth.secretRef().trim();
+            if ("run://session".equalsIgnoreCase(ref)) {
+                String value = supplied.get("session");
+                if (value != null && !value.isBlank()) {
+                    material.put(auth.name(), new RuntimeCredential(auth.name(), value));
+                }
+                continue;
+            }
             if (ref.regionMatches(true, 0, "run://", 0, "run://".length())) {
                 String key = ref.substring("run://".length());
                 String value = supplied.get(key);

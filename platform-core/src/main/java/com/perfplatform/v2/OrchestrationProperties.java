@@ -28,6 +28,8 @@ public class OrchestrationProperties {
     /** Whether the reconciliation loop runs. Disabled in tests that drive it explicitly. */
     private boolean reconciliationEnabled = true;
 
+    private final LifecycleCleanup lifecycleCleanup = new LifecycleCleanup();
+
     /**
      * Whether V1's team YAML is mirrored into the V2 registry at startup.
      *
@@ -72,6 +74,36 @@ public class OrchestrationProperties {
     private final RunnerCell runnerCell = new RunnerCell();
     private final Artifacts artifacts = new Artifacts();
     private final Datasets datasets = new Datasets();
+    private final SecretResolverProperties secretResolver = new SecretResolverProperties();
+    private final SessionAcquisition sessionAcquisition = new SessionAcquisition();
+
+    /**
+     * Cleanup of runner-owned ephemeral Kubernetes objects.
+     *
+     * <p>Normal reconciliation deletes runner Secrets when it observes terminal Jobs. This loop
+     * exists for the less pleasant path: the control plane restarts or loses contact before that
+     * observation, and the explicit delete-after timestamp on the Secret becomes the authority.
+     */
+    public static class LifecycleCleanup {
+        private boolean enabled = true;
+        private Duration interval = Duration.ofMinutes(1);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Duration getInterval() {
+            return interval;
+        }
+
+        public void setInterval(Duration interval) {
+            this.interval = interval;
+        }
+    }
 
     /**
      * The data a test sends.
@@ -93,6 +125,99 @@ public class OrchestrationProperties {
 
         public void setMaxSize(long maxSize) {
             this.maxSize = maxSize;
+        }
+    }
+
+    /**
+     * How per-run application sessions are acquired before partitioning.
+     *
+     * <p>{@code runtime-credential} is the foundation provider: it clones a trigger-supplied
+     * credential so the delivery and partitioning contracts can be exercised locally. Production
+     * must configure an approved real acquisition provider. The endpoint and secret reference fields
+     * are deliberately references and coordinates, never credential values.
+     */
+    public static class SessionAcquisition {
+        private String provider = "runtime-credential";
+        private Duration runtimeCredentialTtl = Duration.ofHours(12);
+        private Duration requestTimeout = Duration.ofSeconds(10);
+        private String endpoint = "";
+        private String loginPath = "";
+        private String refreshPath = "";
+        private String clientCredentialSecretRef = "";
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public Duration getRuntimeCredentialTtl() {
+            return runtimeCredentialTtl;
+        }
+
+        public void setRuntimeCredentialTtl(Duration runtimeCredentialTtl) {
+            this.runtimeCredentialTtl = runtimeCredentialTtl;
+        }
+
+        public Duration getRequestTimeout() {
+            return requestTimeout;
+        }
+
+        public void setRequestTimeout(Duration requestTimeout) {
+            this.requestTimeout = requestTimeout;
+        }
+
+        public String getEndpoint() {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        public String getLoginPath() {
+            return loginPath;
+        }
+
+        public void setLoginPath(String loginPath) {
+            this.loginPath = loginPath;
+        }
+
+        public String getRefreshPath() {
+            return refreshPath;
+        }
+
+        public void setRefreshPath(String refreshPath) {
+            this.refreshPath = refreshPath;
+        }
+
+        public String getClientCredentialSecretRef() {
+            return clientCredentialSecretRef;
+        }
+
+        public void setClientCredentialSecretRef(String clientCredentialSecretRef) {
+            this.clientCredentialSecretRef = clientCredentialSecretRef;
+        }
+    }
+
+    /**
+     * Secret resolution for infrastructure adapters.
+     *
+     * <p>The initial production resolver reads Kubernetes Secret volume files mounted into the
+     * control plane. Configuration still names only a {@code k8s://...} reference; the value lives
+     * in a Secret created and rotated outside this chart.
+     */
+    public static class SecretResolverProperties {
+        private String mountRoot = "/var/run/perfplatform/secrets";
+
+        public String getMountRoot() {
+            return mountRoot;
+        }
+
+        public void setMountRoot(String mountRoot) {
+            this.mountRoot = mountRoot;
         }
     }
 
@@ -313,6 +438,10 @@ public class OrchestrationProperties {
         return datasets;
     }
 
+    public SecretResolverProperties getSecretResolver() {
+        return secretResolver;
+    }
+
     /**
      * Concurrency ceilings (CLAUDE.md §13).
      *
@@ -388,6 +517,10 @@ public class OrchestrationProperties {
 
     public void setReconciliationEnabled(boolean reconciliationEnabled) {
         this.reconciliationEnabled = reconciliationEnabled;
+    }
+
+    public LifecycleCleanup getLifecycleCleanup() {
+        return lifecycleCleanup;
     }
 
     public boolean isSynchronizeTeamsFromYaml() {
@@ -468,5 +601,9 @@ public class OrchestrationProperties {
 
     public Fake getFake() {
         return fake;
+    }
+
+    public SessionAcquisition getSessionAcquisition() {
+        return sessionAcquisition;
     }
 }

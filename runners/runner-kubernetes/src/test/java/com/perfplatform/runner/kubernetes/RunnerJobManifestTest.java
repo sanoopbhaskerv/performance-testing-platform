@@ -279,6 +279,40 @@ class RunnerJobManifestTest {
             assertThat(env(build(RunnerFixtures.request()))).containsEntry("PERF_DATASETS", "");
         }
 
+        @Test
+        @DisplayName("session files are named in environment and mounted from a per-shard Secret")
+        void sessionFilesUseMountedSecretFiles() {
+            ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(java.util.List.of(
+                    RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+
+            Job job = build(request);
+            Container container = container(job);
+
+            assertThat(env(job)).containsEntry("PERF_SESSION_FILES", "sessions.csv");
+            assertThat(env(job).values()).noneMatch(value -> value != null
+                    && value.contains("Bearer hidden"));
+
+            assertThat(job.getSpec().getTemplate().getSpec().getVolumes())
+                    .anySatisfy(volume -> {
+                        assertThat(volume.getName()).isEqualTo("session-files");
+                        assertThat(volume.getSecret().getSecretName())
+                                .isEqualTo(RunnerJobManifest.sessionFileSecretNameFor(request));
+                        assertThat(volume.getSecret().getItems())
+                                .anySatisfy(item -> {
+                                    assertThat(item.getKey()).isEqualTo("sessions.csv");
+                                    assertThat(item.getPath()).isEqualTo("sessions.csv");
+                                });
+                    });
+            assertThat(container.getVolumeMounts())
+                    .anySatisfy(mount -> {
+                        assertThat(mount.getName()).isEqualTo("session-files");
+                        assertThat(mount.getMountPath()).isEqualTo("/workspace/sessions.csv");
+                        assertThat(mount.getSubPath()).isEqualTo("sessions.csv");
+                        assertThat(mount.getReadOnly()).isTrue();
+                    });
+            assertThat(job.toString()).doesNotContain("Bearer hidden");
+        }
+
         /**
          * A runner shares no filesystem with the control plane: it fetches its plan and uploads its
          * results over the network. Without these it holds a key and has nowhere to use it.

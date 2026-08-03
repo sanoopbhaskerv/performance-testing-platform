@@ -12,9 +12,9 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S4 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3s for what each delivered. S5, Targets, credentials and sessions, is next; everything after
-it is still a plan.
+**Status: S1 through S5 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3t for what each delivered. S6, the browser engine and Core Web Vitals, is next; everything
+after it is still a plan.
 
 ---
 
@@ -56,10 +56,9 @@ in two, and only the first half is cheap:
 - **The V1 UI** (`App.tsx`'s legacy screens and the tab switcher) can go whenever. It makes the
   studio simpler: the `.v2` scoping prefix becomes unnecessary, the light theme can follow
   `prefers-color-scheme` instead of being an opt-in, and the last 3 lint errors go with it.
-- **The V1 API and engine cannot go until S5.** Three V2 components read V1's `TeamConfigLoader`:
-  `DevelopmentCallerContextProvider` for caller identity, `TeamYamlTargetResolver` for which host a
-  run may address, and `TeamRegistrySynchronizer` for the team registry. Removing it before S5
-  replaces the team YAML would leave the studio unable to authenticate anyone or resolve any target.
+- **The V1 API and engine still need a focused removal audit.** S5 removed the credentials/session
+  blocker, but development identity remains local-only and V1 endpoints must stay operational until
+  a removal increment explicitly verifies identity, target resolution and team sync replacements.
 
 ---
 
@@ -142,7 +141,9 @@ Found by reading the code, not the docs:
 1. ~~**A journey is one request.**~~ **Fixed in S3** (`HANDOFF.md` §3p): `ScenarioSpec` carries
    ordered steps, values are extracted and carried forward, and a failed extraction fails the sample
    rather than reporting good latency.
-2. **`spec.authentication` is parsed, validated and used by nothing.** No `SecretResolver` exists.
+2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ S5 added runtime
+   credential handling, `SecretResolver`, broker-backed `run://session`, mounted session partitions
+   and production cleanup.
 3. **A run has one plan with one engine.**
    [`EngineDispatchingPlanCompiler.primaryEngine()`](platform-orchestration/src/main/java/com/perfplatform/orchestration/plan/EngineDispatchingPlanCompiler.java:62)
    takes the first workload's engine and **silently ignores the rest**. Triggering the shipped
@@ -632,19 +633,20 @@ authentication:
   - name: app-session
     type: session-header
     injectAs: Cookie
-    secretRef: run://session      # supplied when the run is triggered. Never stored.
+    secretRef: run://session      # acquired for this run. Never stored in the definition.
 ```
 
 ```
-POST /api/v2/test-runs  { ..., "credentials": { "session": "<value>" } }
+POST /api/v2/test-runs  { "definitionVersionId": "..." }
 ```
 
-Held in memory for provisioning, then delivered to the runner as a Kubernetes Secret **by name** —
-the pattern already proven for object-storage credentials (`HANDOFF.md` §3f). Never persisted, never
-digested, never logged, never in a manifest, label or argument.
+In production, S5 acquires the lease through the configured external session broker, then delivers
+the runner's partition as a mounted Kubernetes Secret file. The local runtime-credential fallback can
+still seed `run://session` for development, but production profiles refuse that as the primary
+provider. Never persisted, never digested, never logged, never in a manifest, label or argument.
 
-The studio surfaces this on screen 5 as "Session — supply at run time", with a field that does not
-persist.
+The studio surfaces this on screen 5 as "Session — acquired at run time", with local-only seed entry
+where explicitly configured.
 
 ### Sessions at scale: acquire once, never per user
 
@@ -653,13 +655,13 @@ wrong three ways: it load-tests the identity provider, it will lock accounts or 
 (500 sign-ins in a two-minute ramp from one source is indistinguishable from credential stuffing),
 and login latency contaminates every journey.
 
-So the platform acquires a **pool** of sessions before load starts and distributes it. The pool is a
-**run-scoped dataset** — `${session}` binds like any column, the existing `DatasetPartitioner` slices
-it per shard, existing delivery carries it. No new plumbing; 2g and 2h built all of it, which is the
-check that they were built at the right level.
+So the platform acquires a **pool** of sessions before load starts and distributes it. S5 delivers
+the pool as a **run-scoped mounted Secret file** named `sessions.csv`; JMeter reads the
+`session_value` column and injects it through the workload's `authRef`. It is deliberately not a
+downloadable dataset artifact.
 
 Because the contents are live credentials: download refused, redacted in every listing, deleted at
-completion.
+completion, cancellation or explicit TTL cleanup.
 
 Sizing: one session per 25 virtual users, minimum 5, maximum 50 — configurable, explained in the UI.
 
@@ -733,8 +735,8 @@ does. So web performance costs S8 alone, not S7 + S8.
 | **S2** | The report a novice can read | 10 Report | Medium | ✅ | **done** — §3o |
 | **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **done** — `HANDOFF.md` §3p, §3q, §3r |
 | **S4** | The Validator | 8 Validate | Medium | ✅ | **done** — `HANDOFF.md` §3s |
-| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | next |
-| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | |
+| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | **done** — `HANDOFF.md` §3t |
+| **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | next |
 | **S7** | Live monitoring | 9 Monitor | Large | — | |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |
 | **S9** | One run, many workloads | structural | Large | — | |
@@ -817,6 +819,11 @@ seconds, with the offending request named.
 
 §9 and §10 together: self-service target registration, `SecretResolver` (`run://`, `env://`, and a
 **§31 pause** at `vault://`), `authRef` on workloads, the session pool, expiry detection.
+
+Built in S5 through the production session-delivery slice: runtime credential references,
+`SecretResolver`, broker-backed `run://session`, per-shard mounted `sessions.csv`, lifecycle cleanup,
+Helm RBAC and run-facing broker docs. `HANDOFF.md` §3t carries the exact scope, verification and
+remaining caveats.
 
 *Acceptance:* an authenticated API load test at 200 VUs with exactly `poolSize` sign-ins — pinned by a
 test that counts them. No credential value in any manifest, plan, artifact, event or log, verified by
@@ -975,10 +982,10 @@ credentials are a §31 pause. Re-run the kind procedure (`ROADMAP.md` §0's outs
 | **R1** | ~~vitest~~ | **Resolved: approved.** Added in S1. |
 | **R2** | **The recording browser is a user-driven browser inside the network.** Target-locking and egress policy are the controls | Security review before S10 is built. |
 | **R3** | **Traces and screenshots may contain customer data**, and the platform serves them for download | Governance answer needed. Proposal: on-failure only, short retention, sanitized. |
-| **R4** | **Secret manager** beyond `run://` and `env://` | §31 pause. S5 builds `run://` and `env://` and stops. |
+| **R4** | **Secret manager** beyond mounted `k8s://` and local development references | §31 pause. S5 added the `SecretResolver` port and mounted Kubernetes Secret resolver; Vault/AWS/Azure providers remain explicit decisions. |
 | **R5** | **Git credentials** for Playwright source fetch | **Not needed in release 1** — scripts are uploaded, not cloned (§5). S10 builds the seam. |
-| **R6** | **Who provisions the test-user pool?** S5 needs real accounts that can be locked or audited | Needs an owner before S5 ships. |
-| **R7** | **Session pool artefacts hold live credentials** for a run's duration | §9's answer is a proposal, not an approval. |
+| **R6** | ~~**Who provisions the test-user pool?**~~ | **Resolved for the platform seam:** S5 delegates acquisition to the approved external session broker contract. The owning broker/team still supplies real accounts outside this repo. |
+| **R7** | ~~**Session pool artefacts hold live credentials** for a run's duration~~ | **Resolved:** S5 delivers per-shard `sessions.csv` through run-scoped Kubernetes Secret volumes, never downloadable artifacts, with terminal and TTL cleanup. |
 | **R8** | **Browser cost.** 50 sessions ≈ 40 GB and 25 cores of ephemeral capacity | Budget decision, not an architectural one. |
 | **R9** | **INP cannot be claimed as the field metric.** The platform measures interactions in *its* journey | Must be labelled in the report, not just documented (§6). |
 | **R10** | **Playwright may not run on a read-only root filesystem** | Resolve in S7; if it deviates, say so in the report rather than relaxing the posture quietly. |

@@ -8,6 +8,7 @@ import com.perfplatform.domain.execution.ProvisionRequest;
 import com.perfplatform.domain.run.RunnerShard.ExecutionHandle;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
+import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +43,11 @@ class KubernetesExecutionProviderTest {
 
     private Job jobNamed(String name) {
         return client.batch().v1().jobs()
+                .inNamespace(RunnerFixtures.SETTINGS.namespace()).withName(name).get();
+    }
+
+    private Secret secretNamed(String name) {
+        return client.secrets()
                 .inNamespace(RunnerFixtures.SETTINGS.namespace()).withName(name).get();
     }
 
@@ -113,6 +119,41 @@ class KubernetesExecutionProviderTest {
                 .contains("runner image");
     }
 
+    @Test
+    @DisplayName("session files become a mounted Secret with explicit cleanup timestamps")
+    void createsSessionFileSecret() {
+        ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(List.of(
+                RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+
+        ProvisioningResult result = provider().provision(request);
+
+        assertThat(result.isAccepted()).isTrue();
+        Secret secret = secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request));
+        assertThat(secret).isNotNull();
+        assertThat(secret.getStringData()).containsEntry(
+                "sessions.csv", "session_id,session_value\n1,Bearer hidden");
+        assertThat(secret.getMetadata().getAnnotations())
+                .containsKey("perfplatform.ameriprise.com/secret-expires-at")
+                .containsKey("perfplatform.ameriprise.com/secret-delete-after");
+    }
+
+    @Test
+    @DisplayName("runtime credential Secrets also carry explicit cleanup timestamps")
+    void createsRuntimeCredentialSecretWithCleanupTimestamps() {
+        ProvisionRequest request = RunnerFixtures.requestWithCredentials(List.of(
+                new com.perfplatform.domain.execution.RuntimeCredential("test-user", "Bearer hidden")));
+
+        ProvisioningResult result = provider().provision(request);
+
+        assertThat(result.isAccepted()).isTrue();
+        Secret secret = secretNamed(RunnerJobManifest.runtimeCredentialSecretNameFor(request));
+        assertThat(secret).isNotNull();
+        assertThat(secret.getStringData()).containsEntry("PERF_AUTH_TEST_USER", "Bearer hidden");
+        assertThat(secret.getMetadata().getAnnotations())
+                .containsKey("perfplatform.ameriprise.com/secret-expires-at")
+                .containsKey("perfplatform.ameriprise.com/secret-delete-after");
+    }
+
     // ── Observing ────────────────────────────────────────────────────────
 
     @Test
@@ -162,6 +203,28 @@ class KubernetesExecutionProviderTest {
         assertThat(status.completedAt()).isPresent();
     }
 
+    @Test
+    @DisplayName("terminal observation deletes session file Secrets")
+    void completedJobDeletesSessionSecret() {
+        ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(List.of(
+                RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+        ExecutionHandle handle = provider().provision(request).handle().orElseThrow();
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNotNull();
+        Job job = jobNamed(handle.name());
+
+        replaceStatus(new JobBuilder(job)
+                .withNewStatus()
+                    .addNewCondition()
+                        .withType("Complete").withStatus("True")
+                        .withLastTransitionTime("2026-07-30T10:20:00Z")
+                    .endCondition()
+                .endStatus()
+                .build());
+
+        assertThat(provider().inspect(handle).phase()).isEqualTo(ExecutionPhase.SUCCEEDED);
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNull();
+    }
+
     /**
      * Includes {@code DeadlineExceeded}, which is how the cluster reports that it stopped a workload
      * that overran. The platform must see that as a failure rather than as a Job that merely stopped
@@ -188,12 +251,16 @@ class KubernetesExecutionProviderTest {
     @Test
     @DisplayName("a Job the TTL has reclaimed reports as gone, not as still running")
     void missingJobIsNotFound() {
-        ExecutionHandle handle = provisioned();
+        ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(List.of(
+                RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+        ExecutionHandle handle = provider().provision(request).handle().orElseThrow();
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNotNull();
         client.batch().v1().jobs()
                 .inNamespace(RunnerFixtures.SETTINGS.namespace())
                 .withName(handle.name()).delete();
 
         assertThat(provider().inspect(handle).phase()).isEqualTo(ExecutionPhase.NOT_FOUND);
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNull();
     }
 
     /**
@@ -203,12 +270,16 @@ class KubernetesExecutionProviderTest {
     @Test
     @DisplayName("a different Job reusing the same name is not mistaken for this one")
     void uidMismatchIsNotThisRunsJob() {
-        ExecutionHandle handle = provisioned();
+        ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(List.of(
+                RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+        ExecutionHandle handle = provider().provision(request).handle().orElseThrow();
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNotNull();
 
         ExecutionHandle stale =
                 new ExecutionHandle(handle.providerId(), handle.name(), "a-different-uid");
 
         assertThat(provider().inspect(stale).phase()).isEqualTo(ExecutionPhase.NOT_FOUND);
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNull();
     }
 
     // ── Cancelling ───────────────────────────────────────────────────────
@@ -216,12 +287,16 @@ class KubernetesExecutionProviderTest {
     @Test
     @DisplayName("cancelling deletes the Job")
     void cancellingDeletesTheJob() {
-        ExecutionHandle handle = provisioned();
+        ProvisionRequest request = RunnerFixtures.requestWithSecretFiles(List.of(
+                RunnerFixtures.sessionFile("session_id,session_value\n1,Bearer hidden")));
+        ExecutionHandle handle = provider().provision(request).handle().orElseThrow();
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNotNull();
 
         CancellationResult result = provider().cancel(handle);
 
         assertThat(result.terminated()).isTrue();
         assertThat(jobNamed(handle.name())).isNull();
+        assertThat(secretNamed(RunnerJobManifest.sessionFileSecretNameFor(request))).isNull();
     }
 
     /**

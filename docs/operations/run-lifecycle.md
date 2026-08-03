@@ -221,6 +221,8 @@ platform:
     execution-grace: 10m            # added to the plan duration to form the runner deadline
     validation-grace: 1m
     claim-batch-size: 20
+    session-acquisition:
+      provider: runtime-credential # use external-session-broker for production run://session
     capacity:
       global-max-runs: 10
       default-team-max-runs: 1
@@ -230,6 +232,10 @@ platform:
 Every value is enforced server-side. Nothing in a submitted specification can influence any of them:
 a specification that could raise its own limits would make the limits decorative, and the thing being
 limited is how much simultaneous load the platform points at internal systems.
+
+Broker-backed `run://session` has its own operator guide:
+[run-session-acquisition.md](run-session-acquisition.md). It covers Helm values, mounted Secret
+layout, the runner `sessions.csv` file and the broker request/response contract.
 
 ---
 

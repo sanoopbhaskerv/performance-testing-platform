@@ -15,6 +15,8 @@ import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
+import com.perfplatform.domain.port.SecretResolver;
+import com.perfplatform.domain.port.SessionAcquisitionProvider;
 import com.perfplatform.domain.port.SessionPoolProvider;
 import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TargetResolver;
@@ -37,9 +39,12 @@ import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
 import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ExternalSessionBrokerSessionAcquisitionProvider;
 import com.perfplatform.orchestration.run.InMemoryRuntimeCredentialStore;
+import com.perfplatform.orchestration.run.MountedFileSecretResolver;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
+import com.perfplatform.orchestration.run.RuntimeCredentialSessionAcquisitionProvider;
 import com.perfplatform.orchestration.run.RuntimeCredentialSessionPoolProvider;
 import com.perfplatform.orchestration.run.RunReconciler;
 import com.perfplatform.orchestration.run.RunWorkloadService;
@@ -49,6 +54,8 @@ import com.perfplatform.persistence.artifact.S3ArtifactStore;
 import com.perfplatform.persistence.dataset.FileSystemDatasetStore;
 import com.perfplatform.persistence.dataset.S3DatasetStore;
 import com.perfplatform.persistence.definition.TestDefinitionRegistry;
+import com.perfplatform.runner.kubernetes.EphemeralSecretCleaner;
+import com.perfplatform.runner.kubernetes.KubernetesEphemeralSecretCleaner;
 import com.perfplatform.runner.kubernetes.KubernetesExecutionProvider;
 import com.perfplatform.runner.kubernetes.RunnerCellSettings;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -72,6 +79,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -248,7 +256,7 @@ public class OrchestrationConfiguration {
         boolean production = environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES));
 
         if (KubernetesExecutionProvider.PROVIDER_ID.equalsIgnoreCase(selected)) {
-            return kubernetesExecutionProvider();
+            return new KubernetesExecutionProvider(kubernetesClient(), runnerCellSettings());
         }
 
         if (production) {
@@ -300,7 +308,10 @@ public class OrchestrationConfiguration {
      * still match while the thing executing it had changed, which quietly breaks the promise that a
      * run is reproducible (CLAUDE.md §8).
      */
-    private ExecutionProvider kubernetesExecutionProvider() {
+    @Bean
+    @ConditionalOnProperty(prefix = "platform.orchestration", name = "execution-provider",
+            havingValue = "kubernetes")
+    public RunnerCellSettings runnerCellSettings() {
         OrchestrationProperties.RunnerCell cell = properties.getRunnerCell();
 
         requireConfigured(cell.getNamespace(), "platform.orchestration.runner-cell.namespace",
@@ -352,13 +363,26 @@ public class OrchestrationConfiguration {
                     + "immutable definition version can execute on different runner builds.");
         }
 
-        KubernetesClient client = new KubernetesClientBuilder().build();
-
         log.info("Using the KUBERNETES execution provider: workloads run as isolated, ephemeral "
                         + "Jobs in namespace={} as serviceAccount={} with engines={}",
                 settings.namespace(), settings.serviceAccount(), settings.runnerImages().keySet());
 
-        return new KubernetesExecutionProvider(client, settings);
+        return settings;
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "platform.orchestration", name = "execution-provider",
+            havingValue = "kubernetes")
+    public KubernetesClient kubernetesClient() {
+        return new KubernetesClientBuilder().build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "platform.orchestration", name = "execution-provider",
+            havingValue = "kubernetes")
+    public EphemeralSecretCleaner kubernetesEphemeralSecretCleaner(
+            KubernetesClient client, RunnerCellSettings settings) {
+        return new KubernetesEphemeralSecretCleaner(client, settings);
     }
 
     /**
@@ -478,8 +502,91 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
-    public SessionPoolProvider sessionPoolProvider() {
-        return new RuntimeCredentialSessionPoolProvider();
+    public SecretResolver secretResolver() {
+        return new MountedFileSecretResolver(Path.of(properties.getSecretResolver().getMountRoot()));
+    }
+
+    @Bean
+    public SessionAcquisitionProvider sessionAcquisitionProvider(SecretResolver secrets) {
+        OrchestrationProperties.SessionAcquisition settings = properties.getSessionAcquisition();
+        String provider = settings.getProvider() == null
+                ? ""
+                : settings.getProvider().trim().toLowerCase(Locale.ROOT);
+        boolean production = environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES));
+
+        if ("runtime-credential".equals(provider)) {
+            if (production) {
+                throw new IllegalStateException("The runtime-credential session acquisition provider "
+                        + "clones a trigger-supplied credential and must not be the production "
+                        + "login/refresh strategy. Configure "
+                        + "platform.orchestration.session-acquisition.provider as "
+                        + "'oauth2-refresh' or 'external-session-broker' once the approved "
+                        + "provider implementation is installed.");
+            }
+            log.warn("Using the DEVELOPMENT session acquisition provider: sessions are cloned from "
+                    + "a trigger-supplied runtime credential and expire after {}.",
+                    settings.getRuntimeCredentialTtl());
+            return new RuntimeCredentialSessionAcquisitionProvider(
+                    settings.getRuntimeCredentialTtl());
+        }
+
+        if ("oauth2-refresh".equals(provider)) {
+            requireConfigured(settings.getEndpoint(),
+                    "platform.orchestration.session-acquisition.endpoint",
+                    "the approved session acquisition service base URL");
+            requireConfigured(settings.getLoginPath(),
+                    "platform.orchestration.session-acquisition.login-path",
+                    "the login endpoint path");
+            requireConfigured(settings.getRefreshPath(),
+                    "platform.orchestration.session-acquisition.refresh-path",
+                    "the refresh endpoint path");
+            requireConfigured(settings.getClientCredentialSecretRef(),
+                    "platform.orchestration.session-acquisition.client-credential-secret-ref",
+                    "the secret reference used by the provider, never the secret value");
+            throw new IllegalStateException("Session acquisition provider 'oauth2-refresh' is "
+                    + "configured but no approved implementation is bundled in this increment. "
+                    + "Install the provider adapter behind SessionAcquisitionProvider before "
+                    + "using this mode.");
+        }
+
+        if (ExternalSessionBrokerSessionAcquisitionProvider.PROVIDER_ID.equals(provider)) {
+            requireConfigured(settings.getEndpoint(),
+                    "platform.orchestration.session-acquisition.endpoint",
+                    "the approved session broker base URL");
+            requireConfigured(settings.getClientCredentialSecretRef(),
+                    "platform.orchestration.session-acquisition.client-credential-secret-ref",
+                    "the secret reference used by the provider, never the secret value");
+            requireMountedSecretReference(settings.getClientCredentialSecretRef(),
+                    "platform.orchestration.session-acquisition.client-credential-secret-ref");
+            return new ExternalSessionBrokerSessionAcquisitionProvider(
+                    HttpClient.newBuilder()
+                            .connectTimeout(settings.getRequestTimeout())
+                            .followRedirects(HttpClient.Redirect.NEVER)
+                            .build(),
+                    URI.create(settings.getEndpoint()),
+                    settings.getLoginPath(),
+                    settings.getRefreshPath(),
+                    settings.getClientCredentialSecretRef(),
+                    secrets,
+                    settings.getRequestTimeout());
+        }
+
+        throw new IllegalStateException("Unsupported session acquisition provider '" + provider
+                + "'. Available: runtime-credential, oauth2-refresh, external-session-broker.");
+    }
+
+    private static void requireMountedSecretReference(String value, String property) {
+        if (value == null || !value.trim().regionMatches(true, 0, "k8s://", 0,
+                "k8s://".length())) {
+            throw new IllegalStateException("Configuration '" + property
+                    + "' must be a k8s:// mounted Secret reference for the bundled "
+                    + "mounted-file SecretResolver.");
+        }
+    }
+
+    @Bean
+    public SessionPoolProvider sessionPoolProvider(SessionAcquisitionProvider acquisition) {
+        return new RuntimeCredentialSessionPoolProvider(acquisition);
     }
 
     @Bean

@@ -2,6 +2,7 @@ package com.perfplatform.runner.kubernetes;
 
 import com.perfplatform.domain.execution.ProvisionRequest;
 import com.perfplatform.domain.execution.RuntimeCredential;
+import com.perfplatform.domain.execution.SecretFileDelivery;
 import com.perfplatform.domain.identity.ExecutionPlanId;
 import com.perfplatform.domain.identity.RunnerShardId;
 import com.perfplatform.domain.identity.TeamId;
@@ -9,6 +10,7 @@ import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.spec.SpecificationDigest;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -77,6 +79,17 @@ final class RunnerFixtures {
         return build(0, 1, "jmeter", List.of(), credentials);
     }
 
+    static ProvisionRequest requestWithSecretFiles(List<SecretFileDelivery> secretFiles) {
+        return build(0, 1, "jmeter", List.of(), secretFiles, List.of());
+    }
+
+    static SecretFileDelivery sessionFile(String content) {
+        return new SecretFileDelivery("sessions.csv",
+                content.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                Instant.parse("2026-08-03T12:00:00Z"),
+                Instant.parse("2026-08-03T11:00:00Z"));
+    }
+
     private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
             List<com.perfplatform.domain.execution.DatasetDelivery> datasets) {
         return build(shardIndex, shardCount, engine, datasets, List.of());
@@ -84,6 +97,13 @@ final class RunnerFixtures {
 
     private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
             List<com.perfplatform.domain.execution.DatasetDelivery> datasets,
+            List<RuntimeCredential> credentials) {
+        return build(shardIndex, shardCount, engine, datasets, List.of(), credentials);
+    }
+
+    private static ProvisionRequest build(int shardIndex, int shardCount, String engine,
+            List<com.perfplatform.domain.execution.DatasetDelivery> datasets,
+            List<SecretFileDelivery> secretFiles,
             List<RuntimeCredential> credentials) {
         TestRunId runId = TestRunId.generate();
         return new ProvisionRequest(
@@ -98,6 +118,7 @@ final class RunnerFixtures {
                 "teams/t/runs/" + runId.value() + "/shards/s/shard-0.jmx",
                 List.of("checkout-load/browse"),
                 datasets,
+                secretFiles,
                 credentials,
                 DEADLINE);
     }

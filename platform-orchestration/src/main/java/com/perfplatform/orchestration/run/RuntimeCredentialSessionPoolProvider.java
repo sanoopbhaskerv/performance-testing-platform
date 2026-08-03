@@ -1,5 +1,6 @@
 package com.perfplatform.orchestration.run;
 
+import com.perfplatform.domain.port.SessionAcquisitionProvider;
 import com.perfplatform.domain.port.SessionPoolProvider;
 
 import java.time.Duration;
@@ -12,7 +13,8 @@ import java.util.Objects;
  *
  * <p>It does not log in to an application. It sizes the per-run pool and partitions a supplied
  * session value so the runner contract is exercised now, while a real acquisition provider can
- * replace it later behind {@link SessionPoolProvider}.
+ * replace {@link RuntimeCredentialSessionAcquisitionProvider} later without changing
+ * {@link SessionPoolProvider}.
  */
 public final class RuntimeCredentialSessionPoolProvider implements SessionPoolProvider {
 
@@ -22,29 +24,29 @@ public final class RuntimeCredentialSessionPoolProvider implements SessionPoolPr
 
     private static final Duration DEFAULT_SESSION_TTL = Duration.ofHours(12);
 
-    private final Duration sessionTtl;
+    private final SessionAcquisitionProvider acquisition;
 
     public RuntimeCredentialSessionPoolProvider() {
         this(DEFAULT_SESSION_TTL);
     }
 
     public RuntimeCredentialSessionPoolProvider(Duration sessionTtl) {
-        this.sessionTtl = Objects.requireNonNull(sessionTtl, "sessionTtl");
-        if (sessionTtl.isNegative() || sessionTtl.isZero()) {
-            throw new IllegalArgumentException("sessionTtl must be positive");
-        }
+        this(new RuntimeCredentialSessionAcquisitionProvider(sessionTtl));
+    }
+
+    public RuntimeCredentialSessionPoolProvider(SessionAcquisitionProvider acquisition) {
+        this.acquisition = Objects.requireNonNull(acquisition, "acquisition");
     }
 
     @Override
     public SessionPool acquire(SessionPoolRequest request) {
         int size = poolSizeFor(request.peakVirtualUsers());
         List<SessionLease> leases = new ArrayList<>(size);
+        var minimumValidUntil = request.requestedAt().plus(request.runDeadline());
         for (int index = 0; index < size; index++) {
-            leases.add(new SessionLease(
-                    "%s-%s-%03d".formatted(request.runId().value(), request.authenticationName(),
-                            index),
-                    request.seedCredential().value(),
-                    request.requestedAt().plus(sessionTtl)));
+            leases.add(acquisition.acquire(new SessionAcquisitionProvider.SessionAcquisitionRequest(
+                    request.runId(), request.authenticationName(), index, request.seedCredential(),
+                    request.requestedAt(), minimumValidUntil)));
         }
         return new SessionPool(request.authenticationName(), leases);
     }

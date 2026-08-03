@@ -73,6 +73,10 @@ spec:
               value: {{ .Values.runnerCell.finishedJobTtl | quote }}
             - name: PLATFORM_ORCHESTRATION_RUNNERCELL_DEADLINEGRACE
               value: {{ .Values.runnerCell.deadlineGrace | quote }}
+            - name: PLATFORM_ORCHESTRATION_LIFECYCLECLEANUP_ENABLED
+              value: {{ .Values.lifecycleCleanup.enabled | quote }}
+            - name: PLATFORM_ORCHESTRATION_LIFECYCLECLEANUP_INTERVAL
+              value: {{ .Values.lifecycleCleanup.interval | quote }}
 
             # Artifacts must be durable and reachable from every replica and
             # every runner. Startup refuses a pod-local filesystem in production.
@@ -97,6 +101,26 @@ spec:
             # token or an instance profile; a key in a values file is a key in
             # source control eventually.
 
+            # Session acquisition provider seam. The default runtime-credential
+            # provider is local-only; production profiles refuse it so a real
+            # login/refresh adapter must be selected intentionally.
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_PROVIDER
+              value: {{ .Values.sessionAcquisition.provider | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_RUNTIMECREDENTIALTTL
+              value: {{ .Values.sessionAcquisition.runtimeCredentialTtl | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_REQUESTTIMEOUT
+              value: {{ .Values.sessionAcquisition.requestTimeout | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_ENDPOINT
+              value: {{ .Values.sessionAcquisition.endpoint | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_LOGINPATH
+              value: {{ .Values.sessionAcquisition.loginPath | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_REFRESHPATH
+              value: {{ .Values.sessionAcquisition.refreshPath | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_CLIENTCREDENTIALSECRETREF
+              value: {{ .Values.sessionAcquisition.clientCredentialSecretRef | quote }}
+            - name: PLATFORM_ORCHESTRATION_SECRETRESOLVER_MOUNTROOT
+              value: {{ .Values.secretResolver.mountRoot | quote }}
+
             - name: JMETER_HOME
               value: {{ .Values.jmeter.home | quote }}
             - name: MAT_HOME
@@ -116,6 +140,11 @@ spec:
             - name: team-configs
               mountPath: /config/teams
               readOnly: true
+            {{- range $index, $secret := .Values.secretResolver.mountedSecrets }}
+            - name: secret-resolver-{{ $index }}
+              mountPath: {{ printf "%s/%s" $.Values.secretResolver.mountRoot $secret.name | quote }}
+              readOnly: true
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -141,3 +170,8 @@ spec:
         - name: team-configs
           configMap:
             name: {{ include "performance-platform.fullname" . }}-team-configs
+        {{- range $index, $secret := .Values.secretResolver.mountedSecrets }}
+        - name: secret-resolver-{{ $index }}
+          secret:
+            secretName: {{ $secret.name | quote }}
+        {{- end }}

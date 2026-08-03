@@ -2,11 +2,18 @@ package com.perfplatform.runner.kubernetes;
 
 import com.perfplatform.domain.execution.ProvisionRequest;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.KeyToPathBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.Volume;
+import io.fabric8.kubernetes.api.model.VolumeBuilder;
+import io.fabric8.kubernetes.api.model.VolumeMount;
+import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -74,6 +81,7 @@ public final class RunnerJobManifest {
     /** Where the runner's temporary workspace is mounted. Pod-local, never a durable reference. */
     private static final String WORKSPACE_PATH = "/workspace";
     private static final String WORKSPACE_VOLUME = "workspace";
+    private static final String SESSION_FILES_VOLUME = "session-files";
 
     private RunnerJobManifest() {
     }
@@ -88,6 +96,11 @@ public final class RunnerJobManifest {
     /** Run-scoped credential Secret name for this shard. */
     public static String runtimeCredentialSecretNameFor(ProvisionRequest request) {
         return nameFor(request) + "-auth";
+    }
+
+    /** Run-scoped mounted session-file Secret name for this shard. */
+    public static String sessionFileSecretNameFor(ProvisionRequest request) {
+        return nameFor(request) + "-sessions";
     }
 
     /** The label selector that finds every Job belonging to one run. */
@@ -134,14 +147,7 @@ public final class RunnerJobManifest {
                                     .withType("RuntimeDefault")
                                 .endSeccompProfile()
                             .endSecurityContext()
-                            .addNewVolume()
-                                .withName(WORKSPACE_VOLUME)
-                                // Temporary and pod-local by construction. Results become durable
-                                // by being uploaded to object storage, never by living here.
-                                .withNewEmptyDir()
-                                    .withSizeLimit(new Quantity(settings.workspaceSizeLimit()))
-                                .endEmptyDir()
-                            .endVolume()
+                            .withVolumes(volumes(request, settings))
                             .addNewContainer()
                                 .withName(COMPONENT)
                                 .withImage(settings.imageFor(request.engine()))
@@ -170,10 +176,7 @@ public final class RunnerJobManifest {
                                         .withDrop("ALL")
                                     .endCapabilities()
                                 .endSecurityContext()
-                                .addNewVolumeMount()
-                                    .withName(WORKSPACE_VOLUME)
-                                    .withMountPath(WORKSPACE_PATH)
-                                .endVolumeMount()
+                                .withVolumeMounts(volumeMounts(request))
                             .endContainer()
                         .endSpec()
                     .endTemplate()
@@ -249,6 +252,9 @@ public final class RunnerJobManifest {
         // dataset is business data and a Job manifest is readable by anyone with cluster access.
         // Already sliced, so a runner never decides which rows it sends.
         env.put("PERF_DATASETS", datasetsOf(request));
+        // Secret files are mounted into the workspace by the provider. Names only: values never
+        // enter the Job's environment, labels, annotations or command arguments.
+        env.put("PERF_SESSION_FILES", sessionFilesOf(request));
         // The labels the platform will read results back under. Objectives are scoped by workload
         // and by scenario, so output labelled any other way could not be judged.
         env.put("PERF_OPERATION_LABELS", String.join(",", request.operationLabels()));
@@ -310,6 +316,57 @@ public final class RunnerJobManifest {
         return request.datasets().stream()
                 .map(dataset -> dataset.fileName() + "=" + dataset.objectKey())
                 .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static String sessionFilesOf(ProvisionRequest request) {
+        return request.secretFiles().stream()
+                .map(com.perfplatform.domain.execution.SecretFileDelivery::fileName)
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static List<Volume> volumes(ProvisionRequest request, RunnerCellSettings settings) {
+        List<Volume> volumes = new ArrayList<>();
+        volumes.add(new VolumeBuilder()
+                .withName(WORKSPACE_VOLUME)
+                // Temporary and pod-local by construction. Results become durable by being uploaded
+                // to object storage, never by living here.
+                .withNewEmptyDir()
+                    .withSizeLimit(new Quantity(settings.workspaceSizeLimit()))
+                .endEmptyDir()
+                .build());
+
+        if (!request.secretFiles().isEmpty()) {
+            List<io.fabric8.kubernetes.api.model.KeyToPath> items = request.secretFiles().stream()
+                    .map(file -> new KeyToPathBuilder()
+                            .withKey(file.fileName())
+                            .withPath(file.fileName())
+                            .build())
+                    .toList();
+            volumes.add(new VolumeBuilder()
+                    .withName(SESSION_FILES_VOLUME)
+                    .withNewSecret()
+                        .withSecretName(sessionFileSecretNameFor(request))
+                        .withItems(items)
+                    .endSecret()
+                    .build());
+        }
+        return List.copyOf(volumes);
+    }
+
+    private static List<VolumeMount> volumeMounts(ProvisionRequest request) {
+        List<VolumeMount> mounts = new ArrayList<>();
+        mounts.add(new VolumeMountBuilder()
+                .withName(WORKSPACE_VOLUME)
+                .withMountPath(WORKSPACE_PATH)
+                .build());
+
+        request.secretFiles().forEach(file -> mounts.add(new VolumeMountBuilder()
+                .withName(SESSION_FILES_VOLUME)
+                .withMountPath(WORKSPACE_PATH + "/" + file.fileName())
+                .withSubPath(file.fileName())
+                .withReadOnly(Boolean.TRUE)
+                .build()));
+        return List.copyOf(mounts);
     }
 
     private static String shortId(String uuid) {

@@ -4,6 +4,7 @@ import com.perfplatform.domain.dataset.DatasetPartitioner;
 import com.perfplatform.domain.dataset.DatasetUri;
 import com.perfplatform.domain.execution.DatasetDelivery;
 import com.perfplatform.domain.execution.RuntimeCredential;
+import com.perfplatform.domain.execution.SecretFileDelivery;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.plan.ExecutionPlan;
 import com.perfplatform.domain.port.ArtifactStore;
@@ -84,9 +85,6 @@ public final class RunWorkloadService {
     /** The runner workspace file JMeter reads pooled session rows from. */
     public static final String SESSION_DATASET_FILE_NAME = "sessions.csv";
 
-    private static final String SESSION_DATASET_OBJECT_NAME =
-            ArtifactStore.DATASET_OBJECT_PREFIX + "sessions.csv";
-
     private final EngineRegistry engines;
     private final ArtifactStore artifacts;
     private final ResultCatalog results;
@@ -145,11 +143,16 @@ public final class RunWorkloadService {
      *
      * @param workload the rendered plan, stored before the runner starts
      * @param datasets this shard's partitions, already sliced so no two shards send the same row
+     * @param secretFiles this shard's ephemeral secret files, delivered outside artifact storage
      */
-    public record PreparedShard(ArtifactReference workload, List<DatasetDelivery> datasets) {
+    public record PreparedShard(
+            ArtifactReference workload,
+            List<DatasetDelivery> datasets,
+            List<SecretFileDelivery> secretFiles) {
 
         public PreparedShard {
             datasets = List.copyOf(datasets);
+            secretFiles = List.copyOf(secretFiles);
         }
     }
 
@@ -188,15 +191,16 @@ public final class RunWorkloadService {
 
         List<DatasetDelivery> datasets = new ArrayList<>(
                 prepareDatasets(run, specification, engine, shard));
-        prepareSessionDataset(run, specification, shard, runtimeCredentials, deadline, now)
-                .ifPresent(datasets::add);
+        List<SecretFileDelivery> secretFiles = new ArrayList<>();
+        prepareSessionFile(run, specification, shard, runtimeCredentials, deadline, now)
+                .ifPresent(secretFiles::add);
 
         log.info("Workload prepared runId={} shardIndex={} engine={} target={} artifact={} bytes={} "
                         + "datasets={}",
                 run.id(), shard.shardIndex(), plan.engine(), target.baseUrl(),
                 stored.objectKey(), stored.sizeBytes(), datasets.size());
 
-        return new PreparedShard(stored, datasets);
+        return new PreparedShard(stored, datasets, secretFiles);
     }
 
     /** The shape that predates runtime session delivery. */
@@ -301,7 +305,7 @@ public final class RunWorkloadService {
         return new DatasetDelivery(engine.datasetFileName(declared.name()), stored.objectKey());
     }
 
-    private Optional<DatasetDelivery> prepareSessionDataset(TestRun run,
+    private Optional<SecretFileDelivery> prepareSessionFile(TestRun run,
             PerformanceTestSpecification specification, RunnerShard shard,
             List<RuntimeCredential> runtimeCredentials, Duration deadline, Instant now) {
 
@@ -315,9 +319,7 @@ public final class RunWorkloadService {
         RuntimeCredential seed = runtimeCredentials.stream()
                 .filter(credential -> credential.name().equals(auth.name()))
                 .findFirst()
-                .orElseThrow(() -> new SessionUnavailableException(
-                        "A session credential required by the test definition was not available "
-                                + "for pooling"));
+                .orElse(null);
 
         SessionPoolProvider.SessionPool pool = sessionPools.acquire(
                 new SessionPoolProvider.SessionPoolRequest(run.id(), auth.name(), seed,
@@ -336,12 +338,11 @@ public final class RunWorkloadService {
                     csvEscape(lease.sessionId()), csvEscape(lease.value()), lease.expiresAt()));
         }
 
-        ArtifactReference stored = artifacts.store(
-                new ArtifactDescriptor(run.teamId(), run.id(), Optional.of(shard.id()),
-                        ArtifactType.DATASET, SESSION_DATASET_OBJECT_NAME, "text/csv"),
-                csv.toString().getBytes(StandardCharsets.UTF_8));
-
-        return Optional.of(new DatasetDelivery(SESSION_DATASET_FILE_NAME, stored.objectKey()));
+        return Optional.of(new SecretFileDelivery(
+                SESSION_DATASET_FILE_NAME,
+                csv.toString().getBytes(StandardCharsets.UTF_8),
+                pool.earliestExpiry(),
+                mustRemainValidUntil));
     }
 
     private static Optional<PerformanceTestSpecification.AuthenticationSpec> sessionAuthentication(

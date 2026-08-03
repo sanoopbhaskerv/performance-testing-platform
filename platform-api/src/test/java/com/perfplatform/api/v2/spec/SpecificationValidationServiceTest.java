@@ -31,7 +31,8 @@ class SpecificationValidationServiceTest {
 
         @ParameterizedTest(name = "{0} parses and validates")
         @ValueSource(strings = {
-                "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml"})
+                "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml",
+                "session-broker-api.yaml"})
         @DisplayName("every shipped valid example is valid")
         void validExamplesValidate(String name) {
             var outcome = service.validate(ExampleFixtures.valid(name));

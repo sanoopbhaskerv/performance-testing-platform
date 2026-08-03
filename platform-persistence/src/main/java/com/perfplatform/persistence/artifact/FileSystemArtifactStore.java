@@ -117,6 +117,18 @@ public class FileSystemArtifactStore implements ArtifactStore {
     }
 
     @Override
+    public synchronized void delete(ArtifactReference reference) {
+        Path file = resolveWithinRoot(reference.objectKey());
+        try {
+            Files.deleteIfExists(file);
+            index.removeIf(stored -> stored.reference().objectKey().equals(reference.objectKey()));
+        } catch (IOException e) {
+            throw new ArtifactStoreException(
+                    "Could not delete artifact " + reference.objectKey(), e);
+        }
+    }
+
+    @Override
     public synchronized List<ArtifactReference> listForRun(TestRunId runId) {
         return index.stream()
                 .map(StoredArtifact::reference)

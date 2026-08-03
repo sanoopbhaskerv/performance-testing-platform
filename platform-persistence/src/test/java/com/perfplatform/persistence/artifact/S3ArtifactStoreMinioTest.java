@@ -167,6 +167,19 @@ class S3ArtifactStoreMinioTest {
     }
 
     @Test
+    @DisplayName("deleting an artifact removes the object and is safe to repeat")
+    void deleteRemovesTheObject() {
+        ArtifactReference stored = store.store(descriptor(TeamId.generate(), TestRunId.generate(),
+                Optional.empty(), ArtifactType.RUNNER_LOG, "jmeter.log", "text/plain"),
+                "started\n".getBytes(StandardCharsets.UTF_8));
+
+        store.delete(stored);
+        store.delete(stored);
+
+        assertThat(store.read(stored)).isEmpty();
+    }
+
+    @Test
     @DisplayName("a run's artifacts can be listed back from storage alone")
     void listsARunsArtifacts() {
         TeamId teamId = TeamId.generate();

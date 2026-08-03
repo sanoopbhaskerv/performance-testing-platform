@@ -260,6 +260,10 @@ plan digest still matches while the thing executing it has changed.
 Object-storage credentials are never configured in Helm values — the AWS SDK's default provider
 chain reads them from an IRSA-projected service account token or an instance profile.
 
+Authenticated production runs that need short-lived application sessions use broker-backed
+`run://session`; see [`docs/operations/run-session-acquisition.md`](docs/operations/run-session-acquisition.md)
+for the Helm overlay, mounted Secret layout and broker contract.
+
 Before trusting any capacity number, read
 [`docs/operations/runner-calibration.md`](docs/operations/runner-calibration.md): a throttled load
 generator reports its own latency rather than the system's, and that failure is silent.

@@ -442,6 +442,23 @@ the test had started. The request never blocks — a performance test runs for m
 The run's team comes from the definition version, never from the request. A caller states *what* to
 run, not who to bill it to.
 
+### Broker-backed run://session
+
+A definition can declare `secretRef: run://session` when its workload needs broker-acquired
+application sessions. For the production broker path, the trigger request still references only the
+definition version:
+
+```json
+{
+  "definitionVersionId": "3f2b1c8e-5d4a-4a1b-9c7e-2f6d8b0a1e33"
+}
+```
+
+Do not put a bearer token, cookie or refresh token in the request. The control plane calls the
+configured session broker, partitions the leases per shard and mounts them into the runner as
+`/workspace/sessions.csv`. See [broker-backed run://session](../operations/run-session-acquisition.md)
+and the [session broker contract](../operations/session-broker-contract.md).
+
 ### The idempotency key is required
 
 Repeating a request with the same key returns the **original run** and sets

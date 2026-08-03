@@ -2,7 +2,14 @@ package com.perfplatform.v2;
 
 import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.port.SecretResolver;
+import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TeamDirectory;
+import com.perfplatform.domain.spec.TargetClass;
+import com.perfplatform.domain.target.RegisteredTarget;
+import com.perfplatform.domain.target.TargetAddress;
+import com.perfplatform.orchestration.run.ExternalSessionBrokerSessionAcquisitionProvider;
+import com.perfplatform.orchestration.run.RuntimeCredentialSessionAcquisitionProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -33,6 +40,9 @@ class ProductionSafetyGuardTest {
 
     /** A directory in which every name resolves. */
     private static final TeamDirectory TEAMS = resolvingEverything();
+    private static final TargetRegistry TARGETS = noTargets();
+    private static final SecretResolver SECRETS =
+            reference -> new SecretResolver.SecretMaterial(reference, "broker-client-token");
 
     private static TeamDirectory resolvingEverything() {
         return new TeamDirectory() {
@@ -58,6 +68,34 @@ class ProductionSafetyGuardTest {
 
             @Override
             public Optional<ApplicationId> findApplication(TeamId teamId, String name) {
+                return Optional.empty();
+            }
+        };
+    }
+
+    private static TargetRegistry noTargets() {
+        return new TargetRegistry() {
+            @Override
+            public RegisteredTarget register(TeamId teamId, ApplicationId applicationId,
+                    String applicationName, String environment, TargetClass targetClass,
+                    TargetAddress address, String actor) {
+                throw new UnsupportedOperationException("test target registry is read-only");
+            }
+
+            @Override
+            public Optional<RegisteredTarget> find(TeamId teamId, String applicationName,
+                    String environment) {
+                return Optional.empty();
+            }
+
+            @Override
+            public java.util.List<RegisteredTarget> listForTeam(TeamId teamId) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public Optional<TargetAddress> resolve(TeamId teamId, String applicationName,
+                    String environment) {
                 return Optional.empty();
             }
         };
@@ -293,27 +331,99 @@ class ProductionSafetyGuardTest {
     }
 
     @Nested
-    @DisplayName("the V1 team-YAML target resolver")
+    @DisplayName("target resolution")
     class TargetResolution {
 
         @Test
         @DisplayName("is available for local development")
         void availableLocally() {
-            assertThatCode(() -> configurationFor("local").targetResolver(null, null))
+            assertThatCode(() -> configurationFor("local").targetResolver(TARGETS))
                     .doesNotThrowAnyException();
         }
 
         /**
-         * A production deployment needs environment classification and a hostname allowlist
-         * (CLAUDE.md §20), neither of which V1's team YAML can express. Enabling production or
-         * unrestricted targets is a pause condition (§31), so this fails closed.
+         * Production no longer resolves targets from V1 team YAML. It uses the durable target
+         * registry, whose write path enforces target policy before a run can reference an address.
          */
         @Test
-        @DisplayName("is refused under the production profile")
-        void refusedInProduction() {
-            assertThatThrownBy(() -> configurationFor("production").targetResolver(null, null))
+        @DisplayName("uses the durable registry under the production profile")
+        void durableRegistryIsUsedInProduction() {
+            assertThat(configurationFor("production").targetResolver(TARGETS)).isSameAs(TARGETS);
+        }
+    }
+
+    @Nested
+    @DisplayName("session acquisition")
+    class SessionAcquisition {
+
+        @Test
+        @DisplayName("the runtime credential provider is available for local development")
+        void runtimeCredentialProviderIsAvailableLocally() {
+            assertThat(configurationFor("local").sessionAcquisitionProvider(SECRETS))
+                    .isInstanceOf(RuntimeCredentialSessionAcquisitionProvider.class);
+        }
+
+        @Test
+        @DisplayName("the runtime credential provider is refused in production")
+        void runtimeCredentialProviderIsRefusedInProduction() {
+            assertThatThrownBy(() -> configurationFor("production")
+                    .sessionAcquisitionProvider(SECRETS))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("hostname allowlist");
+                    .hasMessageContaining("runtime-credential")
+                    .hasMessageContaining("must not be the production");
+        }
+
+        @Test
+        @DisplayName("an unknown session acquisition provider fails loudly")
+        void unknownProviderFails() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getSessionAcquisition().setProvider("magic-login");
+
+            assertThatThrownBy(() -> configurationFor(properties, "local")
+                    .sessionAcquisitionProvider(SECRETS))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Unsupported session acquisition provider");
+        }
+
+        @Test
+        @DisplayName("the oauth2 refresh seam requires endpoint and secret references")
+        void oauth2RefreshRequiresCoordinates() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getSessionAcquisition().setProvider("oauth2-refresh");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .sessionAcquisitionProvider(SECRETS))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("session-acquisition.endpoint");
+        }
+
+        @Test
+        @DisplayName("the approved external broker provider is wired in production")
+        void externalBrokerProviderIsWired() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getSessionAcquisition().setProvider("external-session-broker");
+            properties.getSessionAcquisition().setEndpoint("https://session-broker.internal");
+            properties.getSessionAcquisition().setClientCredentialSecretRef(
+                    "k8s://session-broker-client/token");
+
+            assertThat(configurationFor(properties, "production")
+                    .sessionAcquisitionProvider(SECRETS))
+                    .isInstanceOf(ExternalSessionBrokerSessionAcquisitionProvider.class);
+        }
+
+        @Test
+        @DisplayName("the bundled external broker provider requires a mounted secret reference")
+        void externalBrokerRequiresMountedSecretReference() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getSessionAcquisition().setProvider("external-session-broker");
+            properties.getSessionAcquisition().setEndpoint("https://session-broker.internal");
+            properties.getSessionAcquisition().setClientCredentialSecretRef(
+                    "vault://performance/session-broker/client");
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .sessionAcquisitionProvider(SECRETS))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("k8s:// mounted Secret reference");
         }
     }
 

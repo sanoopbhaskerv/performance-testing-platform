@@ -42,4 +42,34 @@ class RuntimeCredentialSessionPoolProviderTest {
             assertThat(lease.sessionId()).contains(runId.value().toString());
         });
     }
+
+    @Test
+    @DisplayName("pooling delegates acquisition with the minimum validity window")
+    void delegatesToAcquisitionProvider() {
+        TestRunId runId = TestRunId.generate();
+        java.util.List<com.perfplatform.domain.port.SessionAcquisitionProvider
+                .SessionAcquisitionRequest> requests = new java.util.ArrayList<>();
+
+        RuntimeCredentialSessionPoolProvider provider = new RuntimeCredentialSessionPoolProvider(
+                request -> {
+                    requests.add(request);
+                    return new SessionPoolProvider.SessionLease("lease-" + request.sessionIndex(),
+                            "value-" + request.sessionIndex(),
+                            request.minimumValidUntil().plus(Duration.ofMinutes(5)));
+                });
+
+        SessionPoolProvider.SessionPool pool = provider.acquire(
+                new SessionPoolProvider.SessionPoolRequest(runId, "session",
+                        new RuntimeCredential("session", "seed"), 50,
+                        Duration.ofMinutes(30), NOW));
+
+        assertThat(pool.leases()).hasSize(5);
+        assertThat(requests).hasSize(5);
+        assertThat(requests).allSatisfy(request -> {
+            assertThat(request.runId()).isEqualTo(runId);
+            assertThat(request.authenticationName()).isEqualTo("session");
+            assertThat(request.seedCredential().toString()).doesNotContain("seed");
+            assertThat(request.minimumValidUntil()).isEqualTo(NOW.plus(Duration.ofMinutes(30)));
+        });
+    }
 }

@@ -65,13 +65,19 @@ Then check the permissions are what was intended — including what must *not* b
 SA=system:serviceaccount:default:perf-performance-platform-sa
 kubectl auth can-i create jobs --as=$SA -n perf-runners   # yes
 kubectl auth can-i delete jobs --as=$SA -n perf-runners   # yes
+kubectl auth can-i create secrets --as=$SA -n perf-runners # yes — run-scoped runtime credential
+                                                          #       and session-file Secrets
+kubectl auth can-i delete secrets --as=$SA -n perf-runners # yes — terminal cleanup and TTL sweep
 kubectl auth can-i patch  jobs --as=$SA -n perf-runners   # no  — an edited Job is a test whose
                                                           #       plan digest no longer describes it
-kubectl auth can-i get secrets --as=$SA -n perf-runners   # no
 kubectl auth can-i create jobs \
   --as=system:serviceaccount:perf-runners:perf-runner -n perf-runners   # no — a runner that could
                                                           #       create Jobs could create load
                                                           #       nobody asked for
+kubectl auth can-i get secrets \
+  --as=system:serviceaccount:perf-runners:perf-runner -n perf-runners    # no — runner Pods mount
+                                                          #       their own Secrets; the runner
+                                                          #       identity cannot list them
 ```
 
 ## 3. Supporting services

@@ -86,6 +86,13 @@ runnerCell:
   # image pull, startup and artifact upload.
   deadlineGrace: 5m
 
+lifecycleCleanup:
+  enabled: true
+  # Sweeps runner-owned ephemeral Secrets that survived because the control
+  # plane missed terminal observation. Normal completion/cancel paths delete
+  # them immediately.
+  interval: 1m
+
 # ─────────────────────────────────────────────────────────
 #  Artifact storage.
 #
@@ -123,6 +130,33 @@ artifacts:
   #   kubectl -n perf-runners create secret generic runner-storage-credentials \
   #     --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
   runnerCredentialsSecret: ""
+
+# Session acquisition provider seam. Values are coordinates and secret
+# references only, never session values or client secrets.
+sessionAcquisition:
+  # Local foundation mode. Production profiles refuse this; choose an approved
+  # real provider adapter such as oauth2-refresh or external-session-broker once
+  # it is installed.
+  provider: runtime-credential
+  runtimeCredentialTtl: 12h
+  requestTimeout: 10s
+  endpoint: ""
+  # For external-session-broker these default to the approved broker contract:
+  # /v1/sessions:acquire and /v1/sessions:refresh. For oauth2-refresh, set both
+  # explicitly when that adapter is installed.
+  loginPath: ""
+  refreshPath: ""
+  clientCredentialSecretRef: ""
+
+secretResolver:
+  # Existing Kubernetes Secrets mounted read-only into the control plane. The
+  # chart does not create these Secrets and never stores their values.
+  mountRoot: /var/run/perfplatform/secrets
+  mountedSecrets: []
+  # Example:
+  # mountedSecrets:
+  #   - name: session-broker-client
+  # Then reference key `token` as k8s://session-broker-client/token.
 
 # The control plane's own credentials are never configured here either. The SDK's
 # default provider chain reads them from the environment, an instance profile, or

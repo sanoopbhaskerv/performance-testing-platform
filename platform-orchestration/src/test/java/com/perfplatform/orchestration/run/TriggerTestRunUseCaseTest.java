@@ -113,7 +113,7 @@ class TriggerTestRunUseCaseTest {
             DefinitionVersion credentialed = versions.add(team, specification, true);
 
             TriggerResult result = useCase.trigger(new TriggerCommand(
-                    credentialed.id(), "credentialed", Map.of("session", "Bearer token-1")),
+                    credentialed.id(), "credentialed", Map.of("api-token", "Bearer token-1")),
                     caller);
 
             assertThat(runtimeCredentials.find(result.run().id()))
@@ -125,11 +125,24 @@ class TriggerTestRunUseCaseTest {
                     });
 
             TriggerResult replay = useCase.trigger(new TriggerCommand(
-                    credentialed.id(), "credentialed", Map.of("session", "Bearer token-2")),
+                    credentialed.id(), "credentialed", Map.of("api-token", "Bearer token-2")),
                     caller);
             assertThat(replay.replayed()).isTrue();
             assertThat(runtimeCredentials.find(result.run().id()).get(0).value())
                     .isEqualTo("Bearer token-2");
+        }
+
+        @Test
+        @DisplayName("run session acquisition does not require trigger-supplied material")
+        void runSessionAcquisitionDoesNotRequireTriggerMaterial() {
+            DefinitionVersion credentialed =
+                    versions.add(team, specificationWithRunSession(), true);
+
+            TriggerResult result = useCase.trigger(new TriggerCommand(
+                    credentialed.id(), "broker-backed-session", Map.of()), caller);
+
+            assertThat(result.run().state()).isEqualTo(RunState.QUEUED);
+            assertThat(runtimeCredentials.find(result.run().id())).isEmpty();
         }
 
         @Test
@@ -287,6 +300,23 @@ class TriggerTestRunUseCaseTest {
     }
 
     private static PerformanceTestSpecification specificationWithRunCredential() {
+        PerformanceTestSpecification base = OrchestrationFixtures.apiSpecification();
+        var body = base.spec();
+        var workload = body.workloads().get(0);
+        var credentialed = new PerformanceTestSpecification.WorkloadSpec(
+                workload.name(), workload.type(), workload.engine(), workload.sourceRef(),
+                "session", workload.model(), workload.scenarios(), workload.startWhen(),
+                workload.browserUsers(), workload.iterationsPerUser());
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(),
+                        List.of(new PerformanceTestSpecification.AuthenticationSpec(
+                                "session", "bearer", "Authorization", "run://api-token")),
+                        body.datasets(), List.of(credentialed), body.objectives(),
+                        body.observability(), body.governance()));
+    }
+
+    private static PerformanceTestSpecification specificationWithRunSession() {
         PerformanceTestSpecification base = OrchestrationFixtures.apiSpecification();
         var body = base.spec();
         var workload = body.workloads().get(0);

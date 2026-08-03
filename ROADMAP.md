@@ -17,9 +17,10 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S4** — the studio, a report a non-expert can read, run progress,
-> multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen and the
-> live Validator. `HANDOFF.md` §3n–§3s.
+> **Built so far: S1 through S5** — the studio, a report a non-expert can read, run progress,
+> multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
+> Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
+> delivery and lifecycle cleanup. `HANDOFF.md` §3n–§3t.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -31,13 +32,13 @@ immutably per version, verified against the columns a test declares, sliced per 
 HAR or a Postman collection, give it real data, run it and read a report — without writing JMX.
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
-was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and three of those six are built. Everything
+was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and five of those six are built. Everything
 below is still an accurate inventory of what exists and what does not.
 
-**V1's removal is authorized** and deferred until after the studio build phases. The UI half is
-cheap; the API half is blocked until S5, because `DevelopmentCallerContextProvider`,
-`TeamYamlTargetResolver` and `TeamRegistrySynchronizer` all read V1's `TeamConfigLoader` — V2 has no
-identity and no targets without it. `PLAN.md` §0, "On V1".
+**V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
+credentials/session blocker, but the API half still needs a focused removal audit because
+development identity is local-only and V1 endpoints must stay operational until an explicit removal
+increment.
 
 **One thing to carry forward, wherever you go next:** 2h changed the runner image's entrypoint, and
 that change has not been run on a cluster. The local path is verified with real load. Re-run
@@ -136,8 +137,12 @@ Each is real, none blocks anything.
 - ~~**The HAR importer still emits sibling scenarios.**~~ **Done in S3** — a capture becomes one
   journey per page with ordered steps, and the `notOrdered` warning was inverted into
   `correlationNeeded`. `HANDOFF.md` §3q.
-- **The studio asks for the team name.** Nothing reports the caller's own team: `TeamDirectory` maps
-  name to id and not back, and no endpoint exposes it. Owned by `PLAN.md` S5.
+- **The studio still asks for the team name.** Nothing reports the caller's own team:
+  `TeamDirectory` maps name to id and not back, and no endpoint exposes it. S5 closed credential and
+  session handling; this belongs with the later identity/V1-removal audit.
+- ~~**Production `run://session` needed a provider and delivery contract.**~~ **Done in S5**:
+  `ExternalSessionBrokerSessionAcquisitionProvider`, mounted `SecretResolver`, per-shard
+  `sessions.csv`, Helm RBAC and docs. `HANDOFF.md` §3t.
 - **The credential-name list is header-shaped.** `x-api-key` is refused as a query parameter but
   `api_key`, `access_token` and `token` are not, so `?api_key=short-value` passes. A query string
   reaches every access log between the runner and the target. Uncovered during S3 and deliberately

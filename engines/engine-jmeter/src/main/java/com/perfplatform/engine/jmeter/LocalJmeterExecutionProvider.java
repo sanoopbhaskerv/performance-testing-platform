@@ -4,6 +4,7 @@ import com.perfplatform.domain.execution.DatasetDelivery;
 import com.perfplatform.domain.execution.ExecutionPhase;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.execution.ProvisionRequest;
+import com.perfplatform.domain.execution.SecretFileDelivery;
 import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactDescriptor;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactType;
@@ -154,6 +155,7 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
             // Beside the plan, because the process runs with this directory as its working
             // directory and the plan's CSVDataSet refers to a plain file name.
             writeDatasets(request, directory);
+            writeSecretFiles(request, directory);
 
             Path results = directory.resolve("results.jtl");
             Path logFile = directory.resolve("jmeter.log");
@@ -367,6 +369,20 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
                                     + "to send"));
 
             Files.write(directory.resolve(delivery.fileName()), content);
+        }
+    }
+
+    /**
+     * Places run-scoped secret files where the plan expects them.
+     *
+     * <p>Local execution is development-only, so this uses a scratch file rather than a Kubernetes
+     * Secret volume. The lifecycle is still bounded by the process directory, and the content is not
+     * stored as an artifact or written to logs.
+     */
+    private static void writeSecretFiles(ProvisionRequest request, Path directory)
+            throws IOException {
+        for (SecretFileDelivery delivery : request.secretFiles()) {
+            Files.write(directory.resolve(delivery.fileName()), delivery.content());
         }
     }
 

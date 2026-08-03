@@ -81,6 +81,30 @@ platform:
     # Runs last minutes to hours, so polling faster buys nothing and costs a round trip per
     # replica per tick.
     reconciliation-interval: 10s
+    lifecycle-cleanup:
+      enabled: ${LIFECYCLE_CLEANUP_ENABLED:true}
+      # Sweeps runner-owned ephemeral Secrets that outlived terminal observation because the
+      # control plane restarted or lost contact. Normal completion/cancel paths still delete them
+      # immediately.
+      interval: ${LIFECYCLE_CLEANUP_INTERVAL:1m}
+
+    session-acquisition:
+      # Development foundation. Production profiles refuse this mode; configure an approved
+      # provider adapter once real login/refresh acquisition is installed.
+      provider: ${SESSION_ACQUISITION_PROVIDER:runtime-credential}
+      runtime-credential-ttl: ${SESSION_ACQUISITION_RUNTIME_CREDENTIAL_TTL:12h}
+      request-timeout: ${SESSION_ACQUISITION_REQUEST_TIMEOUT:10s}
+      # Provider seams for approved production acquisition. Coordinates and secret references only;
+      # never put session values, client secrets or refresh tokens in configuration.
+      endpoint: ${SESSION_ACQUISITION_ENDPOINT:}
+      login-path: ${SESSION_ACQUISITION_LOGIN_PATH:}
+      refresh-path: ${SESSION_ACQUISITION_REFRESH_PATH:}
+      client-credential-secret-ref: ${SESSION_ACQUISITION_CLIENT_CREDENTIAL_SECRET_REF:}
+
+    secret-resolver:
+      # Mounted Kubernetes Secret files. k8s://broker-client/token resolves to
+      # /var/run/perfplatform/secrets/broker-client/token.
+      mount-root: ${SECRET_RESOLVER_MOUNT_ROOT:/var/run/perfplatform/secrets}
 
     # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
     # actively working on to a peer mid-provision.

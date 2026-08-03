@@ -420,6 +420,7 @@ public final class RunReconciler {
                 prepared.workload().objectKey(),
                 operationLabels,
                 prepared.datasets(),
+                prepared.secretFiles(),
                 material,
                 deadlineFor(plan));
     }
@@ -634,6 +635,7 @@ public final class RunReconciler {
                 .map(authByName::get)
                 .filter(Objects::nonNull)
                 .filter(auth -> auth.secretRef() != null
+                        && !"run://session".equalsIgnoreCase(auth.secretRef().trim())
                         && (auth.secretRef().regionMatches(true, 0, "run://", 0,
                                 "run://".length())
                         || auth.secretRef().regionMatches(true, 0, "env://", 0,

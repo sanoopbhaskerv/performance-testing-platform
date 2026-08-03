@@ -17,8 +17,8 @@ import java.util.Objects;
  * No persisted secrets and no specification-level credential values. S5 carries run-scoped
  * runtime credentials only from trigger to provisioning. A provider must deliver those to the
  * runner without embedding the values in labels, annotations, command arguments or stored plans;
- * Kubernetes does that through a per-shard Secret reference, and local development does it through
- * child-process environment only.
+ * Kubernetes does that through per-shard Secret references and mounted Secret files, and local
+ * development does it through child-process environment plus local scratch files only.
  *
  * <p>Also absent: the specification. The runner executes the compiled plan, which it fetches by
  * identifier. Passing the specification would invite a runner to reinterpret it and produce
@@ -44,7 +44,8 @@ import java.util.Objects;
  * @param datasets    this shard's dataset partitions, as keys plus the file names the engine expects
  *                    them under. Already sliced so no two shards send the same row — a provider
  *                    fetches and places them, and decides nothing about their contents
- * @param runtimeCredentials run-scoped credential material. Never persisted and never logged.
+ * @param secretFiles run-scoped secret files. Never persisted as artifacts and never logged.
+ * @param runtimeCredentials run-scoped scalar credential material. Never persisted and never logged.
  * @param deadline    hard wall-clock ceiling; the provider must stop the workload at this point
  *                    even if the plan believes it has more to do
  */
@@ -60,6 +61,7 @@ public record ProvisionRequest(
         String workloadKey,
         List<String> operationLabels,
         List<DatasetDelivery> datasets,
+        List<SecretFileDelivery> secretFiles,
         List<RuntimeCredential> runtimeCredentials,
         Duration deadline) {
 
@@ -75,6 +77,7 @@ public record ProvisionRequest(
         }
         operationLabels = operationLabels == null ? List.of() : List.copyOf(operationLabels);
         datasets = datasets == null ? List.of() : List.copyOf(datasets);
+        secretFiles = secretFiles == null ? List.of() : List.copyOf(secretFiles);
         runtimeCredentials = runtimeCredentials == null ? List.of() : List.copyOf(runtimeCredentials);
         if (engine == null || engine.isBlank()) {
             throw new IllegalArgumentException("engine must not be null or blank");
@@ -97,6 +100,16 @@ public record ProvisionRequest(
             SpecificationDigest planDigest, String workloadKey, List<String> operationLabels,
             List<DatasetDelivery> datasets, Duration deadline) {
         this(runId, teamId, shardId, shardIndex, shardCount, engine, planId, planDigest,
-                workloadKey, operationLabels, datasets, List.of(), deadline);
+                workloadKey, operationLabels, datasets, List.of(), List.of(), deadline);
+    }
+
+    /** The shape that predates secret file delivery. */
+    public ProvisionRequest(TestRunId runId, TeamId teamId, RunnerShardId shardId,
+            int shardIndex, int shardCount, String engine, ExecutionPlanId planId,
+            SpecificationDigest planDigest, String workloadKey, List<String> operationLabels,
+            List<DatasetDelivery> datasets, List<RuntimeCredential> runtimeCredentials,
+            Duration deadline) {
+        this(runId, teamId, shardId, shardIndex, shardCount, engine, planId, planDigest,
+                workloadKey, operationLabels, datasets, List.of(), runtimeCredentials, deadline);
     }
 }

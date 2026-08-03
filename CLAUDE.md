@@ -212,6 +212,17 @@ Do not preserve flawed coupling merely for compatibility.
 
 ### After each increment
 
+Before reporting, update the handoff documents and commit the completed increment unless the user
+explicitly says not to commit. The handoff set is:
+
+1. `HANDOFF.md`.
+2. `NEXT-SESSION.md`.
+3. `ROADMAP.md`.
+4. `PLAN.md`.
+
+The commit must include the code and handoff documents together. Do not push, tag, merge or publish
+without explicit user authorization.
+
 Report:
 
 1. Outcome.
@@ -1722,4 +1733,3 @@ The foundation is not complete until:
 Unless the user explicitly requests a later increment, begin with:
 
 > Execute Increment 0 and Increment 1A only. Do not implement the canonical specification, Kubernetes provider, Playwright, Dynatrace or new UI yet. Protect current behavior, establish the modular skeleton, keep V1 operational, run all available verification and stop with the required completion report.
-

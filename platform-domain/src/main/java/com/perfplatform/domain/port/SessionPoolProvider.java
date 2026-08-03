@@ -12,9 +12,9 @@ import java.util.Objects;
  * Acquires run-scoped application sessions for load generators.
  *
  * <p>This is deliberately a port. The foundation implementation can turn one caller-supplied
- * runtime session into a bounded per-run pool, while a later provider can log in through an
- * approved identity flow, refresh expiring sessions, or lease already-warmed sessions without
- * changing orchestration or engine rendering.
+ * runtime session into a bounded per-run pool, while a production implementation can log in through
+ * an approved identity flow, refresh expiring sessions, or lease already-warmed sessions without
+ * changing orchestration, engine rendering or runner manifest construction.
  */
 public interface SessionPoolProvider {
 
@@ -71,6 +71,12 @@ public interface SessionPoolProvider {
             }
             Objects.requireNonNull(expiresAt, "expiresAt");
         }
+
+        @Override
+        public String toString() {
+            return "SessionLease[sessionId=%s, value=<redacted>, expiresAt=%s]"
+                    .formatted(sessionId, expiresAt);
+        }
     }
 
     /** Acquired sessions for the run. */
@@ -92,5 +98,13 @@ public interface SessionPoolProvider {
         }
     }
 
+    /**
+     * Acquires or refreshes enough sessions for the request.
+     *
+     * <p>Implementations must return leases whose values are valid until at least the requested run
+     * deadline. The orchestration layer verifies that again before provisioning, because a stale
+     * session pool would generate a high-volume authentication failure and then report excellent
+     * latency for requests that did no useful work.
+     */
     SessionPool acquire(SessionPoolRequest request);
 }

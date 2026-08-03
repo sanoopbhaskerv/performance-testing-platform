@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S3. Increments 0–2h and S1–S3 are complete and committed.
+**Last updated:** Studio increment S5. Increments 0–2h and S1–S5 are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -17,17 +17,19 @@ Twelve increments, S1–S12, each shipping a backend capability *and* its studio
 S1–S6**. **`PLAN.md` supersedes `ROADMAP.md` §§2–5 as the statement of what happens next**;
 `ROADMAP.md` remains the inventory of what exists.
 
-**S1, S2 and S3 are built** (§3n–§3r). A test can be described by clicking, its report opens with
-the answer in a sentence, a running test shows where it is in its plan, and a journey can sign in,
-carry a session forward, and review correlation rules before they are applied.
+**S1 through S5 are built** (§3n–§3t). A test can be described by clicking, its report opens with
+the answer in a sentence, a running test shows where it is in its plan, a journey can sign in, carry
+a session forward, review correlation rules before they are applied, validate one live protocol
+iteration before save, and production session acquisition now has secure `run://session` delivery,
+lifecycle cleanup, a broker provider seam and run-facing operator docs.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
 - **vitest is approved** (§31 pause cleared) and was added in S1. **133 UI tests** where there were
   none.
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
-  the studio build phases. The UI half is cheap; the API half is blocked until S5 (`PLAN.md` §0,
-  "On V1").
+  the studio build phases. S5 removed the credentials/session blocker, but API removal still needs a
+  focused audit of identity, target resolution and team sync (`PLAN.md` §0, "On V1").
 - **The recorder is deferred to S10.** Release 1 ships guided capture wizards instead: DevTools HAR
   for protocol journeys, `npx playwright codegen` for browser journeys. **A HAR cannot produce a
   Playwright script** — it records traffic, not user actions — so the two halves need separate
@@ -39,7 +41,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S5, Targets, credentials and sessions**.
+`NEXT-SESSION.md` §2 has the immediate task: **S6, the browser engine and Core Web Vitals**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -75,13 +77,20 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S3 — HAR imports ordered journeys** | **Complete** | see §3q |
 | **S3 — studio Rules screen** | **Complete** | see §3r |
 | **S4 — the Validator** | **Complete** | see §3s |
-| **S5–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S5 — Targets, credentials and sessions** | **Complete** | see §3t |
+| **S6 — the browser engine and Core Web Vitals** | **Next** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
 **941 Java tests green on the committed S4 slice, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h,
 931 at S3 engine, 936 after S3 Rules, 941 after S4 Validator).
+
+S5 focused verification is green: `mvn test-compile`, `mvn test -pl platform-orchestration -am`,
+focused `ProductionSafetyGuardTest`, focused Kubernetes provider tests, focused published-example
+validation for `session-broker-api.yaml`, and Helm rendering of the session-broker production
+overlay. Full `SpecificationValidationServiceTest` still hits the known unrelated manual-request
+fixture mismatch described below.
 
 **133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
@@ -99,15 +108,17 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S5, Targets, credentials and sessions.** `NEXT-SESSION.md` §2 has the
+**Immediate next action: S6, the browser engine and Core Web Vitals.** `NEXT-SESSION.md` §2 has the
 detail.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
 1. ~~**A journey is one request.**~~ **Fixed in S3** (§3p). Scenarios carry ordered steps, values are
    extracted and carried forward, and a failed extraction fails the sample.
-2. **`spec.authentication` is parsed, canonicalized, validated and used by nothing.** No
-   `SecretResolver` exists anywhere in the tree. **S5** — and this is also what blocks V1's removal.
+2. ~~**`spec.authentication` is parsed, canonicalized, validated and used by nothing.**~~ **S5
+   added runtime credential handling, `SecretResolver`, broker-backed `run://session`, mounted
+   session partitions and production cleanup.** Real enterprise identity and non-Kubernetes secret
+   managers remain later pause-condition decisions.
 3. **A run has one plan with one engine.** `EngineDispatchingPlanCompiler.primaryEngine()` takes the
    first workload that declares an engine and **silently ignores the rest** — so triggering the
    shipped `specification/examples/valid/hybrid.yaml` compiles only JMeter and drops the browser
@@ -1088,8 +1099,8 @@ number somebody invented and then trusts.
 ### Not done, and owned by later increments
 
 - **The team name is asked for rather than filled in.** Nothing reports the caller's own team —
-  `TeamDirectory` maps name → id and not back, and no endpoint exposes it. S5's identity work fixes
-  it; until then the studio asks, exactly as the YAML templates already did.
+  `TeamDirectory` maps name → id and not back, and no endpoint exposes it. S5 closed credentials and
+  sessions; this now belongs with the later identity/V1-removal audit.
 - **The status page is unchanged.** Elapsed, current stage and a progress bar are S2, along with the
   report's novice rewrite.
 - **`web-experience` is choosable but not runnable.** The card, the steps and the browser-specific
@@ -1341,8 +1352,8 @@ surfaced for review, not converted into executable behavior behind the user's ba
 ### Deliberately left for later
 
 - **Parameterization-by-clicking** is still not in the studio. Dataset binding already exists in the
-  API/YAML path; choosing a request value and binding it to a dataset column belongs with S5's Data
-  and Auth work.
+  API/YAML path; choosing a request value and binding it to a dataset column remains a studio UX
+  follow-up.
 - ~~**The Validator is still next.**~~ Closed in §3s. The studio now runs one live protocol
   iteration and shows whether correlations and assertions actually resolve.
 
@@ -1389,14 +1400,71 @@ journey/step evidence, and stores the result against the exact generated YAML. T
 disabled until the current document has a successful Validator result, so changing a rule or journey
 after validation requires another live check.
 
-### Deliberately left for S5/S6
+### Deliberately left for S6
 
-- Runtime credential references (`run://`, `env://`) and session pools are S5.
+- Runtime credential references (`run://`, `env://`) and session pools are closed in §3t.
 - Browser journey validation is S6.
 - The full reactor could not be re-run in the current dirty worktree because unrelated student-demo
   changes modified `specification/examples/valid/demo-service.yaml` to `/api/students/1` while
   `SpecificationValidationServiceTest.preservesManualRequests` still expects `/api/users` and
   `/api/payments`. Focused S4 backend/UI checks are green.
+
+---
+
+## 3t. S5 — targets, credentials, sessions
+
+**S5 is complete through the production session-delivery slice.** The earlier S5 commit added
+self-service target registration and runtime credential management. The follow-up S5c–S5f work added
+secure production delivery for `run://session`, lifecycle cleanup, a real provider adapter seam and
+run-facing operational documentation.
+
+### What shipped
+
+- `run://session` no longer requires a runtime-supplied credential in production. The trigger
+  references only the immutable definition version; the configured provider acquires leases.
+- `SessionAcquisitionProvider` is the seam for real login/refresh acquisition, with
+  `ExternalSessionBrokerSessionAcquisitionProvider` as the approved production implementation.
+- `SecretResolver` resolves provider client credentials by reference. The bundled resolver supports
+  mounted Kubernetes Secret files such as `k8s://session-broker-client/token`.
+- The control plane partitions acquired sessions per shard and delivers them as `sessions.csv` via
+  run-scoped Kubernetes Secret volumes mounted read-only into `/workspace`.
+- Runtime credential Secrets and session-file Secrets are deleted on terminal observation or
+  cancellation, and the Spring lifecycle sweeper deletes runner-managed Secrets whose explicit
+  delete-after annotation has elapsed.
+- `ArtifactStore.delete(...)` gives production cleanup an object-store port instead of relying on
+  provider-specific side effects.
+- Helm exposes lifecycle cleanup, session acquisition, mounted Secret resolver settings and
+  namespace-scoped runner RBAC for ephemeral Secrets.
+- Run-facing docs now describe broker-backed `run://session`, mounted Secret layout, Helm production
+  values and broker request/response contracts.
+
+### Operational docs and examples
+
+- `docs/operations/run-session-acquisition.md` — operator flow and mounted Secret layout.
+- `docs/operations/session-broker-contract.md` — acquire/refresh request and response contract.
+- `helm/performance-platform/examples/session-broker-production-values.yaml` — production-like
+  values overlay with references and names only.
+- `specification/examples/valid/session-broker-api.yaml` — consumer-facing YAML example.
+
+### Verification
+
+- `mvn test -pl platform-orchestration -am` — passed during S5e.
+- `mvn clean test -pl platform-core -am -Dtest=ProductionSafetyGuardTest -Dsurefire.failIfNoSpecifiedTests=false` — passed during S5e.
+- `mvn test -pl runners/runner-kubernetes -am -Dtest=KubernetesExecutionProviderTest -Dsurefire.failIfNoSpecifiedTests=false` — passed; the first sandboxed attempt failed because Fabric8's mock server could not bind a local socket, then passed with approved local socket permission.
+- `mvn test -pl platform-api -am -Dtest='SpecificationValidationServiceTest$ValidExamples#validExamplesValidate' -Dsurefire.failIfNoSpecifiedTests=false` — passed, including `session-broker-api.yaml`.
+- `helm template perf helm/performance-platform -f helm/performance-platform/examples/session-broker-production-values.yaml` — passed.
+- `mvn test-compile` — passed across all modules.
+- `git diff --check` — passed.
+
+### Deliberately left for S6 and later
+
+- Browser execution, browser validation and Core Web Vitals are S6.
+- Corporate OIDC and non-Kubernetes secret managers remain pause-condition decisions.
+- The full `SpecificationValidationServiceTest` class still fails on the unrelated manual-request
+  fixture mismatch: it expects `/api/users` and `/api/payments`, while the current demo fixture has
+  `/api/students/1`.
+- A production broker and real broker client Secret were not deployed; S5 proves the adapter
+  contract, mounted reference path and Helm wiring.
 
 ---
 

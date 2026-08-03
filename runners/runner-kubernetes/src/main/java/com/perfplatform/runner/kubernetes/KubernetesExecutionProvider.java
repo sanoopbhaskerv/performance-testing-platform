@@ -106,11 +106,17 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
                 return ProvisioningResult.accepted(handleFor(existing, name));
             }
 
-            createRuntimeCredentialSecret(request);
-            Job created = client.batch().v1().jobs()
-                    .inNamespace(settings.namespace())
-                    .resource(RunnerJobManifest.build(request, settings))
-                    .create();
+            createEphemeralSecrets(request);
+            Job created;
+            try {
+                created = client.batch().v1().jobs()
+                        .inNamespace(settings.namespace())
+                        .resource(RunnerJobManifest.build(request, settings))
+                        .create();
+            } catch (RuntimeException e) {
+                deleteEphemeralSecrets(name);
+                throw e;
+            }
 
             log.info("Runner Job created runId={} teamId={} shardIndex={} engine={} job={} uid={} "
                             + "namespace={}",
@@ -120,6 +126,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
             return ProvisioningResult.accepted(handleFor(created, name));
 
         } catch (RunnerCellSettings.UnknownRunnerImageException e) {
+            deleteEphemeralSecrets(name);
             // A configuration problem, and one a consumer can be told about plainly: their engine is
             // not deployable in this cell. Not an exception, because retrying will not fix it.
             log.error("Refusing to provision runId={} engine={}: {}",
@@ -127,6 +134,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
             return ProvisioningResult.rejected(e.getMessage());
 
         } catch (KubernetesClientException e) {
+            deleteEphemeralSecrets(name);
             log.error("Runner Job creation refused runId={} shardIndex={} job={} status={}",
                     request.runId(), request.shardIndex(), name, e.getCode(), e);
             // Sanitized: the cluster's own message can carry namespace policy, webhook and node
@@ -157,6 +165,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
         if (job == null) {
             // Either the TTL reclaimed a finished Job or it never existed. Both mean nothing is
             // executing now, which is the part that matters for capacity.
+            deleteEphemeralSecrets(handle.name());
             return ExecutionStatus.of(ExecutionPhase.NOT_FOUND);
         }
 
@@ -165,12 +174,13 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
         if (!handle.uid().equals(uidOf(job))) {
             log.warn("Runner Job job={} has uid={} but the run recorded uid={}; treating as gone",
                     handle.name(), uidOf(job), handle.uid());
+            deleteEphemeralSecrets(handle.name());
             return ExecutionStatus.of(ExecutionPhase.NOT_FOUND);
         }
 
         ExecutionStatus status = statusOf(job);
         if (status.phase() == ExecutionPhase.SUCCEEDED || status.phase() == ExecutionPhase.FAILED) {
-            deleteRuntimeCredentialSecret(handle.name());
+            deleteEphemeralSecrets(handle.name());
         }
         return status;
     }
@@ -194,7 +204,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
             if (jobs.get() == null) {
                 // Already gone. Cancellation is retried by design and a second attempt must not
                 // fail, or a run could never reach a terminal state.
-                deleteRuntimeCredentialSecret(handle.name());
+                deleteEphemeralSecrets(handle.name());
                 return CancellationResult.terminated("No such runner Job; already terminated");
             }
 
@@ -202,7 +212,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
 
             boolean gone = jobs.get() == null;
             if (gone) {
-                deleteRuntimeCredentialSecret(handle.name());
+                deleteEphemeralSecrets(handle.name());
             }
             log.info("Runner Job deletion requested job={} cascade={} observedGone={}",
                     handle.name(), CASCADE_FOREGROUND, gone);
@@ -274,6 +284,11 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
         return new ExecutionHandle(PROVIDER_ID, name, uidOf(job));
     }
 
+    private void createEphemeralSecrets(ProvisionRequest request) {
+        createRuntimeCredentialSecret(request);
+        createSessionFileSecret(request);
+    }
+
     private void createRuntimeCredentialSecret(ProvisionRequest request) {
         if (request.runtimeCredentials().isEmpty()) {
             return;
@@ -291,6 +306,7 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
                             .withNamespace(settings.namespace())
                             .withLabels(RunnerJobManifest.selectorForRun(
                                     request.runId().value().toString()))
+                            .withAnnotations(secretLifecycleFor(request))
                         .endMetadata()
                         .withType("Opaque")
                         .withStringData(values)
@@ -298,15 +314,65 @@ public final class KubernetesExecutionProvider implements ExecutionProvider {
                 .createOrReplace();
     }
 
-    private void deleteRuntimeCredentialSecret(String jobName) {
+    private void createSessionFileSecret(ProvisionRequest request) {
+        if (request.secretFiles().isEmpty()) {
+            return;
+        }
+
+        Map<String, String> values = new LinkedHashMap<>();
+        request.secretFiles().forEach(file -> values.put(file.fileName(), file.utf8Content()));
+
+        Instant expiresAt = request.secretFiles().stream()
+                .map(com.perfplatform.domain.execution.SecretFileDelivery::expiresAt)
+                .min(Instant::compareTo)
+                .orElse(Instant.MAX);
+        Instant deleteAfter = request.secretFiles().stream()
+                .map(com.perfplatform.domain.execution.SecretFileDelivery::deleteAfter)
+                .min(Instant::compareTo)
+                .orElse(expiresAt);
+
+        client.secrets()
+                .inNamespace(settings.namespace())
+                .resource(new SecretBuilder()
+                        .withNewMetadata()
+                            .withName(RunnerJobManifest.sessionFileSecretNameFor(request))
+                            .withNamespace(settings.namespace())
+                            .withLabels(RunnerJobManifest.selectorForRun(
+                                    request.runId().value().toString()))
+                            .withAnnotations(secretLifecycle(expiresAt, deleteAfter))
+                        .endMetadata()
+                        .withType("Opaque")
+                        .withStringData(values)
+                        .build())
+                .createOrReplace();
+    }
+
+    private static Map<String, String> secretLifecycleFor(ProvisionRequest request) {
+        Instant deleteAfter = Instant.now().plus(request.deadline());
+        return secretLifecycle(deleteAfter, deleteAfter);
+    }
+
+    private static Map<String, String> secretLifecycle(Instant expiresAt, Instant deleteAfter) {
+        return Map.of(
+                KubernetesEphemeralSecretCleaner.ANNOTATION_SECRET_EXPIRES_AT,
+                expiresAt.toString(),
+                KubernetesEphemeralSecretCleaner.ANNOTATION_SECRET_DELETE_AFTER,
+                deleteAfter.toString());
+    }
+
+    private void deleteEphemeralSecrets(String jobName) {
+        deleteSecret(jobName + "-auth");
+        deleteSecret(jobName + "-sessions");
+    }
+
+    private void deleteSecret(String name) {
         try {
             client.secrets()
                     .inNamespace(settings.namespace())
-                    .withName(jobName + "-auth")
+                    .withName(name)
                     .delete();
         } catch (KubernetesClientException e) {
-            log.warn("Could not delete runtime credential Secret for runner Job job={} status={}",
-                    jobName, e.getCode());
+            log.warn("Could not delete runner Secret name={} status={}", name, e.getCode());
         }
     }
 

@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -143,6 +144,19 @@ public class S3ArtifactStore implements ArtifactStore {
             return Optional.empty();
         } catch (S3Exception e) {
             throw new ArtifactStoreException("Could not read artifact " + reference.objectKey(), e);
+        }
+    }
+
+    @Override
+    public void delete(ArtifactReference reference) {
+        try {
+            s3.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(reference.objectKey())
+                    .build());
+        } catch (S3Exception e) {
+            throw new ArtifactStoreException("Could not delete artifact "
+                    + reference.objectKey(), e);
         }
     }
 

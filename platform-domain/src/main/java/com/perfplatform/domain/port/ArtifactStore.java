@@ -160,6 +160,16 @@ public interface ArtifactStore {
      */
     Optional<byte[]> read(ArtifactReference reference);
 
+    /**
+     * Deletes the stored object, if it is still present.
+     *
+     * <p>Idempotent by reference: retention cleanup, repeated reconciliation and object-store
+     * lifecycle policies may all race. A missing object is therefore success, while the catalog row
+     * can remain as durable evidence that the run produced the artifact and why a later report can
+     * no longer read it.
+     */
+    void delete(ArtifactReference reference);
+
     /** Every artifact of a run, oldest first. */
     List<ArtifactReference> listForRun(TestRunId runId);
 }

@@ -246,6 +246,12 @@ public final class OrchestrationFixtures {
         }
 
         @Override
+        public void delete(ArtifactReference reference) {
+            content.remove(reference.objectKey());
+            stored.removeIf(existing -> existing.objectKey().equals(reference.objectKey()));
+        }
+
+        @Override
         public List<ArtifactReference> listForRun(TestRunId runId) {
             return stored.stream().filter(r -> r.runId().equals(runId)).toList();
         }

@@ -192,8 +192,8 @@ class RunReconcilerTest {
     class RuntimeSessionPools {
 
         @Test
-        @DisplayName("session rows are delivered as a runner dataset partition")
-        void deliversSessionRowsAsDataset() {
+        @DisplayName("session rows are delivered as an ephemeral runner secret file")
+        void deliversSessionRowsAsSecretFile() {
             TestRun run = queueSessionRun("session-delivery");
 
             reconciler("reconciler-1").reconcile();
@@ -202,27 +202,24 @@ class RunReconcilerTest {
             var request = provider.requestFor(shard.id().value().toString()).orElseThrow();
 
             assertThat(request.datasets())
-                    .anySatisfy(dataset ->
-                            assertThat(dataset.fileName()).isEqualTo("sessions.csv"));
+                    .noneMatch(dataset -> dataset.fileName().equals("sessions.csv"));
 
-            String sessionKey = request.datasets().stream()
-                    .filter(dataset -> dataset.fileName().equals("sessions.csv"))
-                    .findFirst()
-                    .orElseThrow()
-                    .objectKey();
+            assertThat(request.secretFiles())
+                    .singleElement()
+                    .satisfies(file -> {
+                        assertThat(file.fileName()).isEqualTo("sessions.csv");
+                        String csv = file.utf8Content();
+                        assertThat(csv).startsWith("session_id,session_value,session_expires_at");
+                        assertThat(csv).contains("opaque-session-token");
+                        assertThat(csv.lines().count()).isEqualTo(9);
+                        assertThat(file.toString()).doesNotContain("opaque-session-token");
+                        assertThat(file.deleteAfter()).isAfterOrEqualTo(T0);
+                    });
 
-            ArtifactStore.ArtifactReference sessionArtifact = artifacts.listForRun(run.id()).stream()
-                    .filter(reference -> reference.objectKey().equals(sessionKey))
-                    .findFirst()
-                    .orElseThrow();
-            String csv = new String(artifacts.read(sessionArtifact).orElseThrow(),
-                    StandardCharsets.UTF_8);
-
-            assertThat(csv).startsWith("session_id,session_value,session_expires_at");
-            assertThat(csv).contains("opaque-session-token");
-            assertThat(csv.lines().count()).isEqualTo(9);
+            assertThat(artifacts.listForRun(run.id()))
+                    .noneMatch(reference -> reference.objectKey().contains("sessions.csv"));
             assertThat(artifacts.artifactsFor(run.id()))
-                    .noneMatch(reference -> reference.objectKey().equals(sessionKey));
+                    .noneMatch(reference -> reference.objectKey().contains("sessions.csv"));
         }
 
         @Test
