@@ -17,9 +17,9 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1, S2 and S3** — the studio, a report a non-expert can read, run progress,
-> multi-step journeys with correlation, HAR-imported ordered journeys and the Rules screen.
-> `HANDOFF.md` §3n–§3r.
+> **Built so far: S1 through S4** — the studio, a report a non-expert can read, run progress,
+> multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen and the
+> live Validator. `HANDOFF.md` §3n–§3s.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -66,7 +66,7 @@ Reordered by `PLAN.md`; kept here as the inventory. Correlation is done; the res
 
 | Item | Why it matters | Size |
 |---|---|---|
-| **Dry-run preflight** | CLAUDE.md §10 lists it as a validation layer. One iteration of each journey against the real target before committing a slot, so a wrong path or a missing credential fails in seconds instead of after a twenty-minute ramp. **This is `PLAN.md` S4** — next. | Medium |
+| ~~**Dry-run preflight**~~ | **Done in S4** for protocol workloads. One iteration of each API journey runs against the resolved target before saving, so a wrong path or broken correlation fails in seconds instead of after a load run. Browser validation waits for S6. | — |
 | **Baseline comparisons** | A single run's p95 means little; the question is always "worse than last week?". Needs a stored baseline per definition and a comparison in the report. **`PLAN.md` S12**; S2 shaped the report to take one. | Medium |
 | ~~**Jenkins shared library**~~ | **Dropped.** CI triggering is not this organisation's practice; the V2 API remains available for whoever wants it. | — |
 | ~~**Manual correlation and extraction**~~ | **Done in `PLAN.md` S3** — scenarios carry ordered steps, values are extracted and carried forward, and a failed extraction fails the sample rather than reporting good latency. `HANDOFF.md` §3p. | — |

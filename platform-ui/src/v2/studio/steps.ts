@@ -10,7 +10,7 @@ import { includedJourneys } from './draft';
  * disabled button with no explanation is the most common way a wizard strands somebody.
  */
 
-export type StepId = 'sources' | 'refine' | 'rules' | 'load' | 'objectives' | 'review';
+export type StepId = 'sources' | 'refine' | 'rules' | 'load' | 'objectives' | 'validate' | 'review';
 
 export interface Step {
   id: StepId;
@@ -26,6 +26,7 @@ const API_LOAD_STEPS: Step[] = [
   { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Load', hint: 'How many people, and for how long?' },
   { id: 'objectives', title: 'Objectives', hint: 'What counts as fast enough?' },
+  { id: 'validate', title: 'Validate', hint: 'Try one journey before booking load.' },
   { id: 'review', title: 'Save and run', hint: 'Check the test, then start it.' },
 ];
 
@@ -35,6 +36,7 @@ const WEB_EXPERIENCE_STEPS: Step[] = [
   { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Browsers', hint: 'How many real browsers, and how many times?' },
   { id: 'objectives', title: 'Objectives', hint: 'What counts as fast enough?' },
+  { id: 'validate', title: 'Validate', hint: 'Try one journey before booking load.' },
   { id: 'review', title: 'Save and run', hint: 'Check the test, then start it.' },
 ];
 
@@ -77,6 +79,9 @@ export function blockerFor(step: StepId, draft: StudioDraft): string | null {
     case 'objectives':
       // Deliberately not required. A test with no objectives still measures, and forcing someone to
       // invent a threshold before their first run produces a number they made up and then trust.
+      return null;
+
+    case 'validate':
       return null;
 
     case 'review':

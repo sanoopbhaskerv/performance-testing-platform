@@ -12,8 +12,9 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1, S2 and S3 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3r for what each delivered. S4, the Validator, is next; everything after it is still a plan.
+**Status: S1 through S4 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3s for what each delivered. S5, Targets, credentials and sessions, is next; everything after
+it is still a plan.
 
 ---
 
@@ -126,7 +127,7 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | **Think time** | ✅ built in S3 — expressible in a document and editable in the Rules screen |
 | **Studio shell** | ✅ built in S1 — §3n |
 | **A report a non-expert can read** | ✅ built in S2 — §3o |
-| **Validator / single-iteration dry run** | ❌ S4, next |
+| **Validator / single-iteration dry run** | ✅ built in S4 — live protocol validation before Save |
 | **Arrival-rate load profile** | ❌ S8. Only staged concurrency today |
 | **Recorder** | ❌ S10. Release 1 ships guided capture wizards (§5) |
 | **Browser engine, Core Web Vitals** | ❌ S6 |
@@ -731,8 +732,8 @@ does. So web performance costs S8 alone, not S7 + S8.
 | **S1** | Studio shell, and the API path end to end | 1 Start, 2 Sources, 3 Refine, 6 Load, 7 Objectives, 9 Status, 10 Report | Large | ✅ | **done** — `HANDOFF.md` §3n |
 | **S2** | The report a novice can read | 10 Report | Medium | ✅ | **done** — §3o |
 | **S3** | Journeys and rules: correlation, verification, think time | 4 Rules | Large | ✅ | **done** — `HANDOFF.md` §3p, §3q, §3r |
-| **S4** | The Validator | 8 Validate | Medium | ✅ | next |
-| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | |
+| **S4** | The Validator | 8 Validate | Medium | ✅ | **done** — `HANDOFF.md` §3s |
+| **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | next |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | |
 | **S7** | Live monitoring | 9 Monitor | Large | — | |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |
@@ -806,6 +807,8 @@ failure.
 
 §8. One iteration, every request and response inspectable, no load slot consumed, subject to the
 target allowlist and per-team rate limiting.
+
+Built in S4 for protocol workloads. Browser validation waits for S6, when browser execution exists.
 
 *Acceptance:* a journey with a wrong path, a broken correlation or a missing credential is caught in
 seconds, with the offending request named.

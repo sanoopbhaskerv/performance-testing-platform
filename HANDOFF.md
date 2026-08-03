@@ -39,7 +39,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S4, the Validator**.
+`NEXT-SESSION.md` §2 has the immediate task: **S5, Targets, credentials and sessions**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -74,13 +74,14 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S3 — journeys and correlation (engine half)** | **Complete** | see §3p |
 | **S3 — HAR imports ordered journeys** | **Complete** | see §3q |
 | **S3 — studio Rules screen** | **Complete** | see §3r |
-| **S4–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S4 — the Validator** | **Complete** | see §3s |
+| **S5–S6 — Performance Studio, rest of release 1** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**936 Java tests green, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path,
-684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3
-Rules).
+**941 Java tests green on the committed S4 slice, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D,
+591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h,
+931 at S3 engine, 936 after S3 Rules, 941 after S4 Validator).
 
 **133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
@@ -98,8 +99,8 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S4, the Validator** — one iteration against the real target before a load
-slot is booked. `NEXT-SESSION.md` §2 has the detail.
+**Immediate next action: S5, Targets, credentials and sessions.** `NEXT-SESSION.md` §2 has the
+detail.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -1342,9 +1343,60 @@ surfaced for review, not converted into executable behavior behind the user's ba
 - **Parameterization-by-clicking** is still not in the studio. Dataset binding already exists in the
   API/YAML path; choosing a request value and binding it to a dataset column belongs with S5's Data
   and Auth work.
-- **The Validator is still next.** The Rules screen can assemble the intended request sequence, but
-  only S4 will run one iteration against the target and show whether the correlations actually
-  resolve.
+- ~~**The Validator is still next.**~~ Closed in §3s. The studio now runs one live protocol
+  iteration and shows whether correlations and assertions actually resolve.
+
+## 3s. S4 — the Validator
+
+**The studio can now try one real protocol iteration before saving a test.** `POST
+/api/v2/test-definitions/validator` validates the submitted specification, authorizes the caller for
+the specification's team, resolves the target through the same server-side `TargetResolver` used by
+runs, and sends one ordered pass through each protocol journey.
+
+This is deliberately not a run:
+
+- No test definition, run, shard, artifact or result row is created.
+- No admission slot is consumed.
+- No execution provider or runner Job is provisioned.
+- The response is direct evidence for the current draft only.
+
+### What it reports
+
+Each journey returns every executed step with:
+
+- the final request URL and body preview;
+- response status, headers and body preview;
+- extraction outcomes, including whether a JSON/header/cookie/status/regex extraction resolved;
+- assertion outcomes, including observed status/body evidence;
+- the failing step's message when validation stops early.
+
+Only protocol workloads execute in S4. Browser validation waits for S6, when browser execution and
+Core Web Vitals exist.
+
+### Guardrails
+
+- The endpoint creates nothing and runs only after structural and semantic validation pass.
+- A caller needs `runs:execute` for the owning team because the Validator makes real requests.
+- Target resolution stays server-side; a specification still cannot choose its own host.
+- Per-team requests are rate-limited in memory to prevent rapid repeat clicks from becoming a small
+  load test.
+- Evidence previews redact credential-shaped values rather than echoing complete tokens.
+
+### Studio surface
+
+The wizard now has a **Validate** step between Objectives and Save. It runs the endpoint, renders the
+journey/step evidence, and stores the result against the exact generated YAML. The Save button is
+disabled until the current document has a successful Validator result, so changing a rule or journey
+after validation requires another live check.
+
+### Deliberately left for S5/S6
+
+- Runtime credential references (`run://`, `env://`) and session pools are S5.
+- Browser journey validation is S6.
+- The full reactor could not be re-run in the current dirty worktree because unrelated student-demo
+  changes modified `specification/examples/valid/demo-service.yaml` to `/api/students/1` while
+  `SpecificationValidationServiceTest.preservesManualRequests` still expects `/api/users` and
+  `/api/payments`. Focused S4 backend/UI checks are green.
 
 ---
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle2, Clock3, Loader2, Save } from 'lucide-react';
-import type { ValidationFinding, V2Client } from '../api';
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock3, Loader2, Play, Save } from 'lucide-react';
+import type { ValidationFinding, ValidatorResult, V2Client } from '../api';
 import { describeError } from '../api';
 import type { ObjectiveDraft, ObjectiveMetric, StudioDraft } from './draft';
 import { includedJourneys, toResourceName } from './draft';
@@ -490,6 +490,173 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
 }
 
 /**
+ * One live pass before any load slot is booked.
+ */
+export function ValidateStep({ client, draft, onChange }: StepProps & { client: V2Client }) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const document = useMemo(() => {
+    try {
+      return { text: toSpecification(draft), problem: null as string | null };
+    } catch (err) {
+      return {
+        text: null,
+        problem: err instanceof IncompleteDraftError ? err.message : String(err),
+      };
+    }
+  }, [draft]);
+
+  const current =
+    draft.validator && draft.validator.forDocument === document.text ? draft.validator.result : null;
+
+  async function runValidator() {
+    if (!document.text) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const result = await client.validateTarget(document.text);
+      onChange({ ...draft, validator: { forDocument: document.text, result } });
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <>
+      <p className="studio-summary">
+        The Validator sends one iteration to the resolved target and shows what happened before a
+        load run is saved or queued.
+      </p>
+
+      {document.problem && (
+        <div className="banner banner-bad" role="alert">
+          <AlertCircle size={16} /> {document.problem}
+        </div>
+      )}
+
+      {error && (
+        <div className="banner banner-bad" role="alert">
+          <AlertCircle size={16} /> Could not run the Validator: {error}
+        </div>
+      )}
+
+      {current && <ValidatorSummary result={current} />}
+
+      {!current && !document.problem && (
+        <p className="studio-hint">
+          This version has not been validated yet. If you change a journey, rule, load setting or
+          objective, run the Validator again so Save applies to the current test.
+        </p>
+      )}
+
+      <button
+        type="button"
+        className="btn"
+        disabled={running || !document.text}
+        onClick={runValidator}
+      >
+        {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+        {running ? 'Validating...' : 'Run Validator'}
+      </button>
+    </>
+  );
+}
+
+function ValidatorSummary({ result }: { result: ValidatorResult }) {
+  const errors = result.findings.filter((finding) => finding.severity === 'ERROR');
+  const warnings = result.findings.filter((finding) => finding.severity === 'WARNING');
+  return (
+    <section className="studio-section">
+      <h3>{result.valid ? 'Validated' : 'Needs attention'}</h3>
+      <p className="studio-summary">
+        {result.valid
+          ? 'Every executed step passed in the single-iteration check.'
+          : 'At least one step failed or the target could not be validated.'}
+        {result.target ? ` Target: ${result.target}.` : ''}
+      </p>
+
+      {(errors.length > 0 || warnings.length > 0) && (
+        <ul className="findings">
+          {[...errors, ...warnings].map((finding, i) => (
+            <li className="finding" key={i}>
+              {finding.severity === 'ERROR' ? (
+                <AlertCircle size={15} className="tone-bad" aria-hidden />
+              ) : (
+                <AlertTriangle size={15} className="tone-warn" aria-hidden />
+              )}
+              <div>
+                <p>{finding.message}</p>
+                {finding.remediation && <p className="muted">{finding.remediation}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="validator-list">
+        {result.journeys.map((journey) => (
+          <article className="validator-journey" key={journey.name}>
+            <h4>
+              {journey.passed ? (
+                <CheckCircle2 size={15} className="tone-good" aria-hidden />
+              ) : (
+                <AlertCircle size={15} className="tone-bad" aria-hidden />
+              )}
+              {journey.name}
+            </h4>
+            {journey.steps.map((step) => (
+              <details className="validator-step" key={step.name} open={!step.passed}>
+                <summary>
+                  <span>
+                    {step.passed ? 'Passed' : 'Failed'}: {step.method} {step.path}
+                  </span>
+                  <span>{step.durationMillis} ms</span>
+                </summary>
+                {step.error && <p className="studio-hint">{step.error}</p>}
+                <div className="validator-grid">
+                  <div>
+                    <h5>Request</h5>
+                    <p>
+                      <code>{step.request.url}</code>
+                    </p>
+                    {step.request.bodyPreview && <pre>{step.request.bodyPreview}</pre>}
+                  </div>
+                  <div>
+                    <h5>Response</h5>
+                    <p>Status {step.response.status}</p>
+                    {step.response.bodyPreview && <pre>{step.response.bodyPreview}</pre>}
+                  </div>
+                </div>
+                {(step.extractions.length > 0 || step.assertions.length > 0) && (
+                  <ul className="rule-evidence">
+                    {step.extractions.map((extraction) => (
+                      <li key={`extract-${extraction.name}`}>
+                        Extraction <strong>{extraction.name}</strong>{' '}
+                        {extraction.resolved ? 'resolved' : 'did not resolve'}
+                        {extraction.valuePreview ? ` to "${extraction.valuePreview}"` : ''}.
+                      </li>
+                    ))}
+                    {step.assertions.map((assertion, index) => (
+                      <li key={`assert-${index}`}>
+                        Assertion {assertion.subject} {assertion.operator} {assertion.expected}{' '}
+                        {assertion.passed ? 'passed' : `failed; observed ${assertion.observed}`}.
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </details>
+            ))}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
  * Name it, check it, save it.
  *
  * The specification is validated **by the server** before Save is offered, not by a rule
@@ -568,7 +735,10 @@ export function ReviewStep({
 
   const errors = findings?.filter((f) => f.severity === 'ERROR') ?? [];
   const warnings = findings?.filter((f) => f.severity === 'WARNING') ?? [];
-  const ready = document.text !== null && errors.length === 0 && !checking;
+  const validatorCurrent =
+    draft.validator && draft.validator.forDocument === document.text ? draft.validator.result : null;
+  const validatorPassed = validatorCurrent?.valid === true;
+  const ready = document.text !== null && errors.length === 0 && !checking && validatorPassed;
 
   return (
     <>
@@ -674,6 +844,12 @@ export function ReviewStep({
         <p className="studio-blocker" style={{ color: 'var(--pf-verdict-pass-fg)' }}>
           <CheckCircle2 size={15} aria-hidden /> Checked by the platform — this test is valid.
         </p>
+      )}
+
+      {document.text && !validatorPassed && (
+        <div className="banner banner-warn" role="status">
+          <AlertTriangle size={16} /> Run the Validator successfully for this version before saving.
+        </div>
       )}
 
       {/*

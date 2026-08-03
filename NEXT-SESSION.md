@@ -38,7 +38,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-Expect **936 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
+Expect **941 tests, 0 failures, 0 skipped** across 14 modules. Docker must be running (Testcontainers
 uses PostgreSQL and MinIO). If a PostgreSQL module fails wholesale with `An error occurred while
 setting up the SSL connection`, that is a known flaky start — retry once. **If any integration test
 reports `Skipped`, that is a false green: investigate, do not accept it.**
@@ -109,11 +109,11 @@ that exposes it. Nothing lands API-only.
   excellent latency. Proposed correlations are accepted or rejected by a person and never applied
   silently.
 
-**936 Java tests, 133 UI tests.**
+**941 Java tests, 133 UI tests.**
 
-**Next: S4, the Validator** — one iteration against the real target before a load slot is booked.
-It should show every request and response, including which extractions resolved, which assertions
-passed, and which request failed when a path, credential or correlation is wrong.
+**Next: S5, Targets, credentials and sessions.** Replace the remaining V1/YAML seams that V2 uses
+for identity and targets, add runtime credential references, and make authenticated tests work
+without storing credential values.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -141,6 +141,14 @@ Nothing since has touched the runner image: S1–S3 are control-plane and UI wor
 next increment that changes it (progress snapshots for live monitoring). Re-run the kind procedure
 then too.
 
+### Current dirty-worktree caveat
+
+Unrelated student-demo changes are present and not committed. They change
+`specification/examples/valid/demo-service.yaml` to `/api/students/1`, while
+`SpecificationValidationServiceTest.preservesManualRequests` still expects `/api/users` and
+`/api/payments`. Full `mvn clean verify` fails there until that work is reconciled. S4's focused
+backend/UI checks are green.
+
 ### Datasets, in one paragraph
 
 `POST /api/v2/datasets?team=…&name=…` with the CSV as the body. It returns a
@@ -156,7 +164,8 @@ JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, 
 store, the runner image, report and artifact download, synthetic-run marking, **four source
 importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
 (shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
-progress**, and **multi-step journeys with reviewed correlation rules**. `HANDOFF.md` §3–§3r is the
+progress**, **multi-step journeys with reviewed correlation rules**, and **a live Validator before
+Save**. `HANDOFF.md` §3–§3s is the
 account of each.
 
 ## 3. Rules that do not bend
@@ -185,7 +194,7 @@ account of each.
 
   ```bash
   grep -ohE "9[0-9]{2} (Java )?tests|1[0-9]{2} UI tests" HANDOFF.md NEXT-SESSION.md ROADMAP.md PLAN.md | sort -u
-  grep -n "Validator\|S4" HANDOFF.md PLAN.md                           # the same thing is outstanding
+  grep -n "S5\|Targets\|credentials\|sessions" HANDOFF.md PLAN.md       # the same thing is outstanding
   grep -n "next" NEXT-SESSION.md ROADMAP.md | grep -i "increment\|S[0-9]"   # the same next move
   ```
 - Do not push, tag, merge or publish without explicit authorization.

@@ -278,6 +278,58 @@
   font-size: var(--pf-text-sm);
 }
 
+.v2 .validator-list {
+  display: grid;
+  gap: var(--pf-space-3);
+}
+
+.v2 .validator-journey {
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  padding: var(--pf-space-4);
+  background: var(--pf-surface-raised);
+}
+
+.v2 .validator-journey h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  margin: 0 0 var(--pf-space-3);
+  font-size: var(--pf-text-md);
+}
+
+.v2 .validator-step {
+  border-top: 1px solid var(--pf-border-subtle);
+  padding: var(--pf-space-3) 0;
+}
+
+.v2 .validator-step summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pf-space-3);
+  cursor: pointer;
+}
+
+.v2 .validator-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--pf-space-3);
+  margin-top: var(--pf-space-3);
+}
+
+.v2 .validator-grid h5 {
+  margin: 0 0 var(--pf-space-2);
+}
+
+.v2 .validator-grid pre {
+  max-height: 12rem;
+  overflow: auto;
+  margin: var(--pf-space-2) 0 0;
+  padding: var(--pf-space-3);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface-sunken);
+}
+
 /* ── The load summary ───────────────────────────────────────────────────
  *
  * One sentence saying what the numbers add up to. Someone who has never run a performance test has

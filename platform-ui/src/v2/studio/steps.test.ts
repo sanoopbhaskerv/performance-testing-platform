@@ -45,6 +45,7 @@ describe('stepsFor', () => {
       'rules',
       'load',
       'objectives',
+      'validate',
       'review',
     ]);
   });

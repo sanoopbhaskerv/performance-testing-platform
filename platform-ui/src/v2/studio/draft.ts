@@ -1,4 +1,4 @@
-import type { CorrelationSuggestion, ImportedScenario } from '../api';
+import type { CorrelationSuggestion, ImportedScenario, ValidatorResult } from '../api';
 
 /**
  * What the studio holds while somebody builds a test.
@@ -57,6 +57,11 @@ export interface CorrelationRuleDraft extends CorrelationSuggestion {
   decision: 'pending' | 'accepted' | 'rejected';
 }
 
+export interface ValidatorDraft {
+  forDocument: string;
+  result: ValidatorResult;
+}
+
 /**
  * The shape of the load, in the three parts a person actually thinks in.
  *
@@ -94,6 +99,7 @@ export interface StudioDraft {
   journeys: Journey[];
   load: LoadShape;
   objectives: ObjectiveDraft[];
+  validator: ValidatorDraft | null;
 }
 
 /**
@@ -118,6 +124,7 @@ export function newDraft(testType: TestType, team: string): StudioDraft {
       { metric: 'http.response.time', percentile: 95, journey: null, value: 1000 },
       { metric: 'http.error.rate', percentile: null, journey: null, value: 1 },
     ],
+    validator: null,
   };
 }
 

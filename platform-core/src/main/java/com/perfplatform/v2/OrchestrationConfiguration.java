@@ -2,6 +2,7 @@ package com.perfplatform.v2;
 
 import com.perfplatform.api.v2.security.CallerContextProvider;
 import com.perfplatform.api.v2.spec.SpecificationParser;
+import com.perfplatform.api.v2.validator.SpecificationDryRunService;
 import com.perfplatform.config.TeamConfigLoader;
 import com.perfplatform.domain.admission.AdmissionPolicy;
 import com.perfplatform.domain.admission.CapacityLimits;
@@ -62,6 +63,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.HashMap;
@@ -576,6 +578,21 @@ public class OrchestrationConfiguration {
     public ReadRunReportUseCase readRunReportUseCase(ReadTestRunUseCase runs, ResultCatalog results,
             ExecutionPlanRepository plans, DefinitionVersionCatalog versions, ArtifactStore artifacts) {
         return new ReadRunReportUseCase(runs, results, plans, versions, artifacts);
+    }
+
+    @Bean
+    public HttpClient validatorHttpClient() {
+        return HttpClient.newBuilder()
+                .connectTimeout(properties.getExecutionGrace())
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+    }
+
+    @Bean
+    public SpecificationDryRunService specificationDryRunService(TeamDirectory teams,
+            TargetResolver targets, HttpClient validatorHttpClient,
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper, Clock clock) {
+        return new SpecificationDryRunService(teams, targets, validatorHttpClient, objectMapper, clock);
     }
 
     /**

@@ -288,6 +288,62 @@ export interface ImportResponse {
   correlationSuggestions: CorrelationSuggestion[];
 }
 
+export interface ValidatorResult {
+  valid: boolean;
+  target: string | null;
+  findings: ValidationFinding[];
+  journeys: ValidatorJourney[];
+}
+
+export interface ValidatorJourney {
+  name: string;
+  passed: boolean;
+  steps: ValidatorStep[];
+}
+
+export interface ValidatorStep {
+  name: string;
+  method: string;
+  path: string;
+  passed: boolean;
+  durationMillis: number;
+  request: ValidatorRequestEvidence;
+  response: ValidatorResponseEvidence;
+  extractions: ValidatorExtraction[];
+  assertions: ValidatorAssertion[];
+  error: string | null;
+}
+
+export interface ValidatorRequestEvidence {
+  url: string;
+  headers: Record<string, string>;
+  bodyPreview: string | null;
+}
+
+export interface ValidatorResponseEvidence {
+  status: number;
+  headers: Record<string, string>;
+  bodyPreview: string | null;
+}
+
+export interface ValidatorExtraction {
+  name: string;
+  from: string;
+  expression: string;
+  resolved: boolean;
+  valuePreview: string | null;
+  message: string | null;
+}
+
+export interface ValidatorAssertion {
+  subject: string;
+  operator: string;
+  expected: string;
+  passed: boolean;
+  observed: string | null;
+  message: string | null;
+}
+
 /** RFC 7807 problem detail, which every V2 error uses. */
 export interface Problem {
   title: string;
@@ -341,6 +397,15 @@ export class V2Client {
         document,
         { headers: { ...this.headers, 'Content-Type': 'application/yaml' } },
       )
+      .then((r) => r.data);
+  }
+
+  /** One live iteration against the server-side resolved target. Creates no run. */
+  validateTarget(document: string) {
+    return axios
+      .post<ValidatorResult>('/api/v2/test-definitions/validator', document, {
+        headers: { ...this.headers, 'Content-Type': 'application/yaml' },
+      })
       .then((r) => r.data);
   }
 
