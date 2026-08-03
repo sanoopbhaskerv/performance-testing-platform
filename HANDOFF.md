@@ -1073,7 +1073,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 - `helm lint` advises `icon is recommended` — pre-existing.
 - Startup logs two loud warnings, by design: the **FAKE execution provider** generates no load, and the **DEVELOPMENT caller-identity provider** derives identity from V1 API keys. Both refuse to start under a production profile.
 - **A local run ends in `Failed` / `NO_LOAD_GENERATED`, not `Passed`.** This is correct and deliberate — see §3b. Do not "fix" it by making the fake provider claim to generate load.
-- UI lint reports **10 errors, 3 warnings**, all pre-existing and none in files added since 1D. The count rose from the previously recorded 3 without any code changing: eslint's React rules began analysing `PerformanceConsole.tsx`, which has always had them. Verified by linting the committed file at HEAD.
+- UI lint reports **3 errors, 3 warnings**, all pre-existing, all in V1's `App.tsx` (three `any`s and three exhaustive-deps warnings). A previous session recorded 10 errors; that was measured against a **drifted `node_modules`**, not the committed lockfile. Established at the studio increment by `npm ci` in a clean worktree at HEAD. If you see a different number, reinstall before believing it.
 - **A background `java -jar` survives `TaskStop`/`preview_stop`.** The shell dies, the JVM does not, and the next start fails with `Port 8080 was already in use` — while `curl` happily answers from the *stale* jar. `lsof -ti:8080 | xargs kill -9` before restarting, or you will verify the wrong build.
 
 ---

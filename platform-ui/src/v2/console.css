@@ -4,7 +4,13 @@
  * Scoped under .v2 so nothing here can change how the V1 screens render — V1 stays operational
  * until its replacement is verified, and a shared stylesheet is the easiest way to break it by
  * accident.
+ *
+ * Every colour, radius and type size here is a semantic token from `tokens.css`. A literal value in
+ * this file is a bug — it is a spot a re-brand will miss — and `tokens.test.ts` fails the build on
+ * one. Reach for a semantic token; if none fits, add one there rather than a hex here.
  */
+
+@import './tokens.css';
 
 .v2 {
   display: flex;
@@ -16,10 +22,10 @@
 }
 
 .v2 .card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  padding: 1.1rem 1.25rem;
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  padding: 1.1rem var(--pf-space-7);
 }
 
 .v2 .card-head {
@@ -55,10 +61,10 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: #4f46e5;
-  color: #fff;
-  border-radius: 6px;
+  border: 1px solid var(--pf-action-border);
+  background: var(--pf-action);
+  color: var(--pf-action-text);
+  border-radius: var(--pf-radius-sm);
   padding: 0.4rem 0.7rem;
   font-size: 0.82rem;
   cursor: pointer;
@@ -98,7 +104,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 0.1rem 0.55rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -106,38 +112,38 @@
 }
 
 .v2 .pill-good {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.35);
+  background: var(--pf-verdict-pass-bg);
+  color: var(--pf-verdict-pass-fg);
+  border-color: var(--pf-verdict-pass-border);
 }
 
 .v2 .pill-bad {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  border-color: rgba(239, 68, 68, 0.35);
+  background: var(--pf-verdict-fail-bg);
+  color: var(--pf-verdict-fail-fg);
+  border-color: var(--pf-verdict-fail-border);
 }
 
 .v2 .pill-busy {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border-color: rgba(59, 130, 246, 0.35);
+  background: var(--pf-status-busy-bg);
+  color: var(--pf-status-busy-fg);
+  border-color: var(--pf-status-busy-border);
 }
 
 .v2 .pill-wait {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border-color: rgba(245, 158, 11, 0.35);
+  background: var(--pf-status-wait-bg);
+  color: var(--pf-status-wait-fg);
+  border-color: var(--pf-status-wait-border);
 }
 
 .v2 .pill-neutral {
-  background: rgba(148, 163, 184, 0.15);
-  color: #cbd5e1;
-  border-color: rgba(148, 163, 184, 0.3);
+  background: var(--pf-verdict-unknown-bg);
+  color: var(--pf-verdict-unknown-fg);
+  border-color: var(--pf-verdict-unknown-border);
 }
 
-.v2 .tone-good { color: #4ade80; }
-.v2 .tone-bad { color: #f87171; }
-.v2 .tone-neutral { color: #cbd5e1; }
+.v2 .tone-good { color: var(--pf-verdict-pass-fg); }
+.v2 .tone-bad { color: var(--pf-verdict-fail-fg); }
+.v2 .tone-neutral { color: var(--pf-verdict-unknown-fg); }
 
 .v2 .spin {
   animation: v2-spin 1.1s linear infinite;
@@ -164,15 +170,15 @@
 }
 
 .v2 .banner-bad {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
+  background: var(--pf-banner-bad-bg);
+  border: 1px solid var(--pf-banner-bad-border);
+  color: var(--pf-banner-bad-fg);
 }
 
 .v2 .banner-info {
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
+  background: var(--pf-banner-info-bg);
+  border: 1px solid var(--pf-banner-info-border);
+  color: var(--pf-banner-info-fg);
 }
 
 /* ── Definitions ────────────────────────────────────────────────────── */
@@ -188,7 +194,7 @@
 }
 
 .v2 .definitions > li {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--pf-border-subtle);
   padding: 0.6rem 0;
 }
 
@@ -208,7 +214,7 @@
 }
 
 .v2 .digest {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--pf-font-mono);
   font-size: 0.72rem;
   opacity: 0.6;
 }
@@ -230,8 +236,8 @@
 /* ── Template picker ────────────────────────────────────────────────────*/
 
 .v2 .templates {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border: 1px solid var(--pf-border-fieldset);
+  border-radius: var(--pf-radius-md);
   padding: 0.6rem 0.8rem 0.7rem;
   margin: 0;
   display: flex;
@@ -274,13 +280,13 @@
 
 .v2 .editor textarea {
   width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--pf-font-mono);
   font-size: 0.78rem;
   line-height: 1.5;
-  background: rgba(0, 0, 0, 0.35);
-  color: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
+  background: var(--pf-surface-sunken);
+  color: var(--pf-text);
+  border: 1px solid var(--pf-border-field);
+  border-radius: var(--pf-radius-sm);
   padding: 0.7rem;
   resize: vertical;
 }
@@ -293,8 +299,8 @@
 .v2 .validation {
   white-space: pre-wrap;
   font-size: 0.78rem;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 6px;
+  background: var(--pf-surface-sunken-soft);
+  border-radius: var(--pf-radius-sm);
   padding: 0.6rem;
   margin: 0;
 }
@@ -319,7 +325,7 @@
 
 .v2 .runs td {
   padding: 0.45rem 0.5rem 0.45rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--pf-border-subtle);
 }
 
 .v2 .runs tbody tr {
@@ -327,11 +333,11 @@
 }
 
 .v2 .runs tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--pf-surface-hover);
 }
 
 .v2 .runs tbody tr.selected {
-  background: rgba(79, 70, 229, 0.16);
+  background: var(--pf-surface-selected);
 }
 
 /* ── Detail ─────────────────────────────────────────────────────────── */
@@ -390,22 +396,22 @@
   font-size: 0.8rem;
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: rgba(148, 163, 184, 0.08);
-  color: #cbd5e1;
+  border: 1px solid var(--pf-disclosure-border);
+  background: var(--pf-disclosure-bg);
+  color: var(--pf-disclosure-fg);
 }
 
 .v2 .provider-line code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--pf-font-mono);
   font-size: 0.75rem;
 }
 
 /* Not styled as an error, because it is not one — it is the honest description of a development
  * deployment. Styled as a standing warning, because acting on its numbers would be a mistake. */
 .v2 .provider-line-synthetic {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fcd34d;
+  border-color: var(--pf-disclosure-alert-border);
+  background: var(--pf-disclosure-alert-bg);
+  color: var(--pf-disclosure-alert-fg);
 }
 
 /* ── The synthetic banner ───────────────────────────────────────────────
@@ -421,18 +427,18 @@
   border-radius: 8px;
   padding: 0.85rem 1rem;
   margin-bottom: 0.4rem;
-  background: rgba(245, 158, 11, 0.14);
-  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: var(--pf-synthetic-bg);
+  border: 1px solid var(--pf-synthetic-border);
   /* A left rule so the block still reads as a warning if a screenshot loses the colour, and in
    * forced-colors mode where backgrounds are replaced. */
-  border-left: 4px solid #f59e0b;
-  color: #fde68a;
+  border-left: 4px solid var(--pf-synthetic-rule);
+  color: var(--pf-synthetic-fg);
 }
 
 .v2 .synthetic-banner strong {
   display: block;
   font-size: 0.92rem;
-  color: #fcd34d;
+  color: var(--pf-synthetic-fg-strong);
 }
 
 .v2 .synthetic-banner p {
@@ -450,8 +456,8 @@
   margin: 0 0 0.5rem;
 }
 
-.v2 .report .verdict-good { color: #4ade80; }
-.v2 .report .verdict-neutral { color: #cbd5e1; }
+.v2 .report .verdict-good { color: var(--pf-verdict-pass-fg); }
+.v2 .report .verdict-neutral { color: var(--pf-verdict-unknown-fg); }
 
 .v2 .footnote {
   font-size: 0.76rem;
@@ -492,7 +498,7 @@
 .v2 table.stages td,
 .v2 table.stages tbody th {
   padding: 0.4rem 0.55rem 0.4rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--pf-border-subtle);
   white-space: nowrap;
 }
 
@@ -505,13 +511,13 @@
 /* The row a whole-test objective is judged against. */
 .v2 table.metrics tr.aggregate {
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--pf-surface-emphasis);
 }
 
 /* p95 is the percentile objectives are usually written against, so it is the one to find fast. */
 .v2 table.metrics .emphasis {
-  color: #f8fafc;
-  font-weight: 600;
+  color: var(--pf-text-strong);
+  font-weight: var(--pf-weight-strong);
 }
 
 /* ── Load profile ───────────────────────────────────────────────────────
@@ -522,7 +528,7 @@
  */
 
 .v2 .workload {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--pf-border-subtle);
   padding: 0.6rem 0;
 }
 
@@ -557,7 +563,7 @@
   display: block;
   height: 10px;
   min-width: 2px;
-  background: #6366f1;
+  background: var(--pf-series-1);
   /* Rounded only at the data end; the origin end stays square against the baseline. */
   border-radius: 0 4px 4px 0;
 }
@@ -566,7 +572,7 @@
 .v2 .stage-value {
   font-variant-numeric: tabular-nums;
   font-size: 0.78rem;
-  color: #f8fafc;
+  color: var(--pf-text-strong);
   /* Reserved width, so the column of figures lines up down the profile. */
   min-width: 3.5rem;
   text-align: right;
@@ -607,7 +613,7 @@
 
 .v2 .advanced {
   margin-top: 1.1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--pf-border-subtle);
   padding-top: 0.6rem;
 }
 
@@ -678,9 +684,9 @@
   flex-direction: column;
   gap: 0.85rem;
   padding: 1rem;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  background: #0f172a;
+  border: 1px solid var(--pf-border-panel);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-panel);
 }
 
 .v2 .import-head {
@@ -696,14 +702,14 @@
 
 .v2 .import-panel textarea {
   width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--pf-font-mono);
   font-size: 0.8rem;
   line-height: 1.5;
   padding: 0.6rem 0.7rem;
   border-radius: 6px;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e2e8f0;
+  border: 1px solid var(--pf-border-panel);
+  background: var(--pf-surface-input);
+  color: var(--pf-text-panel);
   resize: vertical;
 }
 
@@ -718,8 +724,8 @@
 }
 
 .v2 .import-scenarios code {
-  font-size: 0.75rem;
-  color: #cbd5e1;
+  font-size: var(--pf-text-xs);
+  color: var(--pf-text-code);
   word-break: break-all;
 }
 
@@ -738,8 +744,8 @@
   align-items: flex-start;
   padding: 0.6rem 0.7rem;
   border-radius: 6px;
-  background: #111c33;
-  border-left: 3px solid #334155;
+  background: var(--pf-surface-finding);
+  border-left: 3px solid var(--pf-border-panel);
 }
 
 .v2 .finding p {
@@ -752,7 +758,7 @@
   font-size: 0.72rem;
 }
 
-.v2 .tone-warn { color: #fbbf24; }
+.v2 .tone-warn { color: var(--pf-status-wait-fg); }
 
 /* Keeps a file input operable by keyboard and screen reader while the styled
    button in front of it is what everyone else sees. `display: none` would take

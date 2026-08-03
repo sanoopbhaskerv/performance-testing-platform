@@ -42,7 +42,7 @@ setting up the SSL connection`, that is a known flaky start — retry once. **If
 reports `Skipped`, that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm run lint && npm run build     # 10 errors, 3 warnings, all pre-existing
+cd platform-ui && npm test && npm run lint && npm run build   # 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -58,11 +58,10 @@ For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole 
   throw `java.lang.Error: Unresolved compilation problem` at runtime while `mvn test-compile` reports
   success. `mvn clean verify` — it is stale bytecode, not a bug.
 - Single test across the reactor needs `-Dsurefire.failIfNoSpecifiedTests=false`.
-- `platform-ui/src/App.css` is **imported by nothing** — `main.tsx` loads only `index.css`.
-- **UI lint reports 10 errors, 3 warnings, all pre-existing**, in `App.tsx` and the pre-1D parts of
-  `PerformanceConsole.tsx`. Verified by linting the committed files. Do not "fix" them as part of
-  something else; the count rose from 3 without code changing, because eslint's React rules began
-  analysing a file that always had them.
+- **UI lint reports 3 errors, 3 warnings, all pre-existing**, all in V1's `App.tsx`. Do not "fix"
+  them as part of something else. A previous session recorded 10; that was a **drifted
+  `node_modules`**, not a real change — `npm ci` in a clean worktree at HEAD gives 3. Reinstall
+  before believing a different number.
 - **`Tests run: 0` for a class with `@Nested` classes was cosmetic, never lost coverage** — Surefire
   ≤3.5.2 filed the outer class's own tests into the last nested class's report file. The root pom now
   pins **Surefire 3.5.3**, which attributes correctly. Mixing top-level and `@Nested` tests is safe.
@@ -81,7 +80,7 @@ first-class capabilities — **API load testing** (one or many APIs) and **web p
 (record a journey, upload a HAR, or bring a Playwright script; Core Web Vitals) — plus the pairing of
 the two, which is the flagship: *is the page still fast when the backend is at 500 users?*
 
-`PLAN.md` sequences this as **S1–S11**, each shipping a backend capability **and** the studio screen
+`PLAN.md` sequences this as **S1–S12**, each shipping a backend capability **and** the studio screen
 that exposes it. Nothing lands API-only.
 
 ### Release 1 is S1–S6. Decisions are made — do not relitigate them

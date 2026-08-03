@@ -386,8 +386,10 @@ select.form-control {
    (CLAUDE.md §5), so switching between them is an explicit choice rather
    than a redirect that silently takes one away.
 
-   These live here rather than in App.css because App.css is not imported
-   by anything — main.tsx loads only index.css. */
+   These live here because main.tsx loads only index.css. (There used to be
+   an App.css that nothing imported, so rules added to it silently did
+   nothing; it was deleted when the studio's token layer landed, rather than
+   left as a second place to look for a style.) */
 
 .surface-tabs {
   display: flex;
