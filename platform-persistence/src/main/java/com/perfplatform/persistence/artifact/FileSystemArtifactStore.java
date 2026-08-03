@@ -170,6 +170,10 @@ public class FileSystemArtifactStore implements ArtifactStore {
             // run was given belongs together with what it executed.
             case DATASET -> "plan";
             case RESULTS, RUNNER_LOG, RUNNER_MANIFEST -> "analysis";
+            // Only reached by a run-level snapshot, which nothing publishes today — a snapshot
+            // belongs to the shard that wrote it and takes the shard prefix above. Named rather
+            // than defaulted so adding a run-level one is a decision rather than an accident.
+            case PROGRESS -> "analysis";
         };
     }
 
@@ -222,6 +226,12 @@ public class FileSystemArtifactStore implements ArtifactStore {
         }
         if (fileName.equals("runner-manifest.json")) {
             return Optional.of(ArtifactType.RUNNER_MANIFEST);
+        }
+        // A runner overwrites this every few seconds while it executes. Recognised by exact name for
+        // the same reason the manifest is: these are the two files whose meaning is fixed by the
+        // runner contract rather than by their extension.
+        if (fileName.equals(com.perfplatform.domain.progress.ShardProgress.OBJECT_NAME)) {
+            return Optional.of(ArtifactType.PROGRESS);
         }
         if (fileName.endsWith(".log")) {
             return Optional.of(ArtifactType.RUNNER_LOG);

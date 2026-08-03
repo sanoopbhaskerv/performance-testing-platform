@@ -376,6 +376,89 @@ export interface Problem {
 }
 
 /** A terminal run is never going to change again, so polling can stop. */
+/**
+ * What a run is doing right now.
+ *
+ * Every number here is provisional and the type says so in its field names. Percentiles are bucket
+ * upper bounds, counts come from partial runner output, and `provisionalObjectives` is never the
+ * run's verdict — that is computed from the complete results once every generator has finished, and
+ * arrives on the report.
+ */
+export interface RunProgress {
+  runId: string;
+  engine: string;
+  /** The freshest generator snapshot in this view, by the generator's clock. */
+  capturedAt: string;
+  /** The control plane's clock when it assembled this. */
+  observedAt: string;
+  ageSeconds: number;
+  shardsExpected: number;
+  shardsReporting: number;
+  elapsedSeconds: number;
+  /** Users or browser sessions actually applying load, not what the stage asked for. */
+  activeUsers: number;
+  overall: LiveMetrics;
+  byOperation: LiveMetrics[];
+  shards: ShardSnapshot[];
+  series: ProgressPoint[];
+  provisionalObjectives: ObjectiveOutcome[];
+  observations: Observation[];
+}
+
+export interface LiveMetrics {
+  name: string;
+  sampleCount: number;
+  errorCount: number;
+  unparsedCount: number;
+  /** Percentage scaled by 1,000: 1500 means 1.5%. */
+  errorRateMilliPercent: number;
+  minMillis: number;
+  maxMillis: number;
+  meanMillis: number;
+  p50Millis: number;
+  p90Millis: number;
+  /** An upper bound — the top of the bucket the sample fell in. Never interpolated. */
+  p95Millis: number;
+  p99Millis: number;
+  /** Requests per second scaled by 1,000, over the most recent window rather than the whole run. */
+  throughputPerSecondMilli: number;
+}
+
+/**
+ * One generator's own last word.
+ *
+ * Present because the merged totals cannot show a generator that stopped: the survivors keep adding
+ * to them, so a run that lost half its load looks like a run that is merely slower.
+ */
+export interface ShardSnapshot {
+  shardIndex: number;
+  capturedAt: string;
+  ageSeconds: number;
+  sampleCount: number;
+  errorCount: number;
+  activeUsers: number;
+}
+
+export interface ProgressPoint {
+  capturedAt: string;
+  elapsedSeconds: number;
+  activeUsers: number;
+  sampleCount: number;
+  errorCount: number;
+  errorRateMilliPercent: number;
+  throughputPerSecondMilli: number;
+  p95Millis: number;
+}
+
+/** A rule-based observation, and the measurement it came from. */
+export interface Observation {
+  code: string;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  message: string;
+  /** Always present: a message without its numbers is an opinion. */
+  evidence: string;
+}
+
 export const isTerminal = (status: RunStatus): boolean =>
   ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
 
@@ -531,6 +614,22 @@ export class V2Client {
     return axios
       .get<RunReport>(`/api/v2/test-runs/${runId}/report`, { headers: this.headers })
       .then((r) => r.data);
+  }
+
+  /**
+   * What a run is doing right now.
+   *
+   * Returns `null` when nothing has been published yet — the endpoint answers `204`, deliberately,
+   * because "not measured yet" and "measured nothing" are different facts and a body of zeros would
+   * let this render the second while the first is true.
+   *
+   * Never throws for a run that is simply quiet: a failed poll is handled by the caller as a gap in
+   * the live view, not as an error about the run.
+   */
+  getRunProgress(runId: string) {
+    return axios
+      .get<RunProgress | ''>(`/api/v2/test-runs/${runId}/progress`, { headers: this.headers })
+      .then((r) => (r.status === 204 || !r.data ? null : (r.data as RunProgress)));
   }
 
   /** What this deployment does when a run is triggered. Shown permanently in the header. */

@@ -38,6 +38,17 @@
     </dependency>
 
     <!--
+      Jackson, for the one column in this module that stores a document: a live snapshot's
+      per-operation breakdown, latency buckets and per-shard capture times (run_progress.detail_json).
+      Not a new library for the platform — orchestration already uses it — and the alternative was
+      three child tables written every few seconds per run and always read together.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!--
       S3-compatible object storage for durable artifacts (Increment 1E). It lives beside the
       filesystem store because both implement the same storage port and share one key layout; only
       the medium differs. The filesystem store cannot serve multiple replicas, and a runner Pod on

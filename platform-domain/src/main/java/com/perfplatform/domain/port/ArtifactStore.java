@@ -57,7 +57,18 @@ public interface ArtifactStore {
          */
         DATASET,
         /** A generated human-readable report. */
-        REPORT
+        REPORT,
+        /**
+         * A runner's rolling account of itself while it is still executing.
+         *
+         * <p>Overwritten in place every few seconds under one key per shard, so the store holds the
+         * latest rather than a growing pile — the merged history lives in the database, where it can
+         * be queried. Unlike every other type here it is <em>not</em> evidence of a result: it is
+         * reduced from partial output with bucketed percentiles, and a run's verdict is never
+         * computed from it. It is kept after a run ends anyway, because a run that died leaves this
+         * as the only account of what was happening at the time.
+         */
+        PROGRESS
     }
 
     /**

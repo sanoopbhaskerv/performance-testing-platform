@@ -12,7 +12,9 @@ RUN apt-get update \
 RUN npm install -g lighthouse@${LIGHTHOUSE_VERSION}
 
 COPY entrypoint.sh /usr/local/bin/run-playwright-shard
-RUN chmod 0555 /usr/local/bin/run-playwright-shard
+# The rolling progress reducer, in Node because that is what this image already runs.
+COPY progress.js /usr/local/bin/perf-progress
+RUN chmod 0555 /usr/local/bin/run-playwright-shard /usr/local/bin/perf-progress
 
 USER pwuser
 WORKDIR /workspace

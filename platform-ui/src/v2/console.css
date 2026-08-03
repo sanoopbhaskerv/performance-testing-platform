@@ -900,3 +900,203 @@
 @media (prefers-reduced-motion: reduce) {
   .v2 .run-progress-fill { transition: none; }
 }
+
+/* ── Live monitoring ──────────────────────────────────────────────────────────
+ *
+ * The panel a person watches while a test runs. Its layout follows what somebody actually does with
+ * it: read whether anything is wrong, then read the four numbers, then look for which journey is
+ * responsible. Observations therefore sit above the tiles rather than beside them.
+ */
+.v2 .live-monitor {
+  margin: var(--pf-space-6) 0;
+  padding: var(--pf-space-6);
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-lg);
+  background: var(--pf-surface-raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-5);
+}
+
+.v2 .live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-space-4);
+}
+
+.v2 .live-head h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+}
+
+.v2 .live-monitor h4 {
+  margin: var(--pf-space-3) 0 0;
+  font-size: var(--pf-text-md);
+}
+
+/* The freshness badge. Its whole job is to stop reading as "Live" the moment it stops being true. */
+.v2 .live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-1) var(--pf-space-4);
+  border-radius: var(--pf-radius-pill);
+  font-size: var(--pf-text-xs);
+  border: 1px solid transparent;
+}
+
+.v2 .live-live {
+  color: var(--pf-status-busy-fg);
+  background: var(--pf-status-busy-bg);
+  border-color: var(--pf-status-busy-border);
+}
+
+.v2 .live-lagging {
+  color: var(--pf-status-wait-fg);
+  background: var(--pf-status-wait-bg);
+  border-color: var(--pf-status-wait-border);
+}
+
+.v2 .live-stale {
+  color: var(--pf-verdict-fail-fg);
+  background: var(--pf-verdict-fail-bg);
+  border-color: var(--pf-verdict-fail-border);
+}
+
+.v2 .observations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.v2 .observation {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-4);
+  padding: var(--pf-space-4);
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border-subtle);
+  background: var(--pf-surface-emphasis);
+}
+
+.v2 .observation > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.v2 .obs-critical {
+  color: var(--pf-banner-bad-fg);
+  background: var(--pf-banner-bad-bg);
+  border-color: var(--pf-banner-bad-border);
+}
+
+.v2 .obs-warning {
+  color: var(--pf-synthetic-fg);
+  background: var(--pf-synthetic-bg);
+  border-color: var(--pf-synthetic-border);
+}
+
+.v2 .obs-info {
+  color: var(--pf-banner-info-fg);
+  background: var(--pf-banner-info-bg);
+  border-color: var(--pf-banner-info-border);
+}
+
+.v2 .live-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--pf-space-4);
+}
+
+.v2 .live-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-5);
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border-subtle);
+  background: var(--pf-surface-sunken-soft);
+}
+
+.v2 .live-tile-bad {
+  border-color: var(--pf-verdict-fail-border);
+}
+
+.v2 .live-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: var(--pf-text-xs);
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .live-tile-value {
+  font-size: var(--pf-text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tile's own explanation, because "p95" means nothing to somebody on their first load test. */
+.v2 .live-tile-hint {
+  font-size: var(--pf-text-2xs);
+  line-height: 1.4;
+}
+
+.v2 .sparkline,
+.v2 .sparkline-placeholder {
+  height: 28px;
+  width: 100%;
+}
+
+.v2 .sparkline path {
+  stroke: var(--pf-series-1);
+}
+
+.v2 .live-tile-bad .sparkline path {
+  stroke: var(--pf-verdict-fail-fg);
+}
+
+.v2 .live-total {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .live-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--pf-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.v2 .live-table th,
+.v2 .live-table td {
+  text-align: left;
+  padding: var(--pf-space-3) var(--pf-space-4);
+  border-bottom: 1px solid var(--pf-border-subtle);
+}
+
+.v2 .live-table th {
+  font-weight: var(--pf-weight-strong);
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .live-table .bad {
+  color: var(--pf-verdict-fail-fg);
+}
+
+/* A generator that has gone quiet. Marked on its row as well as named in an observation: the
+ * totals above are still climbing, so the row is the only place the loss is visible as a fact. */
+.v2 .live-table .row-bad {
+  background: var(--pf-verdict-fail-bg);
+}
+
+/* A sparkline is decoration for the number beside it; forced-colors mode can drop it entirely. */
+@media (forced-colors: active) {
+  .v2 .sparkline path { stroke: CanvasText; }
+}

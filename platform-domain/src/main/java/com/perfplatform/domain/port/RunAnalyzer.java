@@ -84,4 +84,18 @@ public interface RunAnalyzer {
      */
     Analysis analyze(TestRunId runId, String engine, int shardsExpected, int shardsReported,
             SampleSet samples, List<ObjectiveSpec> objectives);
+
+    /**
+     * Judges measurements that have already been reduced.
+     *
+     * <p>For the live view, whose numbers are merged from runner snapshots rather than reduced from
+     * samples. It exists so that "this objective is breached" has exactly one definition in the
+     * platform: a live warning computed by a looser rule would eventually disagree with the run's own
+     * verdict, and the disagreement would destroy the credibility of both.
+     *
+     * <p>The outcomes are provisional wherever they are used — the measurements behind them come
+     * from partial output and bucketed percentiles — and callers are responsible for saying so. They
+     * are never stored as a run's verdict.
+     */
+    List<ObjectiveOutcome> judge(NormalizedRunResult result, List<ObjectiveSpec> objectives);
 }

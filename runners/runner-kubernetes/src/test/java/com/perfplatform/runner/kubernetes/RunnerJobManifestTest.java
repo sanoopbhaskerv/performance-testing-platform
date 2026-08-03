@@ -255,6 +255,23 @@ class RunnerJobManifestTest {
         }
 
         /**
+         * The runner publishes what it has measured; nothing calls back the other way.
+         *
+         * <p>The shard identifier is in the environment because it goes into every progress
+         * document, and the control plane refuses a snapshot whose identity does not match the run
+         * it is reconciling — the same check that keeps a stale runner's results out of a report.
+         */
+        @Test
+        @DisplayName("the runner is told how often to publish progress, and who it is publishing as")
+        void environmentCarriesProgressContract() {
+            ProvisionRequest request = RunnerFixtures.request();
+
+            assertThat(env(build(request)))
+                    .containsEntry("PERF_PROGRESS_INTERVAL_SECONDS", "5")
+                    .containsEntry("PERF_SHARD_ID", request.shardId().value().toString());
+        }
+
+        /**
          * A runner is told where its data is, never given the data. A Job manifest is readable by
          * anyone with cluster access, appears in audit logs and gets pasted into tickets — and a
          * dataset is the team's business data.

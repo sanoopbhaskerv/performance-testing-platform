@@ -66,7 +66,10 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /usr/local/bin/run-shard
-RUN chmod 0555 /usr/local/bin/run-shard
+# The rolling progress reducer. Python 3 is already present — the apt awscli above is written in it —
+# so this adds a file rather than a runtime.
+COPY progress.py /usr/local/bin/perf-progress
+RUN chmod 0555 /usr/local/bin/run-shard /usr/local/bin/perf-progress
 
 # Matches the securityContext RunnerJobManifest sets. Declared here as well so the
 # image is not root-by-default if it is ever run outside that manifest.

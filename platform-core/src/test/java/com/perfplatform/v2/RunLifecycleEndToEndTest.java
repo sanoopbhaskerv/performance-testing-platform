@@ -192,6 +192,10 @@ class RunLifecycleEndToEndTest {
     @Autowired
     private EngineRegistry engines;
 
+    /** For registering the target a run is permitted to point at. */
+    @Autowired
+    private com.perfplatform.domain.port.TargetRegistry targetRegistry;
+
     private TestDefinitionVersionId versionId;
 
     @BeforeEach
@@ -213,6 +217,19 @@ class RunLifecycleEndToEndTest {
         ApplicationId applicationId = ApplicationId.generate();
         applications.saveAndFlush(new ApplicationEntity(applicationId.value(), teamId.value(),
                 APPLICATION_NAME, ApplicationEntity.TargetClass.NON_PRODUCTION, NOW));
+
+        // Where this team's traffic is permitted to go. Registered explicitly rather than relied on
+        // from the YAML fixture: the synchronizer copies those rows in at startup, and the truncate
+        // above removes them along with the team they belong to. Without one, provisioning refuses
+        // the run — which is the platform behaving correctly and the test failing for a reason that
+        // has nothing to do with what it is checking.
+        //
+        // The address is never dialled. This suite runs the fake execution provider, which generates
+        // no load; it is here because a run must name a permitted target before it may start.
+        targetRegistry.register(teamId, applicationId, APPLICATION_NAME, "performance",
+                com.perfplatform.domain.spec.TargetClass.NON_PRODUCTION,
+                com.perfplatform.domain.target.TargetAddress.parse("http://localhost:18099"),
+                "alice@example.com");
 
         // The second team owns nothing here. It exists so a cross-team request comes from a caller
         // who is properly authenticated and properly scoped — to a different team.

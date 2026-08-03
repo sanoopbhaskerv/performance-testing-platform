@@ -173,6 +173,39 @@ is present:
 kubectl -n perf-runners get job <name> -o json | grep -c 'AWS_SECRET_ACCESS_KEY'   # 0
 ```
 
+## 7. Check live monitoring (S7, never yet run on a cluster)
+
+The runner-image half of live monitoring has only been verified through the local provider. This is
+the procedure that would confirm it in a pod.
+
+```bash
+# The snapshot appears within ~10s of the Job starting, and its timestamp advances every ~5s.
+kubectl -n perf-runners exec deploy/minio-client -- \
+  mc ls --recursive local/perf-artifacts | grep progress.json
+```
+
+```bash
+# The control plane merged it.
+curl -s "http://localhost:18080/api/v2/test-runs/$RUN_ID/progress" -H "X-API-Key: $KEY" | jq \
+  '{age: .ageSeconds, samples: .overall.sampleCount, shards: .shards, obs: [.observations[].code]}'
+```
+
+Four things to confirm, in order:
+
+1. `progress.json` exists under `teams/{team}/runs/{run}/shards/{shard}/` and its modification time
+   advances every ~5 seconds.
+2. `GET …/progress` returns `200` with a `sampleCount` that grows between polls, and `ageSeconds`
+   stays under ~20.
+3. **Delete one Job of a two-shard run.** Within the heartbeat tolerance the response carries
+   `RUNNER_SILENT`, that shard's `ageSeconds` keeps climbing, and its `sampleCount` stops — while
+   the surviving shard's keeps rising. This is the case merged totals cannot show, and the reason
+   the per-shard block exists.
+4. After the Job finishes, the last snapshot is still readable from object storage and matches the
+   final point in the series.
+
+If `progress.json` never appears, check `PERF_PROGRESS_INTERVAL_SECONDS` in the Job's environment
+and the runner's own log — publishing failures are swallowed by design, so the only trace is there.
+
 ## Expected result
 
 A `Complete` Job, ~8,000 requests, and a report showing **two passes and one breach** — the demo

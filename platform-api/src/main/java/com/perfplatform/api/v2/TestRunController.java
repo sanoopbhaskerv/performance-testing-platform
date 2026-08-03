@@ -4,6 +4,7 @@ import com.perfplatform.api.v2.dto.ArtifactResponse;
 import com.perfplatform.api.v2.dto.CancellationResponse;
 import com.perfplatform.api.v2.dto.ObjectiveOutcomeResponse;
 import com.perfplatform.api.v2.dto.RunEventResponse;
+import com.perfplatform.api.v2.dto.RunProgressResponse;
 import com.perfplatform.api.v2.dto.RunReportResponse;
 import com.perfplatform.api.v2.dto.TestRunResponse;
 import com.perfplatform.api.v2.dto.TriggerTestRunRequest;
@@ -13,6 +14,7 @@ import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.orchestration.run.ReadRunProgressUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase.ArtifactContent;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
@@ -76,17 +78,20 @@ public class TestRunController {
     private final CancelTestRunUseCase cancelRun;
     private final ReadTestRunUseCase readRun;
     private final ReadRunReportUseCase readReport;
+    private final ReadRunProgressUseCase readProgress;
     private final CallerContextProvider callers;
 
     public TestRunController(TriggerTestRunUseCase triggerRun,
             CancelTestRunUseCase cancelRun,
             ReadTestRunUseCase readRun,
             ReadRunReportUseCase readReport,
+            ReadRunProgressUseCase readProgress,
             CallerContextProvider callers) {
         this.triggerRun = triggerRun;
         this.cancelRun = cancelRun;
         this.readRun = readRun;
         this.readReport = readReport;
+        this.readProgress = readProgress;
         this.callers = callers;
     }
 
@@ -227,6 +232,41 @@ public class TestRunController {
     @GetMapping(value = "/{runId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public TestRunResponse get(@PathVariable String runId) {
         return TestRunResponse.from(readRun.get(TestRunId.of(runId), callers.current()));
+    }
+
+    /**
+     * What a run is doing right now.
+     *
+     * <p>{@code 204} rather than an empty body full of zeros when nothing has been published yet.
+     * "Not measured yet" and "measured nothing" are different facts, and a response of zeros would
+     * let a client render the second while the first is true — which, for a live view, is the one
+     * wrong answer that matters.
+     *
+     * <p>Polled. Server-Sent Events would suit this better and is a later increment; the merged
+     * snapshots are durable either way, so switching the transport changes nothing about what a
+     * client can ask for or resume from.
+     */
+    @Operation(
+            summary = "Get a run's live measurements",
+            description = "Throughput, latency, errors, per-operation breakdown, each generator's "
+                    + "own last snapshot, and rule-based observations with their evidence. "
+                    + "Everything is provisional: percentiles are bucket upper bounds, counts come "
+                    + "from partial runner output, and provisionalObjectives are not the run's "
+                    + "verdict — that is computed from the complete results once every shard has "
+                    + "finished. Returns 204 when no generator has published anything yet.")
+    @GetMapping(value = "/{runId}/progress", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<RunProgressResponse> progress(
+            @PathVariable String runId,
+            @RequestParam(defaultValue = "120") int limit) {
+
+        return readProgress.read(TestRunId.of(runId), limit, callers.current())
+                .map(view -> ResponseEntity.ok()
+                        // A live view is current for as long as the runners' publishing interval,
+                        // and a cached one shown as current is exactly the failure this endpoint
+                        // exists to prevent.
+                        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                        .body(RunProgressResponse.from(view)))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     /**

@@ -9,6 +9,8 @@ import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactDescriptor;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactType;
 import com.perfplatform.domain.port.ResultCatalog;
+import com.perfplatform.domain.progress.ShardProgress;
+import com.perfplatform.domain.progress.ShardProgressJson;
 import com.perfplatform.domain.run.RunnerShard.ExecutionHandle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,6 +63,16 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
     /** Captured runner output is truncated: a failing run can emit megabytes of stack traces. */
     private static final int MAX_CAPTURED_OUTPUT = 64 * 1024;
 
+    /**
+     * How often a progress snapshot is published.
+     *
+     * <p>The same cadence the runner images use, so the live view behaves identically whichever
+     * provider a deployment runs. Five seconds is short enough that a person watching sees the
+     * effect of a stage change while it is happening, and long enough that reducing the results file
+     * again is not the thing keeping a core busy.
+     */
+    private static final Duration PROGRESS_INTERVAL = Duration.ofSeconds(5);
+
     private final Clock clock;
     private final ArtifactStore artifacts;
     private final ResultCatalog catalog;
@@ -71,6 +84,15 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
     private final Path workDirectory;
 
     private final Map<String, LocalRun> running = new ConcurrentHashMap<>();
+
+    /**
+     * The last snapshot published per shard, so throughput can be measured over a window.
+     *
+     * <p>Separate from {@link LocalRun} because that record describes what was started and does not
+     * change; this changes every five seconds and is the only mutable thing about a run here.
+     */
+    private final Map<String, JmeterProgressReducer.Window> progressWindows =
+            new ConcurrentHashMap<>();
 
     public LocalJmeterExecutionProvider(Clock clock, ArtifactStore artifacts, ResultCatalog catalog,
             Path jmeterCommand, Path workDirectory) {
@@ -174,6 +196,11 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
                     "-Jjmeter.save.saveservice.label=true",
                     "-Jjmeter.save.saveservice.successful=true",
                     "-Jjmeter.save.saveservice.time=true",
+                    // Active threads per row, which is what the live view reports as users applying
+                    // load. Taken from the file rather than from the plan's stage because the two
+                    // differ exactly when it matters: a ramp behind schedule, or a generator at its
+                    // own limit.
+                    "-Jjmeter.save.saveservice.thread_counts=true",
                     "-Jjmeter.save.saveservice.timestamp_format=ms");
 
             ProcessBuilder builder = new ProcessBuilder(command)
@@ -224,11 +251,15 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
         }
 
         if (run.process().isAlive()) {
+            publishProgress(run, now);
             return new ExecutionStatus(ExecutionPhase.RUNNING, Optional.empty(),
                     Optional.of(run.startedAt()), Optional.empty());
         }
 
         int exitCode = run.process().exitValue();
+        // One last snapshot before the outputs are collected, so a run that failed leaves an account
+        // of what it was doing when it did rather than only a results file and an exit code.
+        publishProgress(run, now);
         collectOutputs(run, now, exitCode);
 
         return ExecutionStatus.finished(
@@ -283,6 +314,56 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
+        }
+    }
+
+    /**
+     * Reduces the partial results file and publishes a snapshot, at most once per interval.
+     *
+     * <p>Published to the artifact store under this shard's prefix and <em>not</em> recorded in the
+     * result catalog. A snapshot is overwritten in place every few seconds, so a recorded digest
+     * would stop matching the object almost immediately — and the download path refuses content
+     * whose digest does not match. The durable record of what a run was doing is the merged series
+     * the control plane keeps, not this object.
+     *
+     * <p>Every failure here is swallowed. Publishing progress must not be able to affect what
+     * {@code inspect} reports about a process: a run that failed because a chart could not be drawn
+     * would be a strictly worse platform than one with no chart.
+     */
+    private void publishProgress(LocalRun run, Instant now) {
+        String uid = run.request().shardId().value().toString();
+        JmeterProgressReducer.Window previous = progressWindows.getOrDefault(uid,
+                new JmeterProgressReducer.Window(run.startedAt(), 0));
+
+        if (previous.capturedAt().plus(PROGRESS_INTERVAL).isAfter(now)) {
+            return;
+        }
+
+        try {
+            Path results = run.directory().resolve("results.jtl");
+            if (!Files.isRegularFile(results)) {
+                return;
+            }
+
+            String jtl = Files.readString(results, StandardCharsets.UTF_8);
+            Optional<ShardProgress> snapshot = JmeterProgressReducer.reduce(
+                    run.request(), jtl, now, run.startedAt(), previous);
+            if (snapshot.isEmpty()) {
+                return;
+            }
+
+            artifacts.store(
+                    new ArtifactDescriptor(run.request().teamId(), run.request().runId(),
+                            Optional.of(run.request().shardId()), ArtifactType.PROGRESS,
+                            ShardProgress.OBJECT_NAME, "application/json"),
+                    ShardProgressJson.write(snapshot.get()).getBytes(StandardCharsets.UTF_8));
+
+            progressWindows.put(uid, new JmeterProgressReducer.Window(
+                    now, snapshot.get().overall().sampleCount()));
+
+        } catch (IOException | RuntimeException e) {
+            log.debug("Could not publish a progress snapshot runId={} shardIndex={}",
+                    run.request().runId(), run.request().shardIndex(), e);
         }
     }
 

@@ -447,6 +447,11 @@ public final class RunReconciler {
             return;
         }
 
+        // Before the shards are inspected, so a pass that finds them all finished still merges the
+        // final snapshot each runner wrote on its way out. A run that fails leaves that snapshot as
+        // the only account of what was happening when it did.
+        recordProgress(run, now);
+
         if (exceededDeadline(run, now)) {
             current.forEach(this::terminateShard);
             fail(run, RunFailureCode.DURATION_EXCEEDED,
@@ -471,6 +476,13 @@ public final class RunReconciler {
                 allTerminal = false;
             }
         }
+
+        // Again, after inspecting. The local development provider publishes its snapshot from inside
+        // inspect — it owns the results file rather than a pod — so a single collection before the
+        // inspection would always show the previous pass's numbers, doubling the apparent staleness
+        // for the one provider a person actually watches on a laptop. Recording is idempotent by
+        // capture instant, so for a Kubernetes runner this second call is a no-op.
+        recordProgress(run, now);
 
         if (shardFailure.isPresent()) {
             // Failing the whole run on one failed shard is deliberate. A partial result set measures
@@ -531,8 +543,30 @@ public final class RunReconciler {
         return startedAt.get().plus(deadlineFor(plan.get())).isBefore(now);
     }
 
+    /**
+     * Merges whatever the runners have published about themselves, and stores it.
+     *
+     * <p>Wrapped so nothing about live monitoring can stop a run from advancing. Reading object
+     * storage, decoding a document written by an image released on its own schedule, and an extra
+     * database write are three things that can fail transiently; a run that could not reach a
+     * terminal state because a chart could not be drawn would be a strictly worse platform than one
+     * with no chart.
+     */
+    private void recordProgress(TestRun run, Instant now) {
+        try {
+            run.executionPlanId().flatMap(plans::find)
+                    .ifPresent(plan -> workloads.recordProgress(run, plan, now));
+        } catch (RuntimeException e) {
+            log.debug("Live progress could not be recorded runId={}", run.id(), e);
+        }
+    }
+
     /** Stops whatever is executing and moves the run to {@code CANCELLED}. */
     private void terminate(TestRun run, Instant now, ReconciliationReport.Builder report) {
+        // A cancelled run's last snapshot is the reason somebody stopped it. Recorded before the
+        // runners are torn down, while the objects they published are still the current ones.
+        recordProgress(run, now);
+
         List<RunnerShard> current = shards.findByRun(run.id());
         boolean allStopped = true;
 

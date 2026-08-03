@@ -19,16 +19,18 @@ import type {
   ExecutionCapability,
   ObjectiveOutcome,
   RunEvent,
+  RunProgress,
   RunReport as Report,
   RunStatus,
   TestDefinition,
   TestRun,
   VersionSummary,
 } from './api';
-import { V2Client, describeError, isTerminal } from './api';
+import { V2Client, describeError, isActive, isTerminal } from './api';
 import RunReport from './RunReport';
 import ImportPanel from './ImportPanel';
 import Studio from './studio/Studio';
+import LiveMonitor from './LiveMonitor';
 import RunProgressBar from './RunProgressBar';
 import { objectiveLabel } from './labels';
 import './console.css';
@@ -267,6 +269,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [objectives, setObjectives] = useState<ObjectiveOutcome[]>([]);
   const [report, setReport] = useState<Report | null>(null);
+  const [liveProgress, setLiveProgress] = useState<RunProgress | null>(null);
 
   /** What this deployment does when a run is triggered. Read once; it cannot change while running. */
   const [capability, setCapability] = useState<ExecutionCapability | null>(null);
@@ -339,16 +342,21 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const loadRunDetail = useCallback(
     async (runId: string) => {
       try {
-        const [run, eventList, objectiveList, runReport] = await Promise.all([
+        const [run, eventList, objectiveList, runReport, progress] = await Promise.all([
           client.getRun(runId),
           client.listEvents(runId),
           client.listObjectives(runId),
           client.getReport(runId),
+          // Kept out of the failure path of the rest: a live view that could not be read is a gap
+          // in a chart, and turning it into the panel's error message would report a problem with
+          // the run when the problem is with one poll.
+          client.getRunProgress(runId).catch(() => null),
         ]);
         setRuns((previous) => previous.map((r) => (r.id === runId ? run : r)));
         setEvents(eventList);
         setObjectives(objectiveList);
         setReport(runReport);
+        setLiveProgress(progress);
       } catch (err) {
         setError(describeError(err));
       }
@@ -756,6 +764,11 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
               so it costs no new measurement and no runner change — live throughput and latency are
               S7, which does need one. */}
           <RunProgressBar run={selectedRun} report={report} />
+
+          {/* Live measurements, while there are any. Kept above the objectives and the timeline
+              because it is the reason somebody has this panel open during a run — and it disappears
+              on its own once the run ends and the report becomes the thing worth reading. */}
+          {isActive(selectedRun.status) && <LiveMonitor progress={liveProgress} />}
 
           {/* On the run as well as on its report. The report is what gets screenshotted, but this
               panel is where someone first looks at a result. */}

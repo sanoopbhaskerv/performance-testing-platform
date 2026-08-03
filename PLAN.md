@@ -12,8 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S6 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3v for what each delivered. S7, live monitoring, is next; everything after it is still a plan.
+**Status: S1 through S7 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3w for what each delivered. S8, load profiles, is next; everything after it is still a plan.
 
 ---
 
@@ -201,7 +201,7 @@ it this platform's.
 | **6. Load** | Concurrent users **or** requests/second · stages · journey mix | half built |
 | **7. Objectives** | Latency, error rate, throughput, **Core Web Vitals** | half built |
 | **8. Validate** | One iteration against the real target, every request and response inspectable | new (§8) |
-| **9. Status** | Release 1: state, timeline, elapsed, current stage, progress bar, cancel. **S7** adds live throughput, latency, errors and objective tracking | §4.1, deferred |
+| **9. Status** | State, timeline, elapsed, current stage, progress bar, cancel — plus **S7's live throughput, latency, errors, per-journey breakdown, per-generator health and live objectives** | §4.1, **built** |
 | **10. Report** | Verdicts in plain language, per-operation latency, web vitals, **comparison to baseline** | §4.2, half built |
 
 **Screens 3, 4 and 8 are what make it a studio.** Without them it is a form over a YAML file.
@@ -715,7 +715,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 | Decision | Chosen | Why |
 |---|---|---|
-| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 133 UI tests now. |
+| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 154 UI tests now. |
 | **Recorder** | **Deferred.** Guided capture wizards instead (§5) | A server-side recording browser is large and needs a security review. The wizards get most of the value for almost nothing. |
 | **Live monitoring** | **Deferred.** Existing status, plus elapsed/stage/progress bar | The cost is a runner-image change and re-verification on a cluster. The progress bar is derivable from data the control plane already has — no runner change. |
 | **The novice report** | **Kept** | Pure UI, cheap, and most of what "usable without experience" actually means. |
@@ -736,8 +736,8 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S5** | Targets, credentials, sessions | 5 Data/Auth; self-service targets | Large | ✅ | **done** — `HANDOFF.md` §3t |
 | **S6a** | Broker path production-readiness validation | Operations | Small | ✅ | **done** — `HANDOFF.md` §3u |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | **done** — `HANDOFF.md` §3v |
-| **S7** | Live monitoring | 9 Monitor | Large | — | next |
-| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | |
+| **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
+| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | next |
 | **S9** | One run, many workloads | structural | Large | — | |
 | **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
@@ -901,10 +901,11 @@ runner image. Not a Maven dependency and not a §31 pause on that basis, but it 
 a production runner image and belongs in the completion report as one. Playwright 1.50 requires
 **Node 22**, which constrains the base image.
 
-### S7 — live monitoring
+### S7 — live monitoring — **built**
 
-§4.1, and the reason it is not in release 1: it needs a **runner-image change**, and therefore
-re-verification on a cluster (`docs/operations/local-kubernetes-run.md`).
+`HANDOFF.md` §3w and `docs/operations/live-monitoring.md`. Everything below was delivered as
+described, with one caveat carried forward: the runner-image half has **not been run on a cluster**,
+so `docs/operations/local-kubernetes-run.md` §7 remains outstanding.
 
 **Progress snapshots.** Every 5 seconds each runner reduces what it has produced so far and PUTs a
 `progress.json` under its own shard prefix; the reconciler merges across shards on each pass. Not a
@@ -922,9 +923,12 @@ latency knee, throughput plateau, heartbeat lost, objective crossed — each mes
 observation behind it. Rules, never a model's opinion: a tool that tells a novice something confident
 and wrong is worse than a bare chart.
 
-*Acceptance:* numbers no more than ~15 s stale. Killing a runner shows as a lost heartbeat within
-tolerance, not as a quiet drop in load. A run that dies leaves its last snapshot as durable evidence.
-Every interpretation message is pinned by a test naming its observation.
+*Acceptance, and what was measured:* **11–14 s stale** against real load through the local provider,
+inside the ~15 s target. A lost generator surfaces as `RUNNER_SILENT` with its own table row rather
+than as a quiet drop in load — verified by unit and reconciler tests; the two-shard kill on a cluster
+is still outstanding. A run that dies leaves its last snapshot as a durable series point, taken on
+the way out of `RUNNING` and again on cancellation. **Every interpretation message is pinned by a
+test naming its observation** (`ProgressInterpreterTest`).
 
 ### S8 — load profiles: rate as well as users
 
@@ -993,7 +997,7 @@ credentials are a §31 pause. Re-run the kind procedure (`ROADMAP.md` §0's outs
 | **R7** | ~~**Session pool artefacts hold live credentials** for a run's duration~~ | **Resolved:** S5 delivers per-shard `sessions.csv` through run-scoped Kubernetes Secret volumes, never downloadable artifacts, with terminal and TTL cleanup. |
 | **R8** | **Browser cost.** 50 sessions ≈ 40 GB and 25 cores of ephemeral capacity | Budget decision, not an architectural one. |
 | **R9** | **INP cannot be claimed as the field metric.** The platform measures interactions in *its* journey | Must be labelled in the report, not just documented (§6). |
-| **R10** | **Playwright may not run on a read-only root filesystem** | Resolve in S7; if it deviates, say so in the report rather than relaxing the posture quietly. |
+| **R10** | **Playwright may not run on a read-only root filesystem** | **Still open.** S7 did not exercise the Playwright image on a cluster; it added a progress loop to that image without building or running it. Resolve when the image is first run on kind. |
 
 ---
 
@@ -1046,7 +1050,7 @@ quota-bounded, digest-identified, durable and reproducible, which is the part no
 
 ### Deferred to release 2, deliberately
 
-Live monitoring (S7), arrival-rate sizing (S8), the multi-plan refactor (S9), the server-side
+Arrival-rate sizing (S8), the multi-plan refactor (S9), the server-side
 recorder and git-pinned Playwright import (S10), **web experience under load** (S11), and baselines
 and sharding (S12).
 

@@ -17,6 +17,11 @@ import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
+import com.perfplatform.domain.progress.LatencyHistogram;
+import com.perfplatform.domain.progress.LiveProgress;
+import com.perfplatform.domain.progress.ProgressInterpreter;
+import com.perfplatform.domain.progress.ProgressMetrics;
+import com.perfplatform.orchestration.run.ReadRunProgressUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
@@ -65,6 +70,7 @@ class TestRunControllerTest {
     private final CancelTestRunUseCase cancelRun = mock(CancelTestRunUseCase.class);
     private final ReadTestRunUseCase readRun = mock(ReadTestRunUseCase.class);
     private final ReadRunReportUseCase readReport = mock(ReadRunReportUseCase.class);
+    private final ReadRunProgressUseCase readProgress = mock(ReadRunProgressUseCase.class);
     private final CallerContextProvider callers = mock(CallerContextProvider.class);
 
     private MockMvc mockMvc;
@@ -74,7 +80,8 @@ class TestRunControllerTest {
     void setUp() {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(
-                        new TestRunController(triggerRun, cancelRun, readRun, readReport, callers))
+                        new TestRunController(triggerRun, cancelRun, readRun, readReport, readProgress,
+                                callers))
                 .setControllerAdvice(new V2ProblemHandler())
                 .build();
 
@@ -449,6 +456,70 @@ class TestRunControllerTest {
             } catch (java.security.NoSuchAlgorithmException e) {
                 throw new IllegalStateException(e);
             }
+        }
+    }
+
+
+    /**
+     * The live view, at the HTTP boundary.
+     *
+     * <p>The status code is the part that matters here. A run that has published nothing must not
+     * answer with a body of zeros: "not measured yet" and "measured nothing" are different facts,
+     * and a client rendering the second while the first is true is the one wrong answer a live view
+     * can give.
+     */
+    @Nested
+    @DisplayName("live progress")
+    class Progress {
+
+        @Test
+        @DisplayName("a run that has published nothing answers 204, not an object of zeros")
+        void nothingPublishedYet() throws Exception {
+            when(readProgress.read(any(), anyInt(), any())).thenReturn(Optional.empty());
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/progress"))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("live measurements, each generator's own snapshot, and the evidence behind each message")
+        void returnsTheLiveView() throws Exception {
+            when(readProgress.read(any(), anyInt(), any())).thenReturn(Optional.of(liveView()));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/progress"))
+                    .andExpect(status().isOk())
+                    // Never cached: a live view shown from a cache is exactly the failure this
+                    // endpoint exists to prevent.
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.overall.sampleCount").value(1000))
+                    .andExpect(jsonPath("$.overall.errorRateMilliPercent").value(6000))
+                    // An upper bound read off the merged buckets, never an interpolated figure.
+                    .andExpect(jsonPath("$.overall.p95Millis").value(150))
+                    .andExpect(jsonPath("$.shards[0].ageSeconds").value(4))
+                    .andExpect(jsonPath("$.series.length()").value(1))
+                    .andExpect(jsonPath("$.observations[0].code").value("ERROR_RATE_ELEVATED"))
+                    .andExpect(jsonPath("$.observations[0].evidence").isNotEmpty());
+        }
+
+        private ReadRunProgressUseCase.LiveView liveView() {
+            Instant capturedAt = NOW.plusSeconds(60);
+            long[] latencies = new long[1000];
+            java.util.Arrays.fill(latencies, 120L);
+
+            ProgressMetrics overall = new ProgressMetrics("*", 1000, 60, 0, 10, 900, 120, 20_000,
+                    LatencyHistogram.of(latencies));
+
+            LiveProgress latest = new LiveProgress(run.id(), "jmeter", capturedAt,
+                    capturedAt.plusSeconds(1), 1, 60, 25, overall, java.util.Map.of(),
+                    List.of(new LiveProgress.ShardReport(0, capturedAt, 1000, 60, 25)));
+
+            return new ReadRunProgressUseCase.LiveView(
+                    latest,
+                    List.of(latest),
+                    List.of(),
+                    ProgressInterpreter.interpret(List.of(latest), List.of(),
+                            capturedAt.plusSeconds(4), java.time.Duration.ofMinutes(5)),
+                    capturedAt.plusSeconds(4));
         }
     }
 

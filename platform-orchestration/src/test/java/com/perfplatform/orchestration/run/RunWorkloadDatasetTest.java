@@ -60,7 +60,8 @@ class RunWorkloadDatasetTest {
     private final RunWorkloadService workloads = new RunWorkloadService(
             new EngineRegistry(List.of(new StubEngineProvider())), artifacts, artifacts,
             OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget(),
-            datasets, datasets, new RuntimeCredentialSessionPoolProvider());
+            datasets, datasets, new RuntimeCredentialSessionPoolProvider(),
+            new OrchestrationFixtures.InMemoryProgress());
 
     private final TestRunId runId = TestRunId.generate();
     private final TestDefinitionVersionId versionId = TestDefinitionVersionId.generate();

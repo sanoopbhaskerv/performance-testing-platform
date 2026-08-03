@@ -56,6 +56,16 @@ public final class RunnerJobManifest {
     /** How much of a run identifier appears in a Job name. Enough to be unambiguous by eye. */
     private static final int RUN_ID_PREFIX = 8;
 
+    /**
+     * How often a runner publishes a progress snapshot.
+     *
+     * <p>Five seconds, matching the local provider so a live view behaves the same whichever
+     * provider a deployment runs. Short enough that a person watching sees a stage change while it
+     * is happening; long enough that reducing the results file again is never what keeps a
+     * generator's core busy — which would make the measurement affect the measurement.
+     */
+    static final int PROGRESS_INTERVAL_SECONDS = 5;
+
     // Labels are how reconciliation finds a run's Jobs after a control-plane restart, so they are
     // part of the contract rather than decoration.
     public static final String LABEL_MANAGED_BY = "app.kubernetes.io/managed-by";
@@ -259,6 +269,12 @@ public final class RunnerJobManifest {
         // and by scenario, so output labelled any other way could not be judged.
         env.put("PERF_OPERATION_LABELS", String.join(",", request.operationLabels()));
         env.put("PERF_DEADLINE_SECONDS", String.valueOf(request.deadline().toSeconds()));
+        // How often the runner publishes what it has measured so far, into its own artifact prefix.
+        // The control plane reads and merges those snapshots; without them a run in flight shows a
+        // state and nothing else. Zero turns publishing off, which is the escape hatch for a run
+        // large enough that re-reducing its results file is a cost worth avoiding.
+        env.put("PERF_PROGRESS_INTERVAL_SECONDS",
+                String.valueOf(PROGRESS_INTERVAL_SECONDS));
 
         // Where to read the plan from and write results to. Coordinates only — a runner
         // authenticates with its own projected service-account token, and a credential passed

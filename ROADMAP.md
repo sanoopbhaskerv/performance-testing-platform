@@ -17,12 +17,15 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S6** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S7** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
-> delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook, plus
-> browser-only Playwright execution behind the SPI and Core Web Vitals objective evaluation.
-> `HANDOFF.md` §3n–§3v.
+> delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook,
+> browser-only Playwright execution behind the SPI and Core Web Vitals objective evaluation, and
+> **live monitoring** — runner-published snapshots, a merged durable series, live objectives and
+> rule-based observations in the console. `HANDOFF.md` §3n–§3w.
+>
+> **Next: S8**, load profiles — arrival rate as well as concurrent users.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -35,7 +38,7 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
-slice are built. Everything below is still an accurate inventory of what exists and what
+slice and S7's live monitoring are built. Everything below is still an accurate inventory of what exists and what
 does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
@@ -132,6 +135,14 @@ Each is real, none blocks anything.
   count rises is calibration (`docs/operations/runner-calibration.md`).
 - **The runner image's dataset fetch has not run on a cluster.** Added by 2h and verified only
   through the local provider. Re-run `docs/operations/local-kubernetes-run.md`.
+- **Neither runner image's progress publisher has run on a cluster.** S7 added a Python reducer and
+  a rolling publish loop to the JMeter image and a Node equivalent to the Playwright one, both
+  verified only through the local provider's Java implementation of the same document.
+  `docs/operations/local-kubernetes-run.md` §7 is the procedure, including the two-shard
+  generator-kill check that is the only real test of `RUNNER_SILENT`.
+- **`run_progress` has no retention.** Rows accumulate at ~360 per hour per active run and nothing
+  prunes them. `ProgressCatalog.clear(runId)` exists and nothing calls it on a schedule. The series
+  is derived — losing it costs a chart, never a verdict — so a retention job is safe to add.
 - **The Playwright runner image is scaffolded, not cluster-proven.** S6 added the pinned
   Playwright/Lighthouse image and output contract, but the material script wrapper still needs a real
   kind/EKS run before production trust.
@@ -149,6 +160,9 @@ Each is real, none blocks anything.
 - ~~**Production `run://session` needed a provider and delivery contract.**~~ **Done in S5**:
   `ExternalSessionBrokerSessionAcquisitionProvider`, mounted `SecretResolver`, per-shard
   `sessions.csv`, Helm RBAC and docs. `HANDOFF.md` §3t.
+- ~~**A run in flight showed a state and nothing else.**~~ **Done in S7** — throughput, latency,
+  errors, per-journey breakdown, each generator's own last snapshot, live objectives and rule-based
+  observations, at 11–14 s freshness. `HANDOFF.md` §3w, `docs/operations/live-monitoring.md`.
 - ~~**Production broker path needed a kind-level readiness smoke and acquisition runbook.**~~
   **Done in S6a**: `docs/operations/kind-session-broker-smoke.md` adds the stub broker Service,
   mounted broker-client Secret and runner session Secret creation/cleanup checks; the failed
@@ -159,11 +173,12 @@ Each is real, none blocks anything.
   not widened there: it changes what every existing document validates as.
 - **`ConcurrencyThreadGroup` is in the runner image but unused.** The plan generator still emits
   stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
-  `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions.
+  `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions. **This is S8's
+  work** (`PLAN.md` §11).
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
 - ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library.
-  **133 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
-  emitter and step rules, the report narrative and run progress.
+  **154 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
+  emitter and step rules, the report narrative, run progress and the live view's unscaling layer.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).
 - **UI lint reports 3 errors, 3 warnings**, all pre-existing in V1's `App.tsx`. Deliberately not

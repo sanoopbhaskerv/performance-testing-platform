@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S6. Increments 0–2h and S1–S6 are complete.
+**Last updated:** Studio increment S7. Increments 0–2h and S1–S7 are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -28,7 +28,7 @@ protocol results.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
-- **vitest is approved** (§31 pause cleared) and was added in S1. **133 UI tests** where there were
+- **vitest is approved** (§31 pause cleared) and was added in S1. **154 UI tests** where there were
   none.
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
   the studio build phases. S5 removed the credentials/session blocker, but API removal still needs a
@@ -39,12 +39,13 @@ Scope decisions taken with the user, recorded so they are not relitigated:
   sources.
 - **Playwright import is in release 1**, as an uploaded or pasted `.spec.ts` stored immutably by
   content digest. Not a git clone: no credentials, no §31 pause. Git-pinned import is S10.
-- **Live monitoring is deferred to S7** because it needs a runner-image change. Release 1 keeps the
-  existing status page plus elapsed, stage and a progress bar, all derivable from persisted data.
+- ~~**Live monitoring is deferred to S7**~~ **Built in S7** (§3w). Runners publish rolling snapshots
+  to object storage, the reconciler merges them, and the console shows throughput, latency, errors,
+  per-journey breakdown, each generator's own last word, live objectives and rule-based observations.
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S7, live monitoring**.
+`NEXT-SESSION.md` §2 has the immediate task: **S8, load profiles — arrival rate as well as users**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -83,19 +84,22 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S5 — Targets, credentials and sessions** | **Complete** | see §3t |
 | **S6a — broker path production-readiness validation** | **Complete** | see §3u |
 | **S6 — the browser engine and Core Web Vitals** | **Complete** | see §3v |
-| **S7–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S7 — live monitoring** | **Complete** | see §3w |
+| **S8–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**941 Java tests green on the committed S4 slice, 0 skipped** (272 at 1B, 486 at 1C, 551 at 1D,
-591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h,
-931 at S3 engine, 936 after S3 Rules, 941 after S4 Validator).
+**1,058 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
+Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
+721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3 Rules,
+941 at S4 Validator, 1,058 at S7).
 
-S6 focused verification is green: `mvn test-compile`, focused browser-engine/domain/results/
-orchestration/core tests, focused parser/schema tests, and the UI test suite. A broad affected
-`mvn test` still hits environment limits in this sandbox: Mockito inline cannot self-attach to the
-Homebrew JDK 21 VM, and dry-run socket tests cannot bind.
+**This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
+two pre-existing failures that had been masked (§3w): the Spring context could not start at all
+because two beans matched `TargetResolver`, and that failure hid seventeen end-to-end tests which
+had been broken since S5 made target registration mandatory. The environment limits earlier sessions
+recorded — Mockito self-attach, socket binding — did not recur with Docker running.
 
-**133 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
+**154 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -111,7 +115,8 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S7, live monitoring.** `NEXT-SESSION.md` §2 has the detail.
+**Immediate next action: S8, load profiles — arrival rate as well as users.** `NEXT-SESSION.md` §2
+has the detail.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -1159,7 +1164,7 @@ at the end is worse than none. Clock skew between the run's recorded start and t
 at zero, so a negative-width bar is impossible.
 
 Live throughput, latency and error rate are a different thing and need a runner that publishes
-progress. That is **S7**, and it is the increment that changes the runner image.
+progress. That was **S7**, which changed the runner image — see §3w.
 
 ### Explanations where the numbers are
 
@@ -1568,10 +1573,137 @@ hybrid execution is now rejected explicitly until the S9/S11 multi-plan work.
 
 ### Deliberately left for S7 and later
 
-- Live progress snapshots from runners are S7.
+- ~~Live progress snapshots from runners are S7.~~ Built — §3w.
 - Arrival-rate sizing is S8.
 - Multi-plan hybrid orchestration is S9/S11.
 - Git-pinned Playwright import and the recorder remain S10.
+
+---
+
+## 3w. S7 — live monitoring
+
+**S7 is complete.** A run that is still executing now shows throughput, latency, error rate, a
+per-journey breakdown, each load generator's own last word, its objectives judged live, and
+rule-based observations that each carry the measurement behind them. Before this a run showed a
+state and nothing else: `Running` was true for twenty minutes and said nothing about whether the
+error rate was climbing or whether the generators were still alive.
+
+**The full contract is [`docs/operations/live-monitoring.md`](docs/operations/live-monitoring.md).**
+What follows is why it is shaped this way.
+
+### The runner publishes a file; nothing calls back
+
+Every five seconds each runner reduces what it has produced so far and PUTs `progress.json` under its
+own shard prefix. The reconciler lists, decodes, verifies and merges those on each pass.
+
+A callback would have been less code. It was rejected because a runner holds **no control-plane
+credential and no database access, by design** — a provider able to write run state could report its
+own failure as a success (§3e). It already holds object-storage credentials, so publishing there
+costs nothing new and keeps that property intact.
+
+The consequence is three implementations of one document: Python in the JMeter image, Node in the
+Playwright image, and Java in the local development provider, which owns its results file rather than
+a pod. That cost is paid deliberately and pinned: the JMeter reducer's real output is committed
+verbatim as a decoder fixture (`platform-orchestration/src/test/resources/progress/`), so the two
+halves are tied to each other even though they have not yet run together on a cluster.
+
+### A runner never reports a percentile
+
+It reports latency **bucket counts**. Percentiles do not merge — the p95 of two shards is neither the
+mean nor the larger of their p95s — so a shard reporting one would force the control plane either to
+average them, producing a number no sample supports, or to discard the other shard. Bucket counts
+add exactly.
+
+So a live percentile is an **upper bound**: the top of the bucket the sample fell in, never
+interpolated. `LatencyHistogram` says so, the API says so, and the console's tile says so. This is
+the same refusal as everywhere else in the platform — a plausible number nothing supports is worse
+than a coarser one that is true.
+
+The bucket edges travel inside the document rather than being assumed, because runner images are
+released on their own schedule and a decoder that assumed the current edges would silently misread an
+older image's snapshot and report confident, wrong latencies. Mismatched edges are refused for
+merging, never re-bucketed.
+
+### The per-generator block exists because merged totals cannot show a loss
+
+Two shards' totals added together look identical whether both are running or one died three minutes
+ago — the survivor keeps adding to them, so a run that lost half its load generation reads as a run
+that is merely slower. Only the per-shard capture time exposes it, so it survives the merge, reaches
+the API, and gets its own table and its own `RUNNER_SILENT` observation.
+
+### Live objectives use the same evaluator as the verdict
+
+`RunAnalyzer.judge(...)` was added so the live view and the final verdict share one definition of a
+breach. A live warning computed by a looser rule would eventually disagree with the run's own verdict
+and destroy the credibility of both. They are labelled `provisionalObjectives`, and the caveat is
+repeated inside each outcome's detail text because a screenshot of one row is what actually travels.
+
+### Nothing about live monitoring can fail a run
+
+Storage unreadable, an object caught mid-overwrite, a document from an unknown image — each costs a
+point on a chart, and none may stop a run reaching a terminal state. A run that could not finish
+because a chart could not be drawn would be a strictly worse platform than one with no chart. This is
+asserted directly (`RunReconcilerTest.LiveProgressCollection.unreadableSnapshotDoesNotStopTheRun`).
+
+### The interpretation layer is rules, never a model
+
+Eleven codes, each an explicit threshold over an observed value, each carrying that value. The
+audience is somebody who has never run a load test and cannot tell a confident wrong statement from
+a right one, so the platform must not be capable of making one. It does not predict, extrapolate to a
+finish, or estimate whether a run will pass — a live view exists so a person can decide whether to
+keep watching, and a forecast would replace their decision with arithmetic that has no basis in how
+the system behaves at the next stage.
+
+`ERRORS_RISING` earns its place: cumulative error rate is slow to move, so a system that started
+failing outright a minute ago still shows 3% overall while it fails 40% of what it is currently
+asked. Every rule is pinned by a test naming its observation.
+
+### Two pre-existing failures found and fixed
+
+Neither is S7 work; both blocked verifying S7, and both had been invisible.
+
+**The Spring context could not start.** Two beans matched `TargetResolver` — the explicit one and the
+registry store, since `TargetRegistry extends TargetResolver` — so `platform-core` refused to start
+and `./scripts/start-platform.sh` failed at the control plane. Introduced when S5 added the registry;
+never noticed because no session started the application afterwards. Fixed by marking the explicit
+bean `@Primary`.
+
+**Seventeen end-to-end tests were failing underneath it.** The context failure masked them. Since S5
+made target registration mandatory, `RunLifecycleEndToEndTest` had been provisioning runs for a team
+with no registered target and failing with `PROVISIONING_FAILED` — the platform behaving correctly.
+The test now registers one explicitly rather than relying on YAML rows the truncate removes.
+
+Together these are why the branch now has its first fully green `mvn clean verify`: **1,058 tests,
+0 failures, 0 skipped**, across all 15 modules with Testcontainers.
+
+### Verified with real load
+
+`local-jmeter` against the bundled demo service, 105-second runs: samples, error rate, throughput,
+per-journey breakdown and active users (read from JMeter's `allThreads`, so it reports what is
+actually applying load rather than what the stage asked for) all arrive and advance. The rules fired
+on real behaviour — the demo service fails its `update-student` path, which produced
+`ERROR_RATE_CRITICAL` and `OBJECTIVE_AT_RISK` with correct evidence.
+
+**Freshness: 11–14 seconds**, against the plan's ~15-second target. Getting there needed the
+collection call to happen twice per pass — once before the shards are inspected, so a pass that finds
+them all finished still merges the final snapshot, and once after, because the local provider
+publishes from inside `inspect`. Recording is idempotent by capture instant, so for a Kubernetes
+runner the second call is a no-op.
+
+The console was verified in a browser against a live run: the Monitor renders, the freshness badge
+reads `Live`, sparklines draw once the series has points, and the observations render at their
+severities.
+
+### Deliberately not done
+
+- **Server-Sent Events.** Polling for now; the merged snapshots are durable either way, so the
+  transport can change without altering what a client can ask for or resume from.
+- **Retention for `run_progress`.** Rows accumulate at ~360 per hour per active run and nothing prunes
+  them. `ProgressCatalog.clear(runId)` exists; nothing calls it on a schedule. Recorded in
+  `live-monitoring.md` §7.
+- **Cluster verification.** The Python and Node reducers and both entrypoint loops have not run in a
+  pod. `docs/operations/local-kubernetes-run.md` §7 is the procedure, including the two-shard
+  generator-kill check that is the only real test of `RUNNER_SILENT`.
 
 ---
 
@@ -1653,9 +1785,10 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: S7, live monitoring.** Add runner progress snapshots, merge them in the reconciler and
-surface throughput, latency, errors, objective progress and shard heartbeat age in the Monitor
-screen.
+**Next: S8, load profiles — arrival rate as well as concurrent users.** `PLAN.md` §11. Add
+`LoadModelType.ARRIVAL_RATE` beside `STAGES`, with a required `maxConcurrency` ceiling that admission
+reads instead of the rate, and use the `ConcurrencyThreadGroup` already sitting unused in the runner
+image so staged load glides instead of stepping.
 
 Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
 `docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static
@@ -1664,8 +1797,9 @@ pieces render, but the full kind cluster run was not executed in S6a.
 Already done, so **do not** repeat from earlier plans: the report endpoint, artifact download with
 per-request authorization and digest verification, persisted run metrics, the Kubernetes provider,
 the S3 artifact store, importers, datasets, the studio screens through S6, broker-backed
-`run://session` delivery, S6a's production-readiness runbook and browser-only Playwright/Core Web
-Vitals support.
+`run://session` delivery, S6a's production-readiness runbook, browser-only Playwright/Core Web
+Vitals support, and **S7's live monitoring** — runner snapshots, the merge, the series, the progress
+endpoint and the Monitor screen.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.

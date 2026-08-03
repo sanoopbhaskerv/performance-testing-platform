@@ -14,6 +14,7 @@ import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.ResultCatalog;
+import com.perfplatform.domain.port.ProgressCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.SecretResolver;
 import com.perfplatform.domain.port.SessionAcquisitionProvider;
@@ -43,6 +44,7 @@ import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ExternalSessionBrokerSessionAcquisitionProvider;
 import com.perfplatform.orchestration.run.InMemoryRuntimeCredentialStore;
 import com.perfplatform.orchestration.run.MountedFileSecretResolver;
+import com.perfplatform.orchestration.run.ReadRunProgressUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.ReadTestRunUseCase;
 import com.perfplatform.orchestration.run.RuntimeCredentialSessionAcquisitionProvider;
@@ -501,8 +503,15 @@ public class OrchestrationConfiguration {
      * <p>Resolved from the durable V2 target registry. During the migration overlap,
      * {@link TeamRegistrySynchronizer} copies non-production V1 YAML targets into that registry at
      * startup; runtime resolution itself no longer reads YAML.
+     *
+     * <p>{@code @Primary} because the registry's own store is also a {@code TargetResolver} — the
+     * registry interface extends it — so without this the context has two candidates and refuses to
+     * start at all. Naming this one as the answer keeps the resolution seam explicit: consumers ask
+     * for the narrow read port and get whatever this method decides to build it from, which is what
+     * lets the resolver change without touching every consumer.
      */
     @Bean
+    @org.springframework.context.annotation.Primary
     public TargetResolver targetResolver(TargetRegistry targets) {
         return targets;
     }
@@ -599,9 +608,9 @@ public class OrchestrationConfiguration {
     public RunWorkloadService runWorkloadService(EngineRegistry engines, ArtifactStore artifacts,
             ResultCatalog results, RunAnalyzer analyzer, TargetResolver targets,
             DatasetCatalog datasetCatalog, DatasetStore datasetStore,
-            SessionPoolProvider sessionPools) {
+            SessionPoolProvider sessionPools, ProgressCatalog progress) {
         return new RunWorkloadService(engines, artifacts, results, analyzer, targets,
-                datasetCatalog, datasetStore, sessionPools);
+                datasetCatalog, datasetStore, sessionPools, progress);
     }
 
     @Bean
@@ -705,6 +714,20 @@ public class OrchestrationConfiguration {
     public ReadRunReportUseCase readRunReportUseCase(ReadTestRunUseCase runs, ResultCatalog results,
             ExecutionPlanRepository plans, DefinitionVersionCatalog versions, ArtifactStore artifacts) {
         return new ReadRunReportUseCase(runs, results, plans, versions, artifacts);
+    }
+
+    /**
+     * The live view of a run in flight.
+     *
+     * <p>Built on the run reader for the same reason reporting is: one team check, in one place. A
+     * live view is the read most likely to be polled from a dashboard nobody logged into recently,
+     * so it is the last place that should have an authorization path of its own.
+     */
+    @Bean
+    public ReadRunProgressUseCase readRunProgressUseCase(ReadTestRunUseCase runs,
+            ProgressCatalog progress, DefinitionVersionCatalog versions, RunAnalyzer analyzer,
+            OrchestrationSettings settings, Clock clock) {
+        return new ReadRunProgressUseCase(runs, progress, versions, analyzer, settings, clock);
     }
 
     @Bean

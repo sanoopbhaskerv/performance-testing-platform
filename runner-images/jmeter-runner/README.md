@@ -41,15 +41,38 @@ there; the manifest's contract tests are what keep the two honest.
 | `PERF_WORKSPACE` | The only writable path. The root filesystem is read-only |
 | `PERF_DEADLINE_SECONDS` | Internal ceiling, slightly under the cluster's `activeDeadlineSeconds` |
 | `PERF_OPERATION_LABELS` | The `workload/scenario` labels results must carry |
+| `PERF_PROGRESS_INTERVAL_SECONDS` | How often to publish a live snapshot; `0` disables it |
 
 **No credentials are passed.** The Pod's projected service-account token authorises the uploads. A
 key in a Job manifest is a key in an audit log, and eventually in a ticket.
 
-It uploads exactly three files to `PERF_ARTIFACT_PREFIX`:
+It uploads to `PERF_ARTIFACT_PREFIX`:
 
 - `results.jtl` — the measurements
 - `jmeter.log` — the runner's own log
 - `runner-manifest.json` — identity, timings, exit code, and the plan digest
+- `progress.json` — a rolling snapshot, overwritten every few seconds while it runs
+
+## Live progress
+
+Every `PERF_PROGRESS_INTERVAL_SECONDS`, `progress.py` reduces what has been written to `results.jtl`
+so far and the entrypoint PUTs it as `progress.json`, overwriting the previous one. The control plane
+reads and merges those snapshots; without them a run in flight shows a state and nothing else.
+
+**It is a file, not a callback**, and that is the point: this container holds no API token and no
+database credential by design, because a runner able to write run state could report its own failure
+as a success. It already holds object-storage credentials, so publishing there costs nothing new.
+
+**It never reports a percentile** — it reports latency bucket counts, because percentiles from two
+shards cannot be added and the control plane has to merge them. It never decides anything about the
+run either: no pass, no fail, no threshold.
+
+Every failure in this path is swallowed. A snapshot that could not be reduced or uploaded costs a
+point on a chart; nothing about it may affect the test, its results or its exit code. A final
+snapshot is taken after JMeter exits, including on cancellation, because that one is the account of
+what was happening when a run died.
+
+Full contract: [docs/operations/live-monitoring.md](../../docs/operations/live-monitoring.md).
 
 ## Two things it deliberately does not do
 

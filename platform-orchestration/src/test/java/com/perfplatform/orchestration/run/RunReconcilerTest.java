@@ -86,6 +86,8 @@ class RunReconcilerTest {
     private final InMemoryArtifacts artifacts = new InMemoryArtifacts();
     private final OrchestrationFixtures.InMemoryDatasets datasets =
             new OrchestrationFixtures.InMemoryDatasets();
+    private final OrchestrationFixtures.InMemoryProgress progress =
+            new OrchestrationFixtures.InMemoryProgress();
     private final EngineRegistry engines = new EngineRegistry(List.of(new StubEngineProvider()));
 
     private FakeExecutionProvider provider;
@@ -140,7 +142,7 @@ class RunReconcilerTest {
 
         RunWorkloadService workloads = new RunWorkloadService(engines, artifacts, artifacts,
                 OrchestrationFixtures.permissiveAnalyzer(), OrchestrationFixtures.fixedTarget(),
-                datasets, datasets, sessionPools);
+                datasets, datasets, sessionPools, progress);
 
         return new RunReconciler(runs, shards, plans, versions,
                 new EngineDispatchingPlanCompiler(engines), executionProvider,
@@ -381,6 +383,135 @@ class RunReconcilerTest {
             assertThat(RunWorkloadService.planDigestIn("{ \"planDigest\" : \"sha256:abc\" }"))
                     .contains("sha256:abc");
             assertThat(RunWorkloadService.planDigestIn("{\"exitCode\":0}")).isEmpty();
+        }
+    }
+
+    /**
+     * Live monitoring, from the reconciler's side.
+     *
+     * <p>The rule underneath every test here is the asymmetry: a run must reach a terminal state
+     * whatever happens to its live view, and a live view must never accept numbers it cannot prove
+     * belong to the run. A convenience that can break the lifecycle is a liability, and a chart that
+     * can quietly show another test's traffic is worse than no chart.
+     */
+    @Nested
+    @DisplayName("live progress")
+    class LiveProgressCollection {
+
+        /** Drives a run to RUNNING, where a generator would be publishing snapshots. */
+        private TestRun running() {
+            TestRun run = queueRun("progress");
+            reconciler("reconciler-1").reconcile();
+            return reload(run);
+        }
+
+        private void publish(TestRun run, String document) {
+            RunnerShard shard = shards.findByRun(run.id()).get(0);
+            artifacts.uploadedByRunner(new ArtifactStore.ArtifactDescriptor(
+                            run.teamId(), run.id(), java.util.Optional.of(shard.id()),
+                            ArtifactStore.ArtifactType.PROGRESS,
+                            com.perfplatform.domain.progress.ShardProgress.OBJECT_NAME,
+                            "application/json"),
+                    document.getBytes(StandardCharsets.UTF_8));
+        }
+
+        private String snapshot(TestRun run, String planDigest, long samples, long errors) {
+            RunnerShard shard = shards.findByRun(run.id()).get(0);
+            long[] latencies = new long[(int) samples];
+            java.util.Arrays.fill(latencies, 120L);
+
+            return com.perfplatform.domain.progress.ShardProgressJson.write(
+                    new com.perfplatform.domain.progress.ShardProgress(
+                            run.id(), shard.id(), 0, 1, "jmeter", planDigest,
+                            clock.instant(), 60, 5, 25,
+                            new com.perfplatform.domain.progress.ProgressMetrics(
+                                    com.perfplatform.domain.results.OperationMetrics.ALL,
+                                    samples, errors, 0, 10, 900, 120, 20_000,
+                                    com.perfplatform.domain.progress.LatencyHistogram.of(latencies)),
+                            java.util.Map.of()));
+        }
+
+        private String planDigestOf(TestRun run) {
+            return plans.find(run.executionPlanId().orElseThrow()).orElseThrow()
+                    .planDigest().value();
+        }
+
+        @Test
+        @DisplayName("a published snapshot becomes a durable point in the run's series")
+        void mergesPublishedSnapshots() {
+            TestRun run = running();
+            publish(run, snapshot(run, planDigestOf(run), 500, 12));
+
+            reconciler("reconciler-1").reconcile();
+
+            var latest = progress.latest(run.id()).orElseThrow();
+            assertThat(latest.overall().sampleCount()).isEqualTo(500);
+            assertThat(latest.overall().errorCount()).isEqualTo(12);
+            assertThat(latest.activeUsers()).isEqualTo(25);
+            assertThat(latest.shardsReporting()).isEqualTo(1);
+        }
+
+        /**
+         * A stale object under a reused key would otherwise contribute real-looking numbers to the
+         * wrong run's live view — where, unlike a report, nothing would ever look wrong about them.
+         */
+        @Test
+        @DisplayName("a snapshot describing a different plan is discarded, not merged")
+        void refusesAnotherPlansSnapshot() {
+            TestRun run = running();
+            publish(run, snapshot(run, "sha256:" + "0".repeat(64), 500, 0));
+
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(progress.latest(run.id())).isEmpty();
+        }
+
+        /** Reconciliation repeats, and a duplicate point reads as sustained activity on a chart. */
+        @Test
+        @DisplayName("re-reading the same snapshot does not add a second point")
+        void isIdempotent() {
+            TestRun run = running();
+            publish(run, snapshot(run, planDigestOf(run), 500, 0));
+
+            reconciler("reconciler-1").reconcile();
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(progress.series(run.id(), 100)).hasSize(1);
+        }
+
+        /**
+         * The asymmetry, asserted directly. A truncated object caught mid-overwrite is the expected
+         * case rather than an incident, and a run that could not finish because a chart could not be
+         * drawn would be a strictly worse platform than one with no chart.
+         */
+        @Test
+        @DisplayName("an unreadable snapshot costs a point on a chart, not the run")
+        void unreadableSnapshotDoesNotStopTheRun() {
+            TestRun run = running();
+            publish(run, "{\"schema\":\"perfplatform.progress/v1\",\"runId\":");
+
+            reconciler("reconciler-1").reconcile();
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(progress.latest(run.id())).isEmpty();
+            assertThat(reload(run).state().isTerminal()).isTrue();
+        }
+
+        /**
+         * A snapshot is overwritten in place every few seconds, so a digest recorded for it stops
+         * matching the object almost immediately — and the download path refuses content whose
+         * digest does not match what was recorded.
+         */
+        @Test
+        @DisplayName("a snapshot is not adopted as a run's evidence")
+        void isNotAdoptedAsEvidence() {
+            TestRun run = running();
+            publish(run, snapshot(run, planDigestOf(run), 500, 0));
+
+            reconciler("reconciler-1").reconcile();
+
+            assertThat(artifacts.artifactsFor(run.id()))
+                    .noneMatch(reference -> reference.type() == ArtifactStore.ArtifactType.PROGRESS);
         }
     }
 

@@ -204,6 +204,9 @@
   --pf-text-sm: 0.8rem;
   --pf-text-md: 0.85rem;
   --pf-text-lg: 1.05rem;
+  /* One step above --pf-text-lg, for a headline number that has to be readable across a room —
+   * the live view is watched, not studied. */
+  --pf-text-xl: 1.35rem;
   --pf-weight-strong: 600;
   --pf-tracking-caps: 0.06em;
 }

@@ -34,8 +34,16 @@ PLAN="${WORKSPACE}/plan.jmx"
 RESULTS="${WORKSPACE}/results.jtl"
 JMETER_LOG="${WORKSPACE}/jmeter.log"
 MANIFEST="${WORKSPACE}/runner-manifest.json"
+PROGRESS="${WORKSPACE}/progress.json"
+
+# How often this publishes what it has measured so far. Five seconds is short enough that somebody
+# watching sees a stage change while it is happening, and long enough that re-reducing the results
+# file is never what keeps a core busy. Zero disables publishing entirely, which is the escape hatch
+# if a run is ever large enough that the reduction itself is a cost worth avoiding.
+PROGRESS_INTERVAL_SECONDS="${PERF_PROGRESS_INTERVAL_SECONDS:-5}"
 
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+RUNNER_STARTED_AT="$(date -u +%s)"
 
 # S3-compatible endpoints (MinIO, an appliance) need --endpoint-url; real AWS
 # does not. Path-style addressing is likewise only for the former.
@@ -96,9 +104,60 @@ JSON
     fi
 }
 
+# ── Live progress ────────────────────────────────────────────────────────────
+#
+# Every PROGRESS_INTERVAL_SECONDS: reduce what has been written so far and PUT it under this shard's
+# prefix, overwriting the previous snapshot. The control plane reads and merges these; it is the
+# only way a run shows anything but a state while it is executing.
+#
+# Not a callback into the control plane, and that is the point. This container holds no API token
+# and no database credential, deliberately — a runner able to write run state could report its own
+# failures as successes. It already holds object-storage credentials, so this costs nothing new.
+#
+# Every failure here is swallowed. A snapshot that could not be reduced or uploaded costs a point on
+# a chart; nothing about it may affect the test, its results or its exit code.
+#
+# The window state — cumulative samples and when the window opened — lives in a file rather than in
+# shell variables. The loop below runs as a background subshell, so its variables are its own; the
+# final snapshot is published by the parent after that loop is killed, and it needs the same window
+# the loop was using or the last point on the chart would be a lifetime average rather than a rate.
+PROGRESS_STATE="${WORKSPACE}/progress.state"
+
+# One snapshot: reduce, upload, and remember the sample count. The reducer prints the document on
+# stdout and the cumulative sample count on stderr, so this needs no second parse of what it wrote.
+publish_progress_once() {
+    [[ -f "${RESULTS}" ]] || return 0
+
+    local now window elapsed previous_samples window_start
+    now="$(date -u +%s)"
+    read -r previous_samples window_start < "${PROGRESS_STATE}" 2>/dev/null \
+        || { previous_samples=0; window_start="${now}"; }
+    window=$(( now - window_start ))
+    elapsed=$(( now - RUNNER_STARTED_AT ))
+
+    if python3 /usr/local/bin/perf-progress "${RESULTS}" "${previous_samples}" \
+            "${window}" "${elapsed}" \
+            >"${PROGRESS}" 2>"${WORKSPACE}/progress.count"; then
+        previous_samples="$(tr -dc '0-9' < "${WORKSPACE}/progress.count")"
+        printf '%s %s\n' "${previous_samples:-0}" "${now}" > "${PROGRESS_STATE}"
+        s3 cp "${PROGRESS}" \
+            "s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}progress.json" \
+            --only-show-errors >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+publish_progress_loop() {
+    while true; do
+        sleep "${PROGRESS_INTERVAL_SECONDS}"
+        publish_progress_once
+    done
+}
+
 on_exit() {
     local code=$?
     trap - EXIT
+    stop_progress
     if [[ ${code} -eq 0 ]]; then
         upload 0 COMPLETED
     else
@@ -107,12 +166,22 @@ on_exit() {
     exit "${code}"
 }
 
+# Stops the rolling publisher and takes one last snapshot. The final one matters most: a run that
+# failed leaves it as the only account of what was happening at the moment it did.
+stop_progress() {
+    [[ -n "${PROGRESS_PID:-}" ]] && kill -TERM "${PROGRESS_PID}" 2>/dev/null || true
+    PROGRESS_PID=""
+    [[ "${PROGRESS_INTERVAL_SECONDS}" != "0" ]] && publish_progress_once
+    return 0
+}
+
 # SIGTERM is how both cancellation and activeDeadlineSeconds arrive. Uploading
 # what exists before dying is what makes a cancelled run still diagnosable.
 on_term() {
     log "received SIGTERM; stopping and uploading partial evidence"
     [[ -n "${JMETER_PID:-}" ]] && kill -TERM "${JMETER_PID}" 2>/dev/null || true
     wait "${JMETER_PID:-}" 2>/dev/null || true
+    stop_progress
     upload 143 CANCELLED
     trap - EXIT
     exit 143
@@ -184,8 +253,19 @@ jmeter -n -f \
     -Jjmeter.save.saveservice.label=true \
     -Jjmeter.save.saveservice.latency=true \
     -Jjmeter.save.saveservice.connect_time=true \
+    -Jjmeter.save.saveservice.thread_counts=true \
     &
 JMETER_PID=$!
+
+# The rolling publisher, started only once JMeter is running: a snapshot taken before there is a
+# results file says nothing, and one taken before the plan was fetched would say it while the run
+# had not begun.
+if [[ "${PROGRESS_INTERVAL_SECONDS}" != "0" ]]; then
+    printf '0 %s\n' "$(date -u +%s)" > "${PROGRESS_STATE}"
+    publish_progress_loop &
+    PROGRESS_PID=$!
+    log "publishing progress every ${PROGRESS_INTERVAL_SECONDS}s"
+fi
 
 # A second ceiling inside the container. activeDeadlineSeconds is the cluster's
 # hard stop; this one fires slightly earlier so the shard can upload its evidence
@@ -199,6 +279,7 @@ JMETER_EXIT=$?
 set -e
 
 kill -TERM "${WATCHDOG_PID}" 2>/dev/null || true
+stop_progress
 
 # JMeter exits 0 even when every request failed — it reports on execution, not on
 # the system under test. Judging the results is the control plane's job, and this

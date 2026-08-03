@@ -552,6 +552,75 @@ values: run events are read by every member of a team and exported to operationa
 
 ---
 
+## Watching a run while it executes
+
+```bash
+curl "https://performance.example.internal/api/v2/test-runs/$RUN_ID/progress?limit=120" \
+  -H "X-API-Key: $PERF_API_KEY"
+```
+
+```json
+{
+  "runId": "9c1f0b44-…",
+  "engine": "jmeter",
+  "capturedAt": "2026-08-04T10:01:05Z",
+  "observedAt": "2026-08-04T10:01:17Z",
+  "ageSeconds": 12,
+  "shardsExpected": 2,
+  "shardsReporting": 2,
+  "elapsedSeconds": 65,
+  "activeUsers": 50,
+  "overall": {
+    "sampleCount": 102480, "errorCount": 35867, "unparsedCount": 1,
+    "errorRateMilliPercent": 34999,
+    "p50Millis": 2, "p95Millis": 3, "p99Millis": 12,
+    "throughputPerSecondMilli": 3618000
+  },
+  "byOperation": [{ "name": "checkout/pay", "…": "…" }],
+  "shards": [{ "shardIndex": 0, "ageSeconds": 12, "sampleCount": 51240, "activeUsers": 25 }],
+  "series": [{ "capturedAt": "…", "throughputPerSecondMilli": 2719600, "p95Millis": 3 }],
+  "provisionalObjectives": [{ "metric": "http.error.rate", "verdict": "BREACH", "…": "…" }],
+  "observations": [{
+    "code": "ERROR_RATE_CRITICAL",
+    "severity": "CRITICAL",
+    "message": "A quarter or more of the requests are failing. A failed request is usually answered faster than a real one, so the response times below are flattering rather than reassuring.",
+    "evidence": "34.999% of 102481 requests have failed, against a 25% rule."
+  }]
+}
+```
+
+`204` when no generator has published anything yet. Not a body of zeros: "not measured yet" and
+"measured nothing" are different facts, and zeros let a client render the second while the first is
+true.
+
+### Everything here is provisional
+
+Percentiles are **upper bounds** — the top of the latency bucket the sample fell in, never
+interpolated — and every count comes from partial runner output. `provisionalObjectives` is judged by
+the same evaluator the final verdict uses, so a breach here means the same thing it will mean later,
+but it is **not the run's verdict**: that is computed from the complete raw results once every shard
+has finished, and arrives on `/report`.
+
+### Read `shards` as well as `overall`
+
+Merged totals cannot show a generator that stopped — the survivors keep adding to them, so a run that
+lost half its load generation reads as a run that is merely slower. `shards[].ageSeconds` is what
+exposes it, and the `RUNNER_SILENT` observation is what says so in words.
+
+### Freshness
+
+A number arrives through two cadences: generators publish every five seconds, and the control plane
+merges every reconciliation pass. A healthy view is ~15 seconds behind by construction; compare
+`observedAt` against `capturedAt` rather than assuming currency. Full detail in
+[live-monitoring.md](../operations/live-monitoring.md).
+
+### Polling, for now
+
+Server-Sent Events suits this better and is a later increment. The merged snapshots are durable
+either way, so changing the transport changes nothing about what a client can ask for or resume from.
+
+---
+
 ## Cancelling a run
 
 ```bash

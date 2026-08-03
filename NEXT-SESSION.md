@@ -39,17 +39,16 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-The committed S4 baseline was **941 tests, 0 failures, 0 skipped** across 14 modules. Current S6
-focused verification is green, and `mvn test-compile` passes across all modules. A broad affected
-`mvn test` still hits sandbox environment limits: Mockito inline cannot self-attach to the Homebrew
-JDK 21 VM, and dry-run tests that start local sockets fail with `Socket Operation not permitted`.
-Docker must be running for the full suite because Testcontainers uses PostgreSQL and MinIO. If a
-PostgreSQL module fails wholesale with `An error occurred while setting up the SSL connection`, that
-is a known flaky start — retry once. **If any integration test reports `Skipped`, that is a false
-green: investigate, do not accept it.**
+S7 ran this to completion: **1,058 tests, 0 failures, 0 skipped** across all 15 modules — the first
+fully green `mvn clean verify` on the branch. Docker must be running: Testcontainers uses PostgreSQL
+and MinIO. The environment limits earlier sessions recorded (Mockito inline self-attach, sockets
+refusing to bind) did **not** recur; if they reappear, note them rather than assuming they are
+permanent. If a PostgreSQL module fails wholesale with `An error occurred while setting up the SSL
+connection`, that is a known flaky start — retry once. **If any integration test reports `Skipped`,
+that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 154 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -94,10 +93,10 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved and added in S1.** §31 pause cleared. **133 UI tests** now. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **154 UI tests** now. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
-| **Live monitoring** | Deferred to S7 (needs a runner-image change). Release 1 keeps the existing status page plus elapsed, current stage and a progress bar — all derivable from data already persisted. |
+| **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
 | **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. S5 removed the credentials/session blocker, but removal still needs a focused audit because development identity remains local-only and V1 endpoints must stay operational until that increment is explicitly picked up. |
 
@@ -125,11 +124,19 @@ that exposes it. Nothing lands API-only.
   digests, browser profiles, Core Web Vitals objectives and explicit rejection of mixed-engine specs
   until hybrid orchestration exists.
 
-**S4 baseline: 941 Java tests, 133 UI tests. S6 focused verification is green.**
+- **S7** (§3w) — live monitoring. Runners publish `progress.json` every five seconds; the reconciler
+  merges across shards into a durable series; `GET /api/v2/test-runs/{id}/progress` serves it with
+  live objectives and rule-based observations; the console's Monitor shows it. Verified with real
+  load at **11–14 s freshness**. Also fixed two pre-existing failures it uncovered — the Spring
+  context could not start (two `TargetResolver` beans, since S5), and that masked seventeen broken
+  end-to-end tests.
 
-**Next: S7, live monitoring.** Add runner progress snapshots, merge them in the reconciler, and
-surface throughput, latency, errors, objective progress and shard heartbeat age in the Monitor
-screen.
+**S7: 1,058 Java tests, 154 UI tests, `mvn clean verify` fully green for the first time.**
+
+**Next: S8, load profiles — rate as well as users.** `PLAN.md` §11: add `LoadModelType.ARRIVAL_RATE`
+beside `STAGES` with a required `maxConcurrency` ceiling that admission reads instead of the rate,
+and use the `ConcurrencyThreadGroup` already in the runner image so staged load glides rather than
+steps.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -149,16 +156,19 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 
 ### The caveat to carry forward
 
-2h changed the JMeter runner image's entrypoint (it now fetches dataset partitions), and that change
-has **not been run on a cluster**. S6 added a separate Playwright runner image contract, but did not
-build or run it on kind. The local-JMeter path is verified with real load — including S3's journeys.
-Before trusting either Kubernetes runner path, re-run `docs/operations/local-kubernetes-run.md`.
+2h changed the JMeter runner image's entrypoint (it now fetches dataset partitions), **S7 changed it
+again** (a rolling progress publisher, plus a Python reducer added to the image), and none of it has
+been run on a cluster. S6 added a separate Playwright runner image contract and S7 added a Node
+reducer to it; that image has still never been built or run on kind. The local-JMeter path is
+verified with real load — including S3's journeys and S7's live view. Before trusting either
+Kubernetes runner path, re-run `docs/operations/local-kubernetes-run.md`, whose new §7 covers the
+live-monitoring checks including the two-shard generator kill.
 
-### Current environment caveat
+### Environment caveat, now lifted
 
-A broad affected `mvn test` still fails in this sandbox for environment reasons: Mockito inline
-cannot self-attach to the Homebrew JDK 21 VM, and dry-run tests that bind local sockets hit
-`Socket Operation not permitted`. Focused S6 checks and `mvn test-compile` are green.
+Earlier sessions could not run the full suite here (Mockito inline self-attach, sockets refusing to
+bind). S7 ran `mvn clean verify` end to end with Docker running and got 1,058 green tests with
+nothing skipped. Treat a recurrence as a new observation, not as the expected state.
 
 ### Datasets, in one paragraph
 

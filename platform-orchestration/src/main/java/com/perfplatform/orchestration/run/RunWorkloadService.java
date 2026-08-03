@@ -15,10 +15,13 @@ import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetCatalog.DatasetVersion;
 import com.perfplatform.domain.port.DatasetStore;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
+import com.perfplatform.domain.port.ProgressCatalog;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.SessionPoolProvider;
 import com.perfplatform.domain.port.TargetResolver;
+import com.perfplatform.domain.progress.LiveProgress;
+import com.perfplatform.domain.progress.ShardProgress;
 import com.perfplatform.domain.results.SampleSet;
 import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.run.TestRun;
@@ -31,6 +34,7 @@ import com.perfplatform.engine.spi.RenderedWorkload;
 import com.perfplatform.engine.spi.RunnerOutput;
 import com.perfplatform.engine.spi.ShardAssignment;
 import com.perfplatform.orchestration.plan.EngineRegistry;
+import com.perfplatform.orchestration.progress.ShardProgressCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,10 +98,14 @@ public final class RunWorkloadService {
     private final DatasetCatalog datasetCatalog;
     private final DatasetStore datasetStore;
     private final SessionPoolProvider sessionPools;
+    private final ProgressCatalog progress;
+
+    /** Turns a runner's published snapshot into a value. Stateless, so one instance is enough. */
+    private final ShardProgressCodec progressCodec = new ShardProgressCodec();
 
     public RunWorkloadService(EngineRegistry engines, ArtifactStore artifacts, ResultCatalog results,
             RunAnalyzer analyzer, TargetResolver targets, DatasetCatalog datasetCatalog,
-            DatasetStore datasetStore, SessionPoolProvider sessionPools) {
+            DatasetStore datasetStore, SessionPoolProvider sessionPools, ProgressCatalog progress) {
         this.engines = Objects.requireNonNull(engines, "engines");
         this.artifacts = Objects.requireNonNull(artifacts, "artifacts");
         this.results = Objects.requireNonNull(results, "results");
@@ -106,6 +114,7 @@ public final class RunWorkloadService {
         this.datasetCatalog = Objects.requireNonNull(datasetCatalog, "datasetCatalog");
         this.datasetStore = Objects.requireNonNull(datasetStore, "datasetStore");
         this.sessionPools = Objects.requireNonNull(sessionPools, "sessionPools");
+        this.progress = Objects.requireNonNull(progress, "progress");
     }
 
     /** Raised when a run cannot be pointed at a permitted target. */
@@ -473,6 +482,74 @@ public final class RunWorkloadService {
     }
 
     /**
+     * Reads every shard's published snapshot, merges them, and records the result.
+     *
+     * <p>Called on each pass while a run executes. It is the whole of live monitoring on the control
+     * plane's side: a runner publishes into object storage, this reads what is there, and the merge
+     * becomes a durable point in the run's series.
+     *
+     * <p><b>Nothing here can fail a run.</b> Storage briefly unreadable, a truncated object caught
+     * mid-overwrite, a snapshot from a runner image whose document this version does not know — all
+     * of them cost a point on a chart, and none of them may stop a run reaching a terminal state.
+     * That asymmetry is deliberate: live progress is a convenience laid over the run lifecycle, and
+     * a convenience that can break the lifecycle is a liability.
+     *
+     * <p>Snapshots whose identity does not match are discarded rather than merged, for the same
+     * reason results are: a stale object left by an earlier run under a reused key would otherwise
+     * contribute real-looking numbers to the wrong run's live view, where nothing would ever look
+     * wrong about them.
+     *
+     * @return the merged view, or empty when no shard has published anything readable yet
+     */
+    public Optional<LiveProgress> recordProgress(TestRun run, ExecutionPlan plan, Instant now) {
+        List<ArtifactReference> published;
+        try {
+            published = artifacts.listForRun(run.id()).stream()
+                    .filter(reference -> reference.type() == ArtifactType.PROGRESS)
+                    .toList();
+        } catch (RuntimeException e) {
+            log.debug("Could not list progress snapshots runId={}", run.id(), e);
+            return Optional.empty();
+        }
+
+        String expectedDigest = plan.planDigest().value();
+        List<ShardProgress> snapshots = new ArrayList<>();
+
+        for (ArtifactReference reference : published) {
+            try {
+                artifacts.read(reference)
+                        .flatMap(progressCodec::decode)
+                        .filter(snapshot -> {
+                            boolean matches = snapshot.describes(run.id(), expectedDigest);
+                            if (!matches) {
+                                log.warn("Discarding a progress snapshot that describes another run "
+                                                + "or plan runId={} object={}",
+                                        run.id(), reference.objectKey());
+                            }
+                            return matches;
+                        })
+                        .ifPresent(snapshots::add);
+            } catch (RuntimeException e) {
+                log.debug("A progress snapshot could not be read runId={} object={}",
+                        run.id(), reference.objectKey(), e);
+            }
+        }
+
+        Optional<LiveProgress> merged = LiveProgress.merge(
+                snapshots, Math.max(1, plan.capacity().shardCount()), now);
+
+        merged.ifPresent(view -> {
+            try {
+                progress.record(view);
+            } catch (RuntimeException e) {
+                log.warn("Could not record live progress runId={}", run.id(), e);
+            }
+        });
+
+        return merged;
+    }
+
+    /**
      * The labels this run's results will be reported under, as {@code workload/scenario}.
      *
      * <p>Derived from the specification so the platform and the runner agree on them. Objectives are
@@ -549,6 +626,13 @@ public final class RunWorkloadService {
                 continue;
             }
             if (reference.type() == ArtifactType.DATASET) {
+                continue;
+            }
+            // A progress snapshot is overwritten in place every few seconds, so a digest recorded
+            // for it stops matching the object almost immediately — and the download path refuses
+            // content whose digest does not match what was recorded. The durable record of what a
+            // run was doing is its merged series, not this object.
+            if (reference.type() == ArtifactType.PROGRESS) {
                 continue;
             }
             results.recordArtifact(reference);

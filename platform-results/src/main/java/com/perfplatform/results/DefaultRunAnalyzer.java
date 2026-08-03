@@ -31,4 +31,16 @@ public final class DefaultRunAnalyzer implements RunAnalyzer {
 
         return new Analysis(result, outcomes);
     }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The same evaluator the final verdict uses, on measurements that arrived already reduced.
+     * One definition of a breach, whether the numbers came from a complete results file or from a
+     * runner's rolling snapshot.
+     */
+    @Override
+    public List<ObjectiveOutcome> judge(NormalizedRunResult result, List<ObjectiveSpec> objectives) {
+        return ObjectiveEvaluator.evaluate(result, objectives);
+    }
 }

@@ -289,6 +289,51 @@ public final class OrchestrationFixtures {
     }
 
     /**
+     * A run's live snapshots, in memory.
+     *
+     * <p>Keeps the same append-and-deduplicate contract as the real store, because the behaviour a
+     * test most often needs to assert about progress is that a repeated reconciliation pass does
+     * <em>not</em> add a second point.
+     */
+    public static final class InMemoryProgress
+            implements com.perfplatform.domain.port.ProgressCatalog {
+
+        private final Map<TestRunId, List<com.perfplatform.domain.progress.LiveProgress>> series =
+                new HashMap<>();
+
+        @Override
+        public void record(com.perfplatform.domain.progress.LiveProgress progress) {
+            List<com.perfplatform.domain.progress.LiveProgress> points =
+                    series.computeIfAbsent(progress.runId(), key -> new ArrayList<>());
+            boolean known = points.stream()
+                    .anyMatch(point -> point.capturedAt().equals(progress.capturedAt()));
+            if (!known) {
+                points.add(progress);
+            }
+        }
+
+        @Override
+        public Optional<com.perfplatform.domain.progress.LiveProgress> latest(TestRunId runId) {
+            List<com.perfplatform.domain.progress.LiveProgress> points =
+                    series.getOrDefault(runId, List.of());
+            return points.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(points.get(points.size() - 1));
+        }
+
+        @Override
+        public List<com.perfplatform.domain.progress.LiveProgress> series(TestRunId runId,
+                int limit) {
+            return List.copyOf(series.getOrDefault(runId, List.of()));
+        }
+
+        @Override
+        public void clear(TestRunId runId) {
+            series.remove(runId);
+        }
+    }
+
+    /**
      * Dataset content and its record, in memory.
      *
      * <p>One class implementing both ports, as {@code InMemoryArtifacts} does, because a test that
@@ -495,12 +540,26 @@ public final class OrchestrationFixtures {
 
     /** An analyzer that summarizes nothing and passes everything, for control-flow tests. */
     public static RunAnalyzer permissiveAnalyzer() {
-        return (runId, engine, shardsExpected, shardsReported, samples, objectives) ->
-                new RunAnalyzer.Analysis(
+        return new RunAnalyzer() {
+            @Override
+            public Analysis analyze(TestRunId runId, String engine, int shardsExpected,
+                    int shardsReported, com.perfplatform.domain.results.SampleSet samples,
+                    List<com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec>
+                            objectives) {
+                return new Analysis(
                         new NormalizedRunResult(runId, engine, Optional.empty(), Optional.empty(),
                                 shardsExpected, shardsReported,
                                 com.perfplatform.domain.results.OperationMetrics.empty("*"),
                                 Map.of()),
                         List.of());
+            }
+
+            @Override
+            public List<ObjectiveOutcome> judge(NormalizedRunResult result,
+                    List<com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec>
+                            objectives) {
+                return List.of();
+            }
+        };
     }
 }
