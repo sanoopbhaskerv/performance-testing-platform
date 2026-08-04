@@ -1,7 +1,9 @@
 package com.perfplatform.api.v2.spec;
 
+import com.perfplatform.domain.port.EngineCatalog;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.SpecificationDigest;
+import com.perfplatform.domain.validation.EngineCapabilityValidator;
 import com.perfplatform.domain.validation.SemanticValidator;
 import com.perfplatform.domain.validation.ValidationResult;
 
@@ -16,6 +18,9 @@ import java.util.Optional;
  *       fields ({@link SpecificationParser}).</li>
  *   <li><b>Semantic</b> — do the cross-references resolve, do the numbers make sense
  *       ({@link SemanticValidator}).</li>
+ *   <li><b>Engine capability</b> — can <em>this deployment</em> execute what the document names
+ *       ({@link EngineCapabilityValidator}). A document naming an engine that is not installed is
+ *       well formed and sensible and cannot run, and the answer depends on where it is validated.</li>
  * </ol>
  *
  * <p>Semantic validation runs even when structural findings exist, so a consumer sees every
@@ -36,8 +41,17 @@ public class SpecificationValidationService {
 
     private final SpecificationParser parser;
 
-    public SpecificationValidationService(SpecificationParser parser) {
+    /**
+     * The engines this deployment has.
+     *
+     * <p>A port rather than the registry itself, so validation stays testable without an engine and
+     * so the domain never meets the engine SPI.
+     */
+    private final EngineCatalog engines;
+
+    public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines) {
         this.parser = parser;
+        this.engines = engines;
     }
 
     /**
@@ -67,7 +81,8 @@ public class SpecificationValidationService {
 
         PerformanceTestSpecification specification = parsed.specification().orElseThrow();
         ValidationResult combined = parsed.findings()
-                .merge(SemanticValidator.validate(specification));
+                .merge(SemanticValidator.validate(specification))
+                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()));
 
         Optional<SpecificationDigest> digest = combined.isValid()
                 ? Optional.of(SpecificationDigest.of(specification))
@@ -84,7 +99,8 @@ public class SpecificationValidationService {
      * be ambiguous, and the two entry points differ in whether structural validation ran at all.
      */
     public ValidationOutcome validateSpecification(PerformanceTestSpecification specification) {
-        ValidationResult findings = SemanticValidator.validate(specification);
+        ValidationResult findings = SemanticValidator.validate(specification)
+                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()));
         Optional<SpecificationDigest> digest = findings.isValid()
                 ? Optional.of(SpecificationDigest.of(specification))
                 : Optional.empty();

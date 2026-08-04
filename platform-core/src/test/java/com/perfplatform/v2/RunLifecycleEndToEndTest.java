@@ -604,8 +604,7 @@ class RunLifecycleEndToEndTest {
         // a re-analysis of stored artifacts does, and the case the unique constraint exists for.
         analysis.analyze(
                 runs.find(TestRunId.of(runId)).orElseThrow(),
-                plans.find(runs.find(TestRunId.of(runId)).orElseThrow()
-                        .executionPlanId().orElseThrow()).orElseThrow(),
+                plans.findByRun(TestRunId.of(runId)),
                 versions.find(versionId).orElseThrow(),
                 shards.findByRun(TestRunId.of(runId)));
 

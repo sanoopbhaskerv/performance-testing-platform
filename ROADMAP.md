@@ -17,7 +17,7 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S8** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S9** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
 > delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook,
@@ -25,9 +25,11 @@ than a surprise.
 >**live monitoring** — runner-published snapshots, a merged durable series, live objectives and
 > rule-based observations in the console — and **load models**: requests per second as well as
 > concurrent users, with the concurrency ceiling an open model cannot run without, and staged
-> concurrency that glides rather than steps. `HANDOFF.md` §3n–§3x.
+> concurrency that glides rather than steps — and **per-workload plans**, so one run can carry a
+> protocol load and a browser cohort, with an engine this deployment lacks refused at validation.
+> `HANDOFF.md` §3n–§3y.
 >
-> **Next: S9**, one run with many workloads.
+> **Next: S10**, the recorder — which needs a security review first (`PLAN.md` §12 R2).
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -40,7 +42,7 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
-slice, S7's live monitoring and S8's load models are built. Everything below is still an accurate inventory of what exists and what
+slice, S7's live monitoring, S8's load models and S9's per-workload plans are built. Everything below is still an accurate inventory of what exists and what
 does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
@@ -162,6 +164,10 @@ Each is real, none blocks anything.
 - ~~**Production `run://session` needed a provider and delivery contract.**~~ **Done in S5**:
   `ExternalSessionBrokerSessionAcquisitionProvider`, mounted `SecretResolver`, per-shard
   `sessions.csv`, Helm RBAC and docs. `HANDOFF.md` §3t.
+- ~~**A run had one plan and one engine.**~~ **Done in S9** — one plan per workload, shards scoped
+  by workload, analysis merging sample sets across engines, and a new engine-capability validation
+  layer that refuses a workload naming an engine this deployment does not have. Coordination of a
+  hybrid — `startWhen`, and the browser-session budget deferred from S9 — is S11. `HANDOFF.md` §3y.
 - ~~**A run in flight showed a state and nothing else.**~~ **Done in S7** — throughput, latency,
   errors, per-journey breakdown, each generator's own last snapshot, live objectives and rule-based
   observations, at 11–14 s freshness. `HANDOFF.md` §3w, `docs/operations/live-monitoring.md`.
@@ -183,7 +189,7 @@ Each is real, none blocks anything.
   document.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
 - ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library.
-  **157 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
+  **158 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
   emitter and step rules, the report narrative, run progress and the live view's unscaling layer.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).

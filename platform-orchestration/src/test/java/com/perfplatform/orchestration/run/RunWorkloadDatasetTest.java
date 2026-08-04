@@ -217,7 +217,7 @@ class RunWorkloadDatasetTest {
                 SpecificationDigest.of(specification), specification, true);
 
         ExecutionPlan plan = new ExecutionPlan(ExecutionPlanId.generate(), versionId,
-                StubEngineProvider.ENGINE_ID, "{\"stub\":true}",
+                "api-load", StubEngineProvider.ENGINE_ID, "{\"stub\":true}",
                 SpecificationDigest.ofCanonicalForm("plan"),
                 new ExecutionPlan.CapacityEstimate(shardCount, 100, 900), NOW);
 
@@ -226,7 +226,7 @@ class RunWorkloadDatasetTest {
                 NOW).run();
 
         RunnerShard shard = RunnerShard.planned(RunnerShardId.generate(), runId,
-                StubEngineProvider.ENGINE_ID, shardIndex, shardCount);
+                StubEngineProvider.ENGINE_ID, "api-load", shardIndex, shardCount);
 
         return workloads.prepareShard(run, plan, version, shard);
     }

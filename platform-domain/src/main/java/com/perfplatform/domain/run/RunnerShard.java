@@ -23,6 +23,8 @@ import java.util.Optional;
  * @param id            shard identifier, used in artifact keys and runner labels
  * @param runId         the run this shard belongs to
  * @param engine        engine identifier, e.g. {@code jmeter}
+ * @param workloadName  the workload this shard executes. Two workloads of one run can each have a
+ *                      shard 0, so a shard is identified by its workload and index together
  * @param shardIndex    zero-based position, and the value used to select this shard's dataset slice
  * @param shardCount    total shards in the run, so a runner can partition data without asking
  * @param state         current shard state
@@ -38,6 +40,7 @@ public record RunnerShard(
         RunnerShardId id,
         TestRunId runId,
         String engine,
+        String workloadName,
         int shardIndex,
         int shardCount,
         ShardState state,
@@ -90,29 +93,29 @@ public record RunnerShard(
 
     /** A planned shard, not yet submitted anywhere. */
     public static RunnerShard planned(RunnerShardId id, TestRunId runId, String engine,
-            int shardIndex, int shardCount) {
-        return new RunnerShard(id, runId, engine, shardIndex, shardCount, ShardState.PENDING,
+            String workloadName, int shardIndex, int shardCount) {
+        return new RunnerShard(id, runId, engine, workloadName, shardIndex, shardCount, ShardState.PENDING,
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), 0L);
     }
 
     /** Records the provider's handle and moves to {@link ShardState#PROVISIONED}. */
     public RunnerShard provisioned(ExecutionHandle newHandle, Instant at) {
-        return new RunnerShard(id, runId, engine, shardIndex, shardCount, ShardState.PROVISIONED,
+        return new RunnerShard(id, runId, engine, workloadName, shardIndex, shardCount, ShardState.PROVISIONED,
                 Optional.of(newHandle), Optional.of(at), startedAt, completedAt,
                 exitCode, failureCode, lockVersion);
     }
 
     /** Marks the shard as executing and stamps its start. */
     public RunnerShard running(Instant at) {
-        return new RunnerShard(id, runId, engine, shardIndex, shardCount, ShardState.RUNNING,
+        return new RunnerShard(id, runId, engine, workloadName, shardIndex, shardCount, ShardState.RUNNING,
                 handle, Optional.of(at), startedAt.or(() -> Optional.of(at)), completedAt,
                 exitCode, failureCode, lockVersion);
     }
 
     /** Records a heartbeat without otherwise changing the shard. */
     public RunnerShard heartbeat(Instant at) {
-        return new RunnerShard(id, runId, engine, shardIndex, shardCount, state, handle,
+        return new RunnerShard(id, runId, engine, workloadName, shardIndex, shardCount, state, handle,
                 Optional.of(at), startedAt, completedAt, exitCode, failureCode, lockVersion);
     }
 
@@ -122,7 +125,7 @@ public record RunnerShard(
         if (!terminal.isTerminal()) {
             throw new IllegalArgumentException(terminal + " is not a terminal shard state");
         }
-        return new RunnerShard(id, runId, engine, shardIndex, shardCount, terminal, handle,
+        return new RunnerShard(id, runId, engine, workloadName, shardIndex, shardCount, terminal, handle,
                 lastHeartbeat, startedAt, Optional.of(at),
                 Optional.ofNullable(newExitCode), Optional.ofNullable(newFailureCode), lockVersion);
     }

@@ -141,8 +141,21 @@ class ShardAndPlanStorePostgresTest {
     }
 
     private ExecutionPlan newPlan() {
-        String planJson = "{\"planVersion\":\"v1alpha1\",\"engine\":\"jmeter\",\"shardCount\":1}";
-        return new ExecutionPlan(ExecutionPlanId.generate(), versionId, "jmeter", planJson,
+        return newPlan("api-load");
+    }
+
+    /**
+     * A plan for a named workload.
+     *
+     * <p>The name is a parameter because a run may not hold two plans for the same workload — the
+     * unique key that makes provisioning idempotent forbids it — so a test needing a second plan
+     * must say which other workload it is for.
+     */
+    private ExecutionPlan newPlan(String workloadName) {
+        String planJson = "{\"planVersion\":\"v1alpha1\",\"engine\":\"jmeter\",\"workload\":\""
+                + workloadName + "\"}";
+        return new ExecutionPlan(ExecutionPlanId.generate(), versionId, workloadName, "jmeter",
+                planJson,
                 SpecificationDigest.ofCanonicalForm(planJson),
                 new ExecutionPlan.CapacityEstimate(1, 200, Duration.ofMinutes(15).toSeconds()),
                 NOW);
@@ -156,7 +169,7 @@ class ShardAndPlanStorePostgresTest {
         @DisplayName("a shard round-trips with its handle, heartbeat and outcome")
         void roundTrips() {
             RunnerShard planned = RunnerShard.planned(RunnerShardId.generate(), run.id(),
-                    "jmeter", 0, 1);
+                    "jmeter", "api-load", 0, 1);
             shards.save(planned);
 
             RunnerShard provisioned = shards.save(planned.provisioned(
@@ -184,6 +197,7 @@ class ShardAndPlanStorePostgresTest {
         void orderedByIndex() {
             for (int index = 2; index >= 0; index--) {
                 shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter",
+                        "api-load",
                         index, 3));
             }
 
@@ -199,10 +213,10 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("a run cannot have two shards with the same index")
         void indexIsUniquePerRun() {
-            shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", 0, 1));
+            shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", "api-load", 0, 1));
 
             assertThatThrownBy(() -> shards.save(
-                    RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", 0, 1)))
+                    RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", "api-load", 0, 1)))
                     .isInstanceOf(Exception.class);
         }
 
@@ -210,7 +224,7 @@ class ShardAndPlanStorePostgresTest {
         @DisplayName("heartbeat staleness is judged against the recorded heartbeat")
         void heartbeatStaleness() {
             RunnerShard running = shards.save(
-                    RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", 0, 1)
+                    RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter", "api-load", 0, 1)
                             .provisioned(new RunnerShard.ExecutionHandle("fake", "n", "u"), NOW)
                             .running(NOW));
 
@@ -233,7 +247,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the plan text round-trips unchanged, so it still hashes to its stored digest")
         void planTextRoundTripsExactly() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThat(plans.find(plan.id())).hasValueSatisfying(stored -> {
                 assertThat(stored.planJson()).isEqualTo(plan.planJson());
@@ -245,7 +259,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the capacity estimate round-trips")
         void capacityRoundTrips() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThat(plans.find(plan.id())).hasValueSatisfying(stored -> {
                 assertThat(stored.planDigest()).isEqualTo(plan.planDigest());
@@ -272,9 +286,9 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the store refuses to overwrite a stored plan")
         void storeRefusesOverwrite() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
-            assertThatThrownBy(() -> plans.save(plan))
+            assertThatThrownBy(() -> plans.save(run.id(), plan))
                     .isInstanceOf(ExecutionPlanRepository.ImmutablePlanException.class)
                     .hasMessageContaining("immutable");
         }
@@ -286,7 +300,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the database refuses a direct update of a stored plan")
         void databaseRefusesUpdate() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThatThrownBy(() -> jdbc.update(
                     "UPDATE execution_plans SET plan_json = ?::jsonb WHERE id = ?",
@@ -297,7 +311,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the database refuses to delete a stored plan")
         void databaseRefusesDelete() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThatThrownBy(() -> jdbc.update(
                     "DELETE FROM execution_plans WHERE id = ?", plan.id().value()))
@@ -312,7 +326,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("a run can be pointed at its compiled plan")
         void attaches() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThat(runs.attachExecutionPlan(run.id(), plan.id()).executionPlanId())
                     .contains(plan.id());
@@ -321,7 +335,7 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("attaching the same plan twice is a no-op, so a retried pass is safe")
         void reattachIsIdempotent() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
             runs.attachExecutionPlan(run.id(), plan.id());
 
             assertThat(runs.attachExecutionPlan(run.id(), plan.id()).executionPlanId())
@@ -331,8 +345,9 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("a run cannot be repointed at a different plan")
         void cannotRepoint() {
-            runs.attachExecutionPlan(run.id(), plans.save(newPlan()).id());
-            ExecutionPlan other = plans.save(newPlan());
+            runs.attachExecutionPlan(run.id(), plans.save(run.id(), newPlan()).id());
+            // A different workload, because a run cannot hold two plans for the same one.
+            ExecutionPlan other = plans.save(run.id(), newPlan("browser-experience"));
 
             assertThatThrownBy(() -> runs.attachExecutionPlan(run.id(), other.id()))
                     .isInstanceOf(TestRunRepository.PlanAlreadyAttachedException.class)
@@ -353,10 +368,68 @@ class ShardAndPlanStorePostgresTest {
         @Test
         @DisplayName("the run keeps its state when a plan is attached")
         void attachingDoesNotChangeState() {
-            ExecutionPlan plan = plans.save(newPlan());
+            ExecutionPlan plan = plans.save(run.id(), newPlan());
 
             assertThat(runs.attachExecutionPlan(run.id(), plan.id()).state())
                     .isEqualTo(RunState.VALIDATING);
+        }
+    }
+
+    /**
+     * A run with more than one workload.
+     *
+     * <p>The structural change S9 made, asserted against the database because the database is what
+     * enforces it. The old key was {@code (run_id, shard_index)}, which is exactly the constraint
+     * that would have refused a hybrid run's second workload — silently reducing it to one.
+     */
+    @Nested
+    @DisplayName("a run with several workloads")
+    class ManyWorkloads {
+
+        @Test
+        @DisplayName("holds one plan per workload, found by the run in a stable order")
+        void holdsAPlanPerWorkload() {
+            plans.save(run.id(), newPlan("api-load"));
+            plans.save(run.id(), newPlan("browser-experience"));
+
+            assertThat(plans.findByRun(run.id()))
+                    .extracting(ExecutionPlan::workloadName)
+                    .containsExactly("api-load", "browser-experience");
+        }
+
+        @Test
+        @DisplayName("refuses a second plan for the same workload, which is what makes provisioning idempotent")
+        void refusesASecondPlanForOneWorkload() {
+            plans.save(run.id(), newPlan("api-load"));
+
+            // A reconciler that recompiled after a crash must not be able to create a second plan
+            // for a workload that already has one — it would then start a second set of runners.
+            assertThatThrownBy(() -> plans.save(run.id(), newPlan("api-load")))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        }
+
+        @Test
+        @DisplayName("two workloads can each have a shard 0")
+        void shardIndexesAreScopedToTheirWorkload() {
+            shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter",
+                    "api-load", 0, 1));
+            shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "playwright",
+                    "browser-experience", 0, 1));
+
+            assertThat(shards.findByRun(run.id()))
+                    .extracting(RunnerShard::workloadName)
+                    .containsExactlyInAnyOrder("api-load", "browser-experience");
+        }
+
+        @Test
+        @DisplayName("one workload still cannot have two shard 0s")
+        void oneWorkloadStillHasOneShardPerIndex() {
+            shards.save(RunnerShard.planned(RunnerShardId.generate(), run.id(), "jmeter",
+                    "api-load", 0, 1));
+
+            assertThatThrownBy(() -> shards.save(RunnerShard.planned(
+                    RunnerShardId.generate(), run.id(), "jmeter", "api-load", 0, 1)))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         }
     }
 }

@@ -30,12 +30,27 @@ public class ExecutionPlanStore implements ExecutionPlanRepository {
         return plans.findById(id.value()).map(ExecutionPlanMapper::toDomain);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Ordered by workload name in the query rather than after it, so two reads of the same run
+     * return its plans in the same order however the rows happen to be stored.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.List<ExecutionPlan> findByRun(com.perfplatform.domain.identity.TestRunId runId) {
+        return plans.findByRunIdOrderByWorkloadNameAsc(runId.value()).stream()
+                .map(ExecutionPlanMapper::toDomain)
+                .toList();
+    }
+
     @Override
     @Transactional
-    public ExecutionPlan save(ExecutionPlan plan) {
+    public ExecutionPlan save(com.perfplatform.domain.identity.TestRunId runId, ExecutionPlan plan) {
         if (plans.existsById(plan.id().value())) {
             throw new ImmutablePlanException(plan.id());
         }
-        return ExecutionPlanMapper.toDomain(plans.saveAndFlush(ExecutionPlanMapper.toEntity(plan)));
+        return ExecutionPlanMapper.toDomain(
+                plans.saveAndFlush(ExecutionPlanMapper.toEntity(plan, runId.value())));
     }
 }

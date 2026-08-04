@@ -21,8 +21,13 @@ public class V2ApiConfiguration {
         return new SpecificationParser();
     }
 
+    /**
+     * @param engines the engines this deployment has, so a document naming one it does not have is
+     *                refused while somebody is still editing it rather than at execution time
+     */
     @Bean
-    public SpecificationValidationService specificationValidationService(SpecificationParser parser) {
-        return new SpecificationValidationService(parser);
+    public SpecificationValidationService specificationValidationService(SpecificationParser parser,
+            com.perfplatform.domain.port.EngineCatalog engines) {
+        return new SpecificationValidationService(parser, engines);
     }
 }

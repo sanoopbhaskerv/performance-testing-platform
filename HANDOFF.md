@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S8. Increments 0–2h and S1–S8 are complete.
+**Last updated:** Studio increment S9. Increments 0–2h and S1–S9 are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -28,7 +28,7 @@ protocol results.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
-- **vitest is approved** (§31 pause cleared) and was added in S1. **157 UI tests** where there were
+- **vitest is approved** (§31 pause cleared) and was added in S1. **158 UI tests** where there were
   none.
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
   the studio build phases. S5 removed the credentials/session blocker, but API removal still needs a
@@ -86,13 +86,14 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S6 — the browser engine and Core Web Vitals** | **Complete** | see §3v |
 | **S7 — live monitoring** | **Complete** | see §3w |
 | **S8 — load profiles: rate as well as users** | **Complete** | see §3x |
-| **S9–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S9 — one run, many workloads** | **Complete** (browser budget moved to S11) | see §3y |
+| **S10–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**1,093 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
+**1,106 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
 Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3 Rules,
-941 at S4 Validator, 1,058 at S7, 1,093 at S8).
+941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9).
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -100,7 +101,7 @@ because two beans matched `TargetResolver`, and that failure hid seventeen end-t
 had been broken since S5 made target registration mandatory. The environment limits earlier sessions
 recorded — Mockito self-attach, socket binding — did not recur with Docker running.
 
-**157 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
+**158 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -1814,6 +1815,96 @@ on the *type*, never on whether a value is present — that distinction is what 
 
 ---
 
+## 3y. S9 — one run, many workloads
+
+**S9 is complete for the structural change.** A run now compiles **one plan per workload**, provisions
+shards per workload, and analyses every workload's results together — so a specification declaring a
+protocol load and a browser cohort produces two plans for two engines instead of being refused.
+
+### The defect this closes, in three stages
+
+Before S6, a multi-engine specification had its later workloads **silently dropped**: the run
+executed the first workload's engine, reported success, and nothing anywhere said half the test had
+not run. S6 stopped the silence by refusing such a document at compile time — inside the reconciler,
+as a failed run, minutes after the trigger and long after the version had been stored as immutable.
+S9 makes it work, and moves the remaining refusal to the earliest possible moment.
+
+**The acceptance criterion** — a specification whose second workload names an engine this deployment
+does not have is refused at *validation* — is met by a new fourth validation layer,
+`EngineCapabilityValidator`, reached through the `EngineCatalog` port. It is a deployment fact rather
+than a property of the document, which is why it is its own layer and why the validator is told the
+answer rather than reaching for a registry.
+
+### What changed structurally
+
+- **`ExecutionPlan` gains `workloadName`**, and it is part of a plan's identity rather than a label:
+  it tells two plans of one run apart, names the shards that execute it, and scopes the samples it
+  produces.
+- **`execution_plans` gains `workload_name` and `run_id`** (Flyway `V9`), unique on
+  `(run_id, workload_name)`. That key is what makes provisioning idempotent — a reconciler that
+  recompiled after a crash cannot create a second plan for a workload that already has one, and
+  therefore cannot start a second set of runners.
+- **`runner_shards` gains `workload_name`**, and its unique key moves from `(run_id, shard_index)` to
+  `(run_id, workload_name, shard_index)`. The old key is precisely what would have refused a hybrid
+  run's second workload, silently reducing it to one.
+- **The SPI compiles a named workload** (`compile(specification, workloadName)`). The specification
+  is still passed whole, because a workload's scenarios reference sources, datasets and
+  authentication declared elsewhere in it.
+- **`ExecutionPlanRepository.findByRun`** is the authority on what a run executes. A set carried on
+  the run as well would diverge the first time a pass was interrupted between writing them.
+- **Analysis merges across engines.** Each workload's results are parsed by its own engine and the
+  samples are merged before objectives are judged — which works because a browser journey duration
+  and an HTTP response time are both a labelled latency by the time they leave a parser. That is
+  what `Sample` was designed for, and this is the first thing to rely on it.
+
+The alternative — analysing each workload separately and merging verdicts — was rejected because an
+objective scoped to the whole test (`scope: *`) would then have no single result to be judged
+against, and the platform would have had to invent a rule for combining two verdicts.
+
+### Decisions worth not relitigating
+
+**A stored result names every engine behind it** (`jmeter+playwright`), not the first. Read months
+later, a result naming only one would say a browser cohort had never been part of the run.
+
+**A manifest's digest must match one of the run's plans**, not the one. Membership rather than
+equality, because a hybrid run's manifests come from different runners executing different plans —
+the check is otherwise unchanged, and a manifest matching none of them still describes a test this
+run did not commission.
+
+**One failed workload fails the whole run.** A run half of whose load never started measures a test
+nobody described, and reporting its numbers would state a result for a smaller test than the one
+that was asked for.
+
+**The deadline is the longest plan's, not the first.** Workloads run concurrently with different
+durations — a browser cohort measuring a five-minute protocol load runs for a fraction of it — so
+stopping at the shortest would kill a run doing exactly what it was asked to.
+
+**`test_runs.execution_plan_id` is kept**, pointing at the first plan. Not the authority on anything;
+it stays because the V2 API has always exposed `executionPlanId`, and a run whose plans existed while
+that field stayed null would be a silent break for anything already reading it.
+
+### Consequence worth knowing: more runners
+
+Two protocol workloads on the same engine now compile to two plans and therefore two runners, where
+before they shared one. That is the point — separately provisioned workloads are what S11's start
+conditions need — but it is a real change in pod count for any specification with more than one
+workload.
+
+### Deliberately not done
+
+- **The browser-session budget.** `PLAN.md` listed it under S9 and it is **not** built. A run's
+  browser demand is not known to admission, which evaluates before compilation, so a real budget
+  needs the demand stored on the run at trigger time — a schema and trigger change of its own. Since
+  no run can yet co-schedule a browser cohort with a protocol workload (S11), a browser-only run
+  still consumes an ordinary run slot, which is a coarse but real limit. **Moved to S11**, where the
+  thing it governs first becomes possible.
+- **A hybrid report.** The report still describes the first plan's execution profile. Nothing
+  regresses for a single-workload run; describing several is S11's work, when a hybrid can actually
+  be executed.
+- **Coordinated start.** `startWhen` still resolves to nothing — S11.
+
+---
+
 ## 4. Design decisions made in 1B and 1C (do not relitigate)
 
 ### From 1B
@@ -1892,12 +1983,14 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: S9, one run with many workloads.** `PLAN.md` §11 — the structural change §2 identified.
-`execution_plans` gains `workload_name` and a run references a set of them; `runner_shards` gains
-`workload_name` with a unique key on `(run_id, workload_name, shard_index)`; `RunWorkloadService`
-becomes per-workload and analysis merges sample sets across engines. Its acceptance test is a
-specification whose second workload names an unregistered engine being **refused at validation**
-rather than silently dropped.
+**Next: S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. A recording pod
+with CDP screencast to the console, target-locked navigation, an egress-restricted `NetworkPolicy`, a
+capped lifetime and sanitization on capture — producing the protocol journey *and* the Playwright
+script from one session. **`PLAN.md` §12 R2 requires a security review before this is built**: it is a
+user-driven browser inside the network, and target-locking plus egress policy are the controls.
+
+If a smaller next step is wanted instead, **S11's prerequisites** are now the shortest path to value:
+the browser-session budget deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves.
 
 Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
 `docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static
@@ -1908,8 +2001,10 @@ per-request authorization and digest verification, persisted run metrics, the Ku
 the S3 artifact store, importers, datasets, the studio screens through S6, broker-backed
 `run://session` delivery, S6a's production-readiness runbook, browser-only Playwright/Core Web
 Vitals support, **S7's live monitoring** — runner snapshots, the merge, the series, the progress
-endpoint and the Monitor screen — and **S8's load models**: the arrival-rate model, its mandatory
-concurrency ceiling, gliding staged concurrency, and the per-second threshold unit.
+endpoint and the Monitor screen — **S8's load models**: the arrival-rate model, its mandatory
+concurrency ceiling, gliding staged concurrency, and the per-second threshold unit — and **S9's
+per-workload plans**: `workload_name` on plans and shards, the engine-capability validation layer,
+and analysis that merges sample sets across engines.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.

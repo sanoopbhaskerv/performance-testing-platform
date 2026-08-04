@@ -85,9 +85,16 @@ final class JmeterWorkloadRenderer {
     static RenderedWorkload render(PerformanceTestSpecification specification, ExecutionPlan plan,
             ShardAssignment assignment, TargetAddress target) {
 
-        List<WorkloadSpec> workloads = JmeterPlanCompiler.protocolWorkloads(specification);
+        // Only the plan's own workload. A run compiles a plan per workload, so rendering every
+        // protocol workload here would make each shard execute all of them — multiplying the load
+        // by the number of workloads while every plan still claimed to describe one.
+        List<WorkloadSpec> workloads = JmeterPlanCompiler.protocolWorkloads(specification).stream()
+                .filter(workload -> plan.workloadName().equals(workload.name()))
+                .toList();
         if (workloads.isEmpty()) {
-            throw new IllegalArgumentException("No protocol workload to render");
+            throw new IllegalArgumentException(
+                    "This specification has no JMeter protocol workload named '"
+                            + plan.workloadName() + "' to render");
         }
         Map<String, AuthenticationSpec> authByName = authenticationsByName(specification);
 

@@ -159,10 +159,17 @@ public final class OrchestrationFixtures {
         }
     }
 
-    /** An in-memory plan repository that refuses to overwrite a stored plan. */
+    /**
+     * An in-memory plan repository that refuses to overwrite a stored plan.
+     *
+     * <p>Keeps the run association, because that is what makes a run's plans findable — the same
+     * thing the real store's {@code run_id} column does, and what a reconciler relies on to avoid
+     * compiling a second set after a crash.
+     */
     public static final class InMemoryPlanRepository implements ExecutionPlanRepository {
 
         private final Map<ExecutionPlanId, ExecutionPlan> plans = new HashMap<>();
+        private final Map<ExecutionPlanId, TestRunId> runs = new HashMap<>();
 
         @Override
         public Optional<ExecutionPlan> find(ExecutionPlanId id) {
@@ -170,11 +177,20 @@ public final class OrchestrationFixtures {
         }
 
         @Override
-        public ExecutionPlan save(ExecutionPlan plan) {
+        public List<ExecutionPlan> findByRun(TestRunId runId) {
+            return plans.values().stream()
+                    .filter(plan -> runId.equals(runs.get(plan.id())))
+                    .sorted(java.util.Comparator.comparing(ExecutionPlan::workloadName))
+                    .toList();
+        }
+
+        @Override
+        public ExecutionPlan save(TestRunId runId, ExecutionPlan plan) {
             if (plans.containsKey(plan.id())) {
                 throw new ImmutablePlanException(plan.id());
             }
             plans.put(plan.id(), plan);
+            runs.put(plan.id(), runId);
             return plan;
         }
 
@@ -453,8 +469,12 @@ public final class OrchestrationFixtures {
         }
 
         @Override
-        public EnginePlan compile(PerformanceTestSpecification specification) {
-            return new EnginePlan("{\"engine\":\"jmeter\",\"stub\":true}", 1,
+        public EnginePlan compile(PerformanceTestSpecification specification, String workloadName) {
+            // The workload name is in the plan body so two plans of one run are distinguishable by
+            // digest. Without it a hybrid run's plans would be byte-identical, and a digest check
+            // that cannot tell them apart is not a check.
+            return new EnginePlan(
+                    "{\"engine\":\"jmeter\",\"stub\":true,\"workload\":\"" + workloadName + "\"}", 1,
                     specification.peakProtocolUsers(), 900);
         }
 

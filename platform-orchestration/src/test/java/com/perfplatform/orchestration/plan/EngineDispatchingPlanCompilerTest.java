@@ -47,26 +47,53 @@ class EngineDispatchingPlanCompilerTest {
         EngineDispatchingPlanCompiler compiler = new EngineDispatchingPlanCompiler(
                 new EngineRegistry(List.of(provider("jmeter", WorkloadKind.PROTOCOL))));
 
-        ExecutionPlan plan = compiler.compile(ExecutionPlanId.generate(),
+        List<ExecutionPlan> plans = compiler.compile(ExecutionPlanId::generate,
                 version(singleEngineSpecification()), Instant.parse("2026-08-03T10:00:00Z"));
 
-        assertThat(plan.engine()).isEqualTo("jmeter");
-        assertThat(plan.planJson()).contains("\"engine\":\"jmeter\"");
+        assertThat(plans).singleElement().satisfies(plan -> {
+            assertThat(plan.engine()).isEqualTo("jmeter");
+            assertThat(plan.planJson()).contains("\"engine\":\"jmeter\"");
+        });
     }
 
+    /**
+     * The change S9 made, and the defect it closes.
+     *
+     * <p>A mixed-engine specification used to be refused here, and before S6 its later workloads
+     * were silently dropped — the run executed the first engine's workload, reported success, and
+     * nothing said half the test had not run. It now compiles to one plan per workload.
+     */
     @Test
-    @DisplayName("mixed-engine specifications fail explicitly until coordinated hybrid execution")
-    void rejectsMixedEngines() {
+    @DisplayName("a mixed-engine specification compiles to one plan per workload")
+    void compilesEachWorkloadForItsOwnEngine() {
         EngineDispatchingPlanCompiler compiler = new EngineDispatchingPlanCompiler(
                 new EngineRegistry(List.of(
                         provider("jmeter", WorkloadKind.PROTOCOL),
                         provider("playwright", WorkloadKind.BROWSER))));
 
-        assertThatThrownBy(() -> compiler.compile(ExecutionPlanId.generate(),
+        List<ExecutionPlan> plans = compiler.compile(ExecutionPlanId::generate,
+                version(mixedEngineSpecification()), Instant.parse("2026-08-03T10:00:00Z"));
+
+        assertThat(plans).hasSize(2);
+        assertThat(plans).extracting(ExecutionPlan::engine)
+                .containsExactly("jmeter", "playwright");
+        assertThat(plans).extracting(ExecutionPlan::workloadName)
+                .containsExactly("api-load", "browser-experience");
+
+        // Distinct digests, so a runner's manifest identifies which plan it executed. Two plans of
+        // one run that hashed the same would make that check unable to tell them apart.
+        assertThat(plans.get(0).planDigest()).isNotEqualTo(plans.get(1).planDigest());
+    }
+
+    @Test
+    @DisplayName("a workload naming an engine this platform lacks fails loudly")
+    void rejectsAnUnregisteredEngine() {
+        EngineDispatchingPlanCompiler compiler = new EngineDispatchingPlanCompiler(
+                new EngineRegistry(List.of(provider("jmeter", WorkloadKind.PROTOCOL))));
+
+        assertThatThrownBy(() -> compiler.compile(ExecutionPlanId::generate,
                 version(mixedEngineSpecification()), Instant.parse("2026-08-03T10:00:00Z")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Mixed-engine or hybrid specifications")
-                .hasMessageContaining("jmeter")
+                .isInstanceOf(EngineRegistry.UnknownEngineException.class)
                 .hasMessageContaining("playwright");
     }
 
@@ -137,8 +164,11 @@ class EngineDispatchingPlanCompilerTest {
             }
 
             @Override
-            public EnginePlan compile(PerformanceTestSpecification specification) {
-                return new EnginePlan("{\"engine\":\"" + engineId + "\"}", 1, 1, 60);
+            public EnginePlan compile(PerformanceTestSpecification specification,
+                    String workloadName) {
+                return new EnginePlan(
+                        "{\"engine\":\"" + engineId + "\",\"workload\":\"" + workloadName + "\"}",
+                        1, 1, 60);
             }
 
             @Override

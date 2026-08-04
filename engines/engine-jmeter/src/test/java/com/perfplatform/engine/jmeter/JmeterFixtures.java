@@ -102,12 +102,26 @@ final class JmeterFixtures {
         return new ShardAssignment(TestRunId.generate(), index, count, null);
     }
 
-    /** A stored plan for the given specification, as the dispatcher would build it. */
+    /**
+     * A stored plan for the given specification, as the dispatcher would build it.
+     *
+     * <p>The first protocol workload's, since a plan describes one workload. A test needing a
+     * particular one names it through {@link #planFor(PerformanceTestSpecification, String)}.
+     */
     static ExecutionPlan planFor(PerformanceTestSpecification specification) {
-        EnginePlan compiled = JmeterPlanCompiler.compile(specification);
+        return planFor(specification, specification.spec().workloads().stream()
+                .filter(workload -> workload.type() == WorkloadType.PROTOCOL)
+                .map(PerformanceTestSpecification.WorkloadSpec::name)
+                .findFirst()
+                .orElseThrow());
+    }
+
+    static ExecutionPlan planFor(PerformanceTestSpecification specification, String workloadName) {
+        EnginePlan compiled = JmeterPlanCompiler.compile(specification, workloadName);
         return new ExecutionPlan(
                 ExecutionPlanId.generate(),
                 TestDefinitionVersionId.generate(),
+                workloadName,
                 JmeterEngineProvider.ENGINE_ID,
                 compiled.planJson(),
                 SpecificationDigest.ofCanonicalForm(compiled.planJson()),

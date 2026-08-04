@@ -17,7 +17,7 @@ import java.util.Set;
  * engines or decide what to do when a specification names one that is not installed. Orchestration
  * looks an engine up and calls the SPI; it never branches on which engine it got.
  */
-public final class EngineRegistry {
+public final class EngineRegistry implements com.perfplatform.domain.port.EngineCatalog {
 
     private final Map<String, ExecutionEngineProvider> byId;
 
@@ -68,6 +68,13 @@ public final class EngineRegistry {
                 .orElseThrow(() -> new UnknownEngineException(engineId, byId.keySet()));
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>This is also what validation reports as available when a specification names an engine
+     * this deployment does not have.
+     */
+    @Override
     public Set<String> engineIds() {
         return byId.keySet();
     }

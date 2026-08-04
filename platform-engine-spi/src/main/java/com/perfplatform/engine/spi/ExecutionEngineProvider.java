@@ -64,15 +64,23 @@ public interface ExecutionEngineProvider {
     ValidationResult validate(PerformanceTestSpecification specification);
 
     /**
-     * Compiles a specification into this engine's plan.
+     * Compiles one of the specification's workloads into this engine's plan.
      *
      * <p>Must be deterministic: the same specification and profile always produce byte-identical
      * {@link EnginePlan#planJson()}. Its digest is the run's identity, so a compiler that emitted
      * map entries in hash order would invalidate results at random.
      *
-     * @throws IllegalArgumentException if the specification declares nothing this engine can run
+     * <h3>One workload, not all of them</h3>
+     * A run compiles a plan per workload, so a specification declaring a protocol load and a browser
+     * cohort produces two plans for two engines rather than one plan that quietly executes whichever
+     * workloads its engine recognised. Passing the name rather than a filtered specification keeps
+     * the document whole: a workload's scenarios can reference sources, datasets and authentication
+     * declared elsewhere in it.
+     *
+     * @param workloadName the workload to compile, which must exist and must name this engine
+     * @throws IllegalArgumentException if the named workload is absent or is not this engine's
      */
-    EnginePlan compile(PerformanceTestSpecification specification);
+    EnginePlan compile(PerformanceTestSpecification specification, String workloadName);
 
     /**
      * Renders the file one shard executes.

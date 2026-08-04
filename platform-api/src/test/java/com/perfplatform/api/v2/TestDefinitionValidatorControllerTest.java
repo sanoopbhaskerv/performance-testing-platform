@@ -30,6 +30,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class TestDefinitionValidatorControllerTest {
 
+    /**
+     * The engines a test deployment has.
+     *
+     * <p>Both, because the shipped examples use both and a validator that reported the browser
+     * engine as unavailable would fail every browser fixture for the wrong reason.
+     */
+    private static final com.perfplatform.domain.port.EngineCatalog ENGINES =
+            () -> java.util.Set.of("jmeter", "playwright");
+
     private final SpecificationDryRunService dryRun = mock(SpecificationDryRunService.class);
     private final CallerContextProvider callers = mock(CallerContextProvider.class);
     private final CallerContext caller = new CallerContext("alice@example.com", Set.of(),
@@ -40,7 +49,7 @@ class TestDefinitionValidatorControllerTest {
     @BeforeEach
     void setUp() {
         SpecificationValidationService validation =
-                new SpecificationValidationService(new SpecificationParser());
+                new SpecificationValidationService(new SpecificationParser(), ENGINES);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new TestDefinitionValidatorController(validation, dryRun, callers))
                 .setControllerAdvice(new V2ProblemHandler())

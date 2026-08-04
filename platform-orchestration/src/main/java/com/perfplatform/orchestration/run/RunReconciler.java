@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -237,10 +238,15 @@ public final class RunReconciler {
             return;
         }
 
-        ExecutionPlan plan = resolvePlan(run, version, now);
+        List<ExecutionPlan> runPlans = resolvePlans(run, version, now);
+
+        // The run keeps a pointer to its first plan. Not the authority on what it executes — the
+        // store is, and asking it is what the rest of this class does — but the V2 API has always
+        // exposed executionPlanId, and a run whose plans existed while that field stayed null would
+        // be a silent break for anything already reading it.
         TestRun attached = run.executionPlanId().isPresent()
                 ? run
-                : runs.attachExecutionPlan(run.id(), plan.id());
+                : runs.attachExecutionPlan(run.id(), runPlans.get(0).id());
 
         // The provider about to generate this run's load may generate none. Recorded on the run here,
         // at the moment it becomes true and before any measurement exists that could be read without
@@ -249,57 +255,71 @@ public final class RunReconciler {
         TestRun withPlan = provider.generatesRealLoad() ? attached : attached.markedSynthetic();
 
         List<RunnerShard> existing = shards.findByRun(run.id());
-        List<RunnerShard> planned = existing.isEmpty()
-                ? createShards(withPlan, plan)
-                : existing;
+        int provisionedShards = 0;
 
-        for (RunnerShard shard : planned) {
-            // A shard that already carries a handle was provisioned by an earlier pass that died
-            // before recording the run's transition. Provisioning it again would start a second
-            // load generator for the same shard.
-            if (shard.handle().isPresent()) {
-                continue;
+        // Every workload, every shard. A hybrid run provisions a protocol generator and a browser
+        // cohort in the same pass; before S9 a run had one plan and a second workload was either
+        // refused or — earlier still — silently dropped, so the run executed half the test and
+        // reported success.
+        for (ExecutionPlan plan : runPlans) {
+            List<RunnerShard> planned = shardsFor(withPlan, plan, existing);
+            provisionedShards += planned.size();
+
+            for (RunnerShard shard : planned) {
+                // A shard that already carries a handle was provisioned by an earlier pass that died
+                // before recording the run's transition. Provisioning it again would start a second
+                // load generator for the same shard.
+                if (shard.handle().isPresent()) {
+                    continue;
+                }
+
+                // Rendered, sliced and stored before the runner is asked to start, so both what
+                // executed and what it sent are recoverable whatever happens to the runner
+                // afterwards.
+                RunWorkloadService.PreparedShard prepared;
+                try {
+                    prepared = workloads.prepareShard(withPlan, plan, version, shard, material,
+                            deadlineFor(plan), now);
+                } catch (RunWorkloadService.TargetUnresolvableException
+                        | RunWorkloadService.DatasetUnavailableException
+                        | RunWorkloadService.SessionUnavailableException e) {
+                    // None is transient. A target that is not registered does not become registered
+                    // by retrying, and a dataset that does not have the declared columns will not
+                    // grow them — and a run that sat in PROVISIONING forever would hold a capacity
+                    // slot while telling the consumer nothing. The message is the actionable part.
+                    fail(withPlan, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+                    return;
+                }
+
+                ExecutionProvider.ProvisioningResult result = provider.provision(
+                        provisionRequest(withPlan, plan, shard, prepared,
+                                RunWorkloadService.operationLabels(version.specification()),
+                                material));
+
+                if (!result.isAccepted()) {
+                    String reason = result.failureReason().orElse("The runner could not be created");
+                    shards.save(shard.finished(ShardState.FAILED, null,
+                            RunFailureCode.PROVISIONING_FAILED, now));
+                    // The whole run fails, including workloads whose runners started. A run half of
+                    // whose load never began measures a test nobody described, and reporting its
+                    // numbers would state a result for a smaller test than the one that was asked
+                    // for. Shards already running are torn down by the cancellation path.
+                    fail(withPlan, RunFailureCode.PROVISIONING_FAILED, reason, now, report);
+                    return;
+                }
+
+                shards.save(shard.provisioned(result.handle().orElseThrow(), now));
+
+                // The provider is named in the history, so the evidence of what executed a run is
+                // part of the run's own record rather than only of the log of whichever replica ran
+                // the pass.
+                Map<String, String> provisioned = new LinkedHashMap<>();
+                provisioned.put("workload", plan.workloadName());
+                provisioned.put("shardIndex", String.valueOf(shard.shardIndex()));
+                provisioned.put("provider", provider.providerId());
+                runs.appendEvent(RunEvent.of(withPlan.id(), RunEventType.SHARD_PROVISIONED,
+                        RunEvent.SYSTEM_ACTOR, provisioned, now));
             }
-
-            // Rendered, sliced and stored before the runner is asked to start, so both what
-            // executed and what it sent are recoverable whatever happens to the runner afterwards.
-            RunWorkloadService.PreparedShard prepared;
-            try {
-                prepared = workloads.prepareShard(withPlan, plan, version, shard, material,
-                        deadlineFor(plan), now);
-            } catch (RunWorkloadService.TargetUnresolvableException
-                    | RunWorkloadService.DatasetUnavailableException
-                    | RunWorkloadService.SessionUnavailableException e) {
-                // Neither is transient. A target that is not registered does not become registered
-                // by retrying, and a dataset that does not have the declared columns will not grow
-                // them — and a run that sat in PROVISIONING forever would hold a capacity slot while
-                // telling the consumer nothing. The message is the actionable part.
-                fail(withPlan, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
-                return;
-            }
-
-            ExecutionProvider.ProvisioningResult result = provider.provision(
-                    provisionRequest(withPlan, plan, shard, prepared,
-                            RunWorkloadService.operationLabels(version.specification()),
-                            material));
-
-            if (!result.isAccepted()) {
-                String reason = result.failureReason().orElse("The runner could not be created");
-                shards.save(shard.finished(ShardState.FAILED, null,
-                        RunFailureCode.PROVISIONING_FAILED, now));
-                fail(withPlan, RunFailureCode.PROVISIONING_FAILED, reason, now, report);
-                return;
-            }
-
-            shards.save(shard.provisioned(result.handle().orElseThrow(), now));
-
-            // The provider is named in the history, so the evidence of what executed a run is part
-            // of the run's own record rather than only of the log of whichever replica ran the pass.
-            Map<String, String> provisioned = new LinkedHashMap<>();
-            provisioned.put("shardIndex", String.valueOf(shard.shardIndex()));
-            provisioned.put("provider", provider.providerId());
-            runs.appendEvent(RunEvent.of(withPlan.id(), RunEventType.SHARD_PROVISIONED,
-                    RunEvent.SYSTEM_ACTOR, provisioned, now));
         }
 
         runs.apply(withPlan.transitionTo(RunState.RUNNING, RunEvent.SYSTEM_ACTOR,
@@ -308,11 +328,20 @@ public final class RunReconciler {
                                 + "will measure nothing."
                         : "All shards provisioned", now));
 
-        log.info("Run started runId={} teamId={} engine={} planDigest={} shards={} provider={} "
-                        + "synthetic={}",
-                withPlan.id(), withPlan.teamId(), plan.engine(), plan.planDigest(), planned.size(),
+        log.info("Run started runId={} teamId={} workloads={} shards={} provider={} synthetic={}",
+                withPlan.id(), withPlan.teamId(), runPlans.size(), provisionedShards,
                 provider.providerId(), withPlan.synthetic());
         report.admitted();
+    }
+
+    /** This plan's shards, reusing the ones an earlier pass created rather than adding more. */
+    private List<RunnerShard> shardsFor(TestRun run, ExecutionPlan plan,
+            List<RunnerShard> existing) {
+
+        List<RunnerShard> mine = existing.stream()
+                .filter(shard -> plan.workloadName().equals(shard.workloadName()))
+                .toList();
+        return mine.isEmpty() ? createShards(run, plan) : mine;
     }
 
     /**
@@ -325,11 +354,11 @@ public final class RunReconciler {
      */
     private void analyzeRun(TestRun run, Instant now, ReconciliationReport.Builder report) {
         Optional<DefinitionVersion> version = versions.find(run.definitionVersionId());
-        Optional<ExecutionPlan> plan = run.executionPlanId().flatMap(plans::find);
+        List<ExecutionPlan> runPlans = plans.findByRun(run.id());
 
-        if (version.isEmpty() || plan.isEmpty()) {
+        if (version.isEmpty() || runPlans.isEmpty()) {
             fail(run, RunFailureCode.ANALYSIS_FAILED,
-                    "The definition version or execution plan this run references is no longer "
+                    "The definition version or execution plans this run references are no longer "
                             + "readable, so its results cannot be judged", now, report);
             return;
         }
@@ -337,7 +366,7 @@ public final class RunReconciler {
         RunAnalyzer.Analysis analysis;
         try {
             analysis = workloads.analyze(
-                    run, plan.get(), version.get(), shards.findByRun(run.id()));
+                    run, runPlans, version.get(), shards.findByRun(run.id()));
         } catch (RunWorkloadService.PlanDigestMismatchException e) {
             // A terminal, non-retryable outcome with its own code. Results that describe a different
             // plan are refused rather than merged: the numbers would be real and the report would
@@ -390,18 +419,34 @@ public final class RunReconciler {
         report.completed();
     }
 
-    private ExecutionPlan resolvePlan(TestRun run, DefinitionVersion version, Instant now) {
-        return run.executionPlanId()
-                .flatMap(plans::find)
-                .orElseGet(() -> plans.save(
-                        compiler.compile(ExecutionPlanId.generate(), version, now)));
+    /**
+     * The run's plans, compiled once and reused on every later pass.
+     *
+     * <p>The store is the authority on what a run executes: a pass that finds plans already attached
+     * uses them rather than recompiling. Recompiling could produce different plans — shard count
+     * comes from a calibration profile that changes — and the run's results would then describe
+     * neither.
+     */
+    private List<ExecutionPlan> resolvePlans(TestRun run, DefinitionVersion version, Instant now) {
+        List<ExecutionPlan> existing = plans.findByRun(run.id());
+        if (!existing.isEmpty()) {
+            return existing;
+        }
+
+        List<ExecutionPlan> compiled = compiler.compile(ExecutionPlanId::generate, version, now);
+        List<ExecutionPlan> stored = new java.util.ArrayList<>(compiled.size());
+        for (ExecutionPlan plan : compiled) {
+            stored.add(plans.save(run.id(), plan));
+        }
+        return List.copyOf(stored);
     }
 
     private List<RunnerShard> createShards(TestRun run, ExecutionPlan plan) {
         int shardCount = plan.capacity().shardCount();
         return java.util.stream.IntStream.range(0, shardCount)
                 .mapToObj(index -> shards.save(RunnerShard.planned(
-                        RunnerShardId.generate(), run.id(), plan.engine(), index, shardCount)))
+                        RunnerShardId.generate(), run.id(), plan.engine(), plan.workloadName(),
+                        index, shardCount)))
                 .toList();
     }
 
@@ -534,13 +579,24 @@ public final class RunReconciler {
         return shards.save(shard.finished(ShardState.FAILED, null, RunFailureCode.RUNNER_LOST, now));
     }
 
+    /**
+     * Whether the run has outlived every one of its plans.
+     *
+     * <p>The <em>longest</em> deadline, not the first. Workloads run concurrently and can have
+     * different durations — a browser cohort measuring a five-minute protocol load runs for a
+     * fraction of it — so stopping at the shortest would kill a run that is still doing exactly what
+     * it was asked to.
+     */
     private boolean exceededDeadline(TestRun run, Instant now) {
-        Optional<ExecutionPlan> plan = run.executionPlanId().flatMap(plans::find);
         Optional<Instant> startedAt = run.timeline().startedAt();
-        if (plan.isEmpty() || startedAt.isEmpty()) {
+        if (startedAt.isEmpty()) {
             return false;
         }
-        return startedAt.get().plus(deadlineFor(plan.get())).isBefore(now);
+        Optional<Duration> longest = plans.findByRun(run.id()).stream()
+                .map(this::deadlineFor)
+                .max(Comparator.naturalOrder());
+
+        return longest.isPresent() && startedAt.get().plus(longest.get()).isBefore(now);
     }
 
     /**
@@ -554,8 +610,10 @@ public final class RunReconciler {
      */
     private void recordProgress(TestRun run, Instant now) {
         try {
-            run.executionPlanId().flatMap(plans::find)
-                    .ifPresent(plan -> workloads.recordProgress(run, plan, now));
+            List<ExecutionPlan> runPlans = plans.findByRun(run.id());
+            if (!runPlans.isEmpty()) {
+                workloads.recordProgress(run, runPlans, now);
+            }
         } catch (RuntimeException e) {
             log.debug("Live progress could not be recorded runId={}", run.id(), e);
         }

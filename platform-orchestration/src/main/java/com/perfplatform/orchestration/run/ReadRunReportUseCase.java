@@ -109,7 +109,10 @@ public final class ReadRunReportUseCase {
         TestRun run = runs.get(runId, caller);
 
         Optional<DefinitionVersion> version = versions.find(run.definitionVersionId());
-        Optional<ExecutionPlan> plan = run.executionPlanId().flatMap(plans::find);
+        // The run's first plan, in workload order. A report describing a hybrid run's execution
+        // properly is S11's work, when a hybrid can actually be executed; taking the first here
+        // keeps a single-workload run — every run today — reporting exactly as it did.
+        Optional<ExecutionPlan> plan = plans.findByRun(runId).stream().findFirst();
 
         RunReport report = new RunReport(
                 run,

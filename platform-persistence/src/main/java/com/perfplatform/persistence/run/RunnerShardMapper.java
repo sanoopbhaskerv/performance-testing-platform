@@ -17,6 +17,7 @@ final class RunnerShardMapper {
                 RunnerShardId.of(entity.getId()),
                 TestRunId.of(entity.getRunId()),
                 entity.getEngine(),
+                entity.getWorkloadName(),
                 entity.getShardIndex(),
                 entity.getShardCount(),
                 entity.getStatus(),
@@ -34,6 +35,7 @@ final class RunnerShardMapper {
                 shard.id().value(),
                 shard.runId().value(),
                 shard.engine(),
+                shard.workloadName(),
                 shard.shardIndex(),
                 shard.shardCount(),
                 shard.state());

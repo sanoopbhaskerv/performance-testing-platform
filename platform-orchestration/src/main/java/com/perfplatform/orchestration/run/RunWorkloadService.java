@@ -436,29 +436,53 @@ public final class RunWorkloadService {
      * indeterminate before they are stored. The measurements are still recorded — they are what the
      * artifacts contain — but no objective on a run that generated no load may report a pass.
      */
-    public RunAnalyzer.Analysis analyze(TestRun run, ExecutionPlan plan, DefinitionVersion version,
-            List<RunnerShard> shards) {
+    public RunAnalyzer.Analysis analyze(TestRun run, List<ExecutionPlan> plans,
+            DefinitionVersion version, List<RunnerShard> shards) {
 
-        ExecutionEngineProvider engine = engines.require(plan.engine());
+        if (plans.isEmpty()) {
+            throw new IllegalArgumentException("A run cannot be analyzed without its plans");
+        }
 
         // Adopt anything a remote runner uploaded before looking for results. A Kubernetes runner
         // writes to object storage and cannot write to the database — it has no credentials for one
         // and must never have any (a provider that could write run state could mark its own failures
         // as successes). Without this step a Job's output would be invisible to analysis.
-        adoptUploadedArtifacts(run, plan);
+        adoptUploadedArtifacts(run, plans);
 
-        List<RunnerOutput.ShardResult> shardResults = new ArrayList<>();
-        for (RunnerShard shard : shards) {
-            resultDataFor(run.id(), shard).ifPresent(data ->
-                    shardResults.add(new RunnerOutput.ShardResult(shard.shardIndex(), data)));
+        // Each workload's results are parsed by its own engine and the samples are merged. That is
+        // the whole of cross-engine analysis: a browser journey duration and an HTTP response time
+        // are both a labelled latency by the time they leave their parser, which is what Sample was
+        // designed for. Objectives are then judged once, over everything, and each is scoped to the
+        // workload or operation it names.
+        SampleSet samples = SampleSet.empty();
+        int expected = 0;
+        int reported = 0;
+
+        for (ExecutionPlan plan : plans) {
+            ExecutionEngineProvider engine = engines.require(plan.engine());
+
+            List<RunnerOutput.ShardResult> shardResults = new ArrayList<>();
+            for (RunnerShard shard : shards) {
+                if (!plan.workloadName().equals(shard.workloadName())) {
+                    continue;
+                }
+                resultDataFor(run.id(), shard).ifPresent(data ->
+                        shardResults.add(new RunnerOutput.ShardResult(shard.shardIndex(), data)));
+            }
+
+            int planShards = Math.max(1, plan.capacity().shardCount());
+            expected += planShards;
+            reported += shardResults.size();
+
+            samples = samples.merge(engine.parse(
+                    new RunnerOutput(run.id(), planShards, shardResults)));
         }
 
-        int expected = Math.max(1, plan.capacity().shardCount());
-        SampleSet samples = engine.parse(
-                new RunnerOutput(run.id(), expected, shardResults));
+        final int shardsExpected = expected;
+        final int shardsReported = reported;
 
-        RunAnalyzer.Analysis measured = analyzer.analyze(run.id(), plan.engine(), expected,
-                shardResults.size(), samples, objectives(version.specification()));
+        RunAnalyzer.Analysis measured = analyzer.analyze(run.id(), engineLabel(plans),
+                shardsExpected, shardsReported, samples, objectives(version.specification()));
 
         // Applied here rather than inside the analyzer so the analyzer stays a pure function of the
         // samples: what it computes must be re-derivable from stored artifacts alone, and whether a
@@ -472,13 +496,29 @@ public final class RunWorkloadService {
         // different analyses.
         results.recordAnalysis(run.id(), analysis.result(), analysis.outcomes());
 
-        log.info("Run analyzed runId={} shardsReported={}/{} samples={} unreadable={} objectives={} "
-                        + "successful={} synthetic={}",
-                run.id(), shardResults.size(), expected, samples.samples().size(),
+        log.info("Run analyzed runId={} workloads={} shardsReported={}/{} samples={} unreadable={} "
+                        + "objectives={} successful={} synthetic={}",
+                run.id(), plans.size(), shardsReported, shardsExpected, samples.samples().size(),
                 samples.unparsedRows(), analysis.outcomes().size(), analysis.isSuccessful(),
                 run.synthetic());
 
         return analysis;
+    }
+
+    /**
+     * What to record as the engine behind a run's measurements.
+     *
+     * <p>One engine's identifier when a run has one, and every engine joined when it has several.
+     * Not the first engine's: a hybrid run's numbers come from two engines, and a stored result
+     * naming only one would be read months later as though a browser cohort had never been part of
+     * it. The per-operation rows are where the detail lives; this is the honest summary label.
+     */
+    private static String engineLabel(List<ExecutionPlan> plans) {
+        return plans.stream()
+                .map(ExecutionPlan::engine)
+                .distinct()
+                .sorted()
+                .collect(Collectors.joining("+"));
     }
 
     /**
@@ -501,7 +541,8 @@ public final class RunWorkloadService {
      *
      * @return the merged view, or empty when no shard has published anything readable yet
      */
-    public Optional<LiveProgress> recordProgress(TestRun run, ExecutionPlan plan, Instant now) {
+    public Optional<LiveProgress> recordProgress(TestRun run, List<ExecutionPlan> plans,
+            Instant now) {
         List<ArtifactReference> published;
         try {
             published = artifacts.listForRun(run.id()).stream()
@@ -512,7 +553,12 @@ public final class RunWorkloadService {
             return Optional.empty();
         }
 
-        String expectedDigest = plan.planDigest().value();
+        // A snapshot has to belong to one of this run's plans. A hybrid run's generators publish
+        // against different plans, so matching a single digest would silently discard every
+        // snapshot from the second workload — and the live view would show half the traffic.
+        Set<String> expectedDigests = plans.stream()
+                .map(plan -> plan.planDigest().value())
+                .collect(Collectors.toSet());
         List<ShardProgress> snapshots = new ArrayList<>();
 
         for (ArtifactReference reference : published) {
@@ -520,7 +566,8 @@ public final class RunWorkloadService {
                 artifacts.read(reference)
                         .flatMap(progressCodec::decode)
                         .filter(snapshot -> {
-                            boolean matches = snapshot.describes(run.id(), expectedDigest);
+                            boolean matches = expectedDigests.stream()
+                                    .anyMatch(digest -> snapshot.describes(run.id(), digest));
                             if (!matches) {
                                 log.warn("Discarding a progress snapshot that describes another run "
                                                 + "or plan runId={} object={}",
@@ -535,8 +582,11 @@ public final class RunWorkloadService {
             }
         }
 
-        Optional<LiveProgress> merged = LiveProgress.merge(
-                snapshots, Math.max(1, plan.capacity().shardCount()), now);
+        int expectedShards = plans.stream()
+                .mapToInt(plan -> Math.max(1, plan.capacity().shardCount()))
+                .sum();
+
+        Optional<LiveProgress> merged = LiveProgress.merge(snapshots, expectedShards, now);
 
         merged.ifPresent(view -> {
             try {
@@ -603,7 +653,7 @@ public final class RunWorkloadService {
      * <p>Idempotent: {@code recordArtifact} deduplicates by object key, so a repeated pass over the
      * same uploads is a no-op rather than a second set of evidence.
      */
-    private void adoptUploadedArtifacts(TestRun run, ExecutionPlan plan) {
+    private void adoptUploadedArtifacts(TestRun run, List<ExecutionPlan> plans) {
         Set<String> known = results.artifactsFor(run.id()).stream()
                 .map(ArtifactReference::objectKey)
                 .collect(Collectors.toSet());
@@ -644,7 +694,7 @@ public final class RunWorkloadService {
                     adopted, run.id(), run.teamId());
         }
 
-        verifyPlanIdentity(run, plan);
+        verifyPlanIdentity(run, plans);
     }
 
     /**
@@ -654,8 +704,14 @@ public final class RunWorkloadService {
      * whose upload was cut short, has said nothing rather than said something wrong. A manifest that
      * carries a <em>different</em> digest is refused outright.
      */
-    private void verifyPlanIdentity(TestRun run, ExecutionPlan plan) {
-        String expected = plan.planDigest().value();
+    private void verifyPlanIdentity(TestRun run, List<ExecutionPlan> plans) {
+        // Any of the run's plans, because a hybrid run's manifests come from different runners
+        // executing different plans. Membership rather than equality is still the same check it
+        // always was: a manifest whose digest belongs to none of this run's plans describes a test
+        // this run did not commission.
+        Set<String> expected = plans.stream()
+                .map(plan -> plan.planDigest().value())
+                .collect(Collectors.toSet());
 
         for (ArtifactReference reference : results.artifactsFor(run.id())) {
             if (reference.type() != ArtifactType.RUNNER_MANIFEST) {
@@ -665,10 +721,11 @@ public final class RunWorkloadService {
                     .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
                     .flatMap(RunWorkloadService::planDigestIn);
 
-            if (reported.isPresent() && !expected.equals(reported.get())) {
-                log.error("Plan digest mismatch runId={} expected={} reported={} artifact={}",
+            if (reported.isPresent() && !expected.contains(reported.get())) {
+                log.error("Plan digest mismatch runId={} expected one of={} reported={} artifact={}",
                         run.id(), expected, reported.get(), reference.objectKey());
-                throw new PlanDigestMismatchException(run.id(), expected, reported.get());
+                throw new PlanDigestMismatchException(run.id(),
+                        String.join(" or ", expected), reported.get());
             }
         }
     }

@@ -102,11 +102,16 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
     }
 
     @Override
-    public EnginePlan compile(PerformanceTestSpecification specification) {
-        List<WorkloadSpec> workloads = browserWorkloads(specification);
+    public EnginePlan compile(PerformanceTestSpecification specification, String workloadName) {
+        // One workload per plan. A run compiles a plan for each of its workloads, so compiling all
+        // the browser ones here would produce a plan claiming to be several tests at once.
+        List<WorkloadSpec> workloads = browserWorkloads(specification).stream()
+                .filter(workload -> workloadName == null || workloadName.equals(workload.name()))
+                .toList();
         if (workloads.isEmpty()) {
             throw new IllegalArgumentException(
-                    "This specification declares no browser workload, so Playwright has nothing to run");
+                    "This specification declares no browser workload named '" + workloadName
+                            + "', so Playwright has nothing to compile");
         }
 
         Map<String, SourceSpec> sourcesByName = specification.spec().sources().stream()
@@ -121,7 +126,10 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
                 .field("environment", environmentName(specification))
                 .field("correlationHeader", correlationHeader(specification))
                 .field("shardCount", DEFAULT_SHARD_COUNT)
-                .field("peakBrowserSessions", specification.peakBrowserSessions())
+                // This plan's own sessions, not every browser workload's. A plan whose capacity
+                // described the whole document would have admission reserving the same sessions
+                // once per plan.
+                .field("peakBrowserSessions", peakSessions(workloads))
                 .field("durationSeconds", durationSeconds(specification, workloads));
 
         json.startArray("workloads");
@@ -131,7 +139,12 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
         json.endArray().endObject();
 
         return new EnginePlan(json.build(), DEFAULT_SHARD_COUNT,
-                specification.peakBrowserSessions(), durationSeconds(specification, workloads));
+                peakSessions(workloads), durationSeconds(specification, workloads));
+    }
+
+    /** Peak concurrent browser sessions across the workloads this plan covers. */
+    private static int peakSessions(List<WorkloadSpec> workloads) {
+        return workloads.stream().mapToInt(WorkloadSpec::peakUsers).sum();
     }
 
     @Override

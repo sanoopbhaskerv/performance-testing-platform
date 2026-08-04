@@ -26,8 +26,21 @@ import java.util.Objects;
  * JMeter compiler arrives in 1D behind {@link ExecutionPlanCompiler} and changes what
  * {@link #planJson()} contains, not how plans are identified, stored or verified.
  *
+ * <h2>One plan per workload</h2>
+ * A specification can declare several workloads — a protocol load and a browser cohort measuring the
+ * same system, or two protocol workloads with different shapes — and each compiles to its own plan
+ * for its own engine. Before S9 a run had exactly one plan: a multi-engine specification was refused
+ * at compile time, and before S6 its later workloads were silently dropped and the run reported
+ * success having executed half the test.
+ *
+ * <p>{@link #workloadName} is therefore part of a plan's identity rather than a label on it. It is
+ * what lets two plans of the same run be told apart, what names the shards that execute it, and what
+ * scopes the samples it produces so an objective written about one workload is judged against that
+ * workload's traffic.
+ *
  * @param id                  plan identifier, referenced by the run
  * @param definitionVersionId the immutable specification version this plan was compiled from
+ * @param workloadName        the workload this plan executes; unique within a run
  * @param engine              engine identifier, e.g. {@code jmeter}
  * @param planJson            the compiled plan; opaque to the domain, meaningful to its engine
  * @param planDigest          SHA-256 over {@code planJson}, checked against runner results
@@ -37,6 +50,7 @@ import java.util.Objects;
 public record ExecutionPlan(
         ExecutionPlanId id,
         TestDefinitionVersionId definitionVersionId,
+        String workloadName,
         String engine,
         String planJson,
         SpecificationDigest planDigest,
@@ -80,6 +94,9 @@ public record ExecutionPlan(
         }
         if (planJson == null || planJson.isBlank()) {
             throw new IllegalArgumentException("planJson must not be null or blank");
+        }
+        if (workloadName == null || workloadName.isBlank()) {
+            throw new IllegalArgumentException("workloadName must not be null or blank");
         }
     }
 

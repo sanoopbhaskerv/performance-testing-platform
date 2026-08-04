@@ -35,6 +35,15 @@ public class RunnerShardEntity {
     @Column(name = "engine", nullable = false, updatable = false, length = 32)
     private String engine;
 
+    /**
+     * The workload this shard executes.
+     *
+     * <p>Two workloads of one run can each have a shard 0, so a shard's identity within a run is its
+     * workload and index together. Rows written before per-workload plans carry {@code *}.
+     */
+    @Column(name = "workload_name", nullable = false, updatable = false, length = 63)
+    private String workloadName;
+
     @Column(name = "shard_index", nullable = false, updatable = false)
     private int shardIndex;
 
@@ -79,11 +88,12 @@ public class RunnerShardEntity {
         // Required by JPA.
     }
 
-    RunnerShardEntity(UUID id, UUID runId, String engine, int shardIndex, int shardCount,
-            ShardState status) {
+    RunnerShardEntity(UUID id, UUID runId, String engine, String workloadName, int shardIndex,
+            int shardCount, ShardState status) {
         this.id = Objects.requireNonNull(id, "id");
         this.runId = Objects.requireNonNull(runId, "runId");
         this.engine = Objects.requireNonNull(engine, "engine");
+        this.workloadName = Objects.requireNonNull(workloadName, "workloadName");
         this.shardIndex = shardIndex;
         this.shardCount = shardCount;
         this.status = Objects.requireNonNull(status, "status");
@@ -91,6 +101,10 @@ public class RunnerShardEntity {
 
     public UUID getId() {
         return id;
+    }
+
+    public String getWorkloadName() {
+        return workloadName;
     }
 
     public UUID getRunId() {

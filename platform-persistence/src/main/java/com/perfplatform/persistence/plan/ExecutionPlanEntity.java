@@ -32,6 +32,26 @@ public class ExecutionPlanEntity {
     private String engine;
 
     /**
+     * The workload this plan executes, unique within its run.
+     *
+     * <p>Part of the plan's identity rather than a label on it: it is what tells two plans of one
+     * run apart, and what the run's shards and samples are scoped by. Rows that predate
+     * per-workload plans carry {@code *}, where one plan was the whole of a run's execution.
+     */
+    @Column(name = "workload_name", nullable = false, updatable = false, length = 63)
+    private String workloadName;
+
+    /**
+     * The run this plan was compiled for.
+     *
+     * <p>Nullable only for rows written before plans belonged to runs. Written together with the
+     * plan itself, so an interrupted pass cannot leave a plan that no run claims — which would make
+     * the next pass compile a second one and start a second set of runners.
+     */
+    @Column(name = "run_id", updatable = false)
+    private UUID runId;
+
+    /**
      * The compiled plan, stored as text.
      *
      * <p>Not a JSON column type. JSONB is a parsed representation and reorders object keys on the
@@ -61,11 +81,14 @@ public class ExecutionPlanEntity {
         // Required by JPA.
     }
 
-    ExecutionPlanEntity(UUID id, UUID definitionVersionId, String engine, String planJson,
+    ExecutionPlanEntity(UUID id, UUID definitionVersionId, String workloadName, UUID runId,
+            String engine, String planJson,
             String planDigest, int shardCount, int peakVirtualUsers, long estimatedDurationSeconds,
             Instant createdAt) {
         this.id = Objects.requireNonNull(id, "id");
         this.definitionVersionId = Objects.requireNonNull(definitionVersionId, "definitionVersionId");
+        this.workloadName = Objects.requireNonNull(workloadName, "workloadName");
+        this.runId = runId;
         this.engine = Objects.requireNonNull(engine, "engine");
         this.planJson = Objects.requireNonNull(planJson, "planJson");
         this.planDigest = Objects.requireNonNull(planDigest, "planDigest");
@@ -81,6 +104,14 @@ public class ExecutionPlanEntity {
 
     public UUID getDefinitionVersionId() {
         return definitionVersionId;
+    }
+
+    public String getWorkloadName() {
+        return workloadName;
+    }
+
+    public UUID getRunId() {
+        return runId;
     }
 
     public String getEngine() {

@@ -50,11 +50,15 @@ final class JmeterPlanCompiler {
     private JmeterPlanCompiler() {
     }
 
-    static EnginePlan compile(PerformanceTestSpecification specification) {
-        List<WorkloadSpec> workloads = protocolWorkloads(specification);
+    static EnginePlan compile(PerformanceTestSpecification specification, String workloadName) {
+        List<WorkloadSpec> workloads = protocolWorkloads(specification).stream()
+                .filter(workload -> workloadName == null
+                        || workloadName.equals(workload.name()))
+                .toList();
         if (workloads.isEmpty()) {
             throw new IllegalArgumentException(
-                    "This specification declares no protocol workload, so JMeter has nothing to run");
+                    "This specification declares no JMeter protocol workload named '"
+                            + workloadName + "', so there is nothing to compile");
         }
 
         CanonicalJson json = new CanonicalJson()

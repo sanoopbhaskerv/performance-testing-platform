@@ -53,11 +53,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SchemaConformanceTest {
 
+    /**
+     * The engines a test deployment has.
+     *
+     * <p>Both, because the shipped examples use both and a validator that reported the browser
+     * engine as unavailable would fail every browser fixture for the wrong reason.
+     */
+    private static final com.perfplatform.domain.port.EngineCatalog ENGINES =
+            () -> java.util.Set.of("jmeter", "playwright");
+
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
 
     private final SpecificationValidationService service =
-            new SpecificationValidationService(new SpecificationParser());
+            new SpecificationValidationService(new SpecificationParser(), ENGINES);
 
     private static JsonNode schema() {
         try {

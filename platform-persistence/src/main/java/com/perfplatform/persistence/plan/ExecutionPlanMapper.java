@@ -15,6 +15,7 @@ final class ExecutionPlanMapper {
         return new ExecutionPlan(
                 ExecutionPlanId.of(entity.getId()),
                 TestDefinitionVersionId.of(entity.getDefinitionVersionId()),
+                entity.getWorkloadName(),
                 entity.getEngine(),
                 entity.getPlanJson(),
                 SpecificationDigest.parse(entity.getPlanDigest()),
@@ -25,10 +26,12 @@ final class ExecutionPlanMapper {
                 entity.getCreatedAt());
     }
 
-    static ExecutionPlanEntity toEntity(ExecutionPlan plan) {
+    static ExecutionPlanEntity toEntity(ExecutionPlan plan, java.util.UUID runId) {
         return new ExecutionPlanEntity(
                 plan.id().value(),
                 plan.definitionVersionId().value(),
+                plan.workloadName(),
+                runId,
                 plan.engine(),
                 plan.planJson(),
                 plan.planDigest().value(),

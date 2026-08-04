@@ -286,8 +286,7 @@ class RunReconcilerTest {
         }
 
         private String planDigestOf(TestRun run) {
-            return plans.find(run.executionPlanId().orElseThrow()).orElseThrow()
-                    .planDigest().value();
+            return plans.findByRun(run.id()).get(0).planDigest().value();
         }
 
         /**
@@ -432,8 +431,7 @@ class RunReconcilerTest {
         }
 
         private String planDigestOf(TestRun run) {
-            return plans.find(run.executionPlanId().orElseThrow()).orElseThrow()
-                    .planDigest().value();
+            return plans.findByRun(run.id()).get(0).planDigest().value();
         }
 
         @Test
@@ -589,7 +587,9 @@ class RunReconcilerTest {
 
             assertThat(report.admitted()).isEqualTo(1);
             assertThat(reload(run).state()).isEqualTo(RunState.RUNNING);
-            assertThat(reload(run).executionPlanId()).isPresent();
+            // The plans are the run's, found through the store rather than carried on the run: one
+            // source of truth for what a run executes, whether it has one workload or several.
+            assertThat(plans.findByRun(run.id())).hasSize(1);
             assertThat(plans.count()).isEqualTo(1);
         }
 
@@ -623,7 +623,7 @@ class RunReconcilerTest {
                 assertThat(request.shardIndex()).isZero();
                 assertThat(request.shardCount()).isEqualTo(1);
                 assertThat(request.planDigest()).isEqualTo(
-                        plans.find(reload(run).executionPlanId().orElseThrow()).orElseThrow()
+                        plans.findByRun(run.id()).get(0)
                                 .planDigest());
                 // The deadline is the plan's duration plus the configured grace, so a workload that
                 // ignores its stages still stops.

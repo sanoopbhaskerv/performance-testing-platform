@@ -42,7 +42,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S8 ran this to completion: **1,093 tests, 0 failures, 0 skipped** across all 15 modules. S7 was the
+S9 ran this to completion: **1,106 tests, 0 failures, 0 skipped** across all 15 modules. S7 was the
 first fully green `mvn clean verify` on the branch and it has stayed green since. Docker must be running: Testcontainers uses PostgreSQL
 and MinIO. The environment limits earlier sessions recorded (Mockito inline self-attach, sockets
 refusing to bind) did **not** recur; if they reappear, note them rather than assuming they are
@@ -51,7 +51,7 @@ connection`, that is a known flaky start — retry once. **If any integration te
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 157 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 158 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -96,7 +96,7 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved and added in S1.** §31 pause cleared. **157 UI tests** now. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
@@ -141,13 +141,21 @@ that exposes it. Nothing lands API-only.
   without. Also fixed a throughput objective that could not be written at all (`Threshold` had no
   per-second unit).
 
-**S8: 1,093 Java tests, 157 UI tests, `mvn clean verify` fully green.**
+- **S9** (§3y) — one run, many workloads. A run compiles **one plan per workload**, provisions
+  shards per workload and analyses every workload's results together, so a protocol load and a
+  browser cohort can belong to one run. A workload naming an engine this deployment lacks is now
+  refused **at validation**, closing a defect that once dropped later workloads silently. The
+  browser-session budget moved to S11, where the thing it governs first becomes possible.
 
-**Next: S9, one run with many workloads.** `PLAN.md` §11: `execution_plans` gains `workload_name` and
-a run references a set of them, `runner_shards` gains it too with a unique key on
-`(run_id, workload_name, shard_index)`, `RunWorkloadService` becomes per-workload, and analysis merges
-sample sets across engines. The acceptance test is a specification whose second workload names an
-unregistered engine being **refused at validation** rather than silently dropped.
+**S9: 1,106 Java tests, 158 UI tests, `mvn clean verify` fully green.**
+
+**Next: S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. **Read
+`PLAN.md` §12 R2 first: a security review is required before this is built** — it puts a
+user-driven browser inside the network, and target-locking plus an egress-restricted `NetworkPolicy`
+are the controls.
+
+A smaller alternative, if one is wanted: **S11's prerequisites** — the browser-session budget
+deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves against something.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -161,9 +169,10 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ **S5 added runtime
    credential references, `SecretResolver`, and broker-backed `run://session`.** Corporate identity
    and non-Kubernetes secret managers remain later pause-condition decisions.
-3. **A run still has one plan with one engine.** S6 changed
-   `EngineDispatchingPlanCompiler.primaryEngine()` to reject mixed-engine and hybrid specs instead
-   of silently taking the first workload. Real coordinated hybrid execution remains **S9/S11**.
+3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9.** A run compiles one plan per
+   workload, shards are scoped by workload, and analysis merges sample sets across engines. What
+   remains for a hybrid is *coordination* — `startWhen` resolving, and the browser-session budget —
+   which is **S11**.
 
 ### The caveat to carry forward
 

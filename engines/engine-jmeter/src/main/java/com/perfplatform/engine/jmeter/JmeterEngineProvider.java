@@ -147,8 +147,8 @@ public final class JmeterEngineProvider implements ExecutionEngineProvider {
     }
 
     @Override
-    public EnginePlan compile(PerformanceTestSpecification specification) {
-        return JmeterPlanCompiler.compile(specification);
+    public EnginePlan compile(PerformanceTestSpecification specification, String workloadName) {
+        return JmeterPlanCompiler.compile(specification, workloadName);
     }
 
     @Override

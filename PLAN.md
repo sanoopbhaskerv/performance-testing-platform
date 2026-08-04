@@ -12,9 +12,8 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S8 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3x for what each delivered. S9, one run with many workloads, is next; everything after it is
-still a plan.
+**Status: S1 through S9 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3y for what each delivered. S10, the recorder, is next; everything after it is still a plan.
 
 ---
 
@@ -716,7 +715,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 | Decision | Chosen | Why |
 |---|---|---|
-| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 157 UI tests now. |
+| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 158 UI tests now. |
 | **Recorder** | **Deferred.** Guided capture wizards instead (§5) | A server-side recording browser is large and needs a security review. The wizards get most of the value for almost nothing. |
 | **Live monitoring** | **Deferred.** Existing status, plus elapsed/stage/progress bar | The cost is a runner-image change and re-verification on a cluster. The progress bar is derivable from data the control plane already has — no runner change. |
 | **The novice report** | **Kept** | Pure UI, cheap, and most of what "usable without experience" actually means. |
@@ -739,8 +738,8 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | **done** — `HANDOFF.md` §3v |
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
-| **S9** | One run, many workloads | structural | Large | — | next |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | |
+| **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | next |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
@@ -948,16 +947,23 @@ the work itself forced:
 Verified with real load: 2,239 samples against ~2,250 specified for the open model, and a closed-model
 run whose active users climbed 1→9 where the old rendering jumped 5→10.
 
-### S9 — one run, many workloads
+### S9 — one run, many workloads — **built**
 
-The structural change §2 identified. `execution_plans` gains `workload_name`; a run references a set
-(Flyway `V7`). `runner_shards` already carries `engine` — add `workload_name`, unique on
-`(run_id, workload_name, shard_index)`. `RunWorkloadService` becomes per-workload; analysis merges
-sample sets across engines, which `Sample` was already designed for. `CapacityLimits` gains a separate
-browser-session budget, exactly as its javadoc already promises.
+`HANDOFF.md` §3y. Delivered as described, in Flyway `V9` rather than `V7` (taken by registered
+targets), with one item moved:
 
-*Acceptance:* a specification whose second workload names an unregistered engine is **refused at
-validation** rather than silently dropped — a test that would have caught today's defect.
+**The browser-session budget is now S11's.** Admission evaluates before compilation, so it does not
+know a run's browser demand; a real budget needs that demand stored on the run at trigger time, which
+is a schema and trigger change of its own. Nothing can yet co-schedule a browser cohort with a
+protocol workload, so a browser-only run still consumes an ordinary run slot — coarse, but real. It
+belongs with the increment where the thing it governs first becomes possible.
+
+*Acceptance — met:* a workload naming an engine this deployment does not have is refused by the new
+engine-capability validation layer, while somebody is still editing the document.
+
+**Consequence worth knowing:** two protocol workloads on one engine now compile to two plans and
+therefore two runners, where before they shared one. Separately provisioned workloads are exactly
+what S11's start conditions need, but it is a real change in pod count.
 
 ### S10 — the recorder, and git-pinned Playwright sources
 
@@ -970,7 +976,9 @@ Security review before build (§12, R2).
 ### S11 — web performance under load
 
 `LoadStage` gains a `name` so `startWhen: { workload, stage }` resolves — today
-`hybrid.yaml`'s `stage: steady-state` refers to nothing.
+`hybrid.yaml`'s `stage: steady-state` refers to nothing. **Also carries S9's deferred
+browser-session budget**, since this is the increment where a browser cohort first shares a run with
+a protocol workload and the two budgets stop being interchangeable.
 
 The browser cohort starts when **all three** hold: protocol shards `RUNNING`, wall-clock past the
 stage boundary computed from the shard's `startedAt`, **and** a minimum sample count observed. Time

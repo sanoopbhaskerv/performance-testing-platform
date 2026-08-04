@@ -51,8 +51,8 @@ class PlaywrightEngineProviderTest {
     @Test
     @DisplayName("compiled plan is deterministic and carries source digest plus browser profile")
     void compile() {
-        EnginePlan first = provider.compile(specification());
-        EnginePlan second = provider.compile(specification());
+        EnginePlan first = provider.compile(specification(), "browser-experience");
+        EnginePlan second = provider.compile(specification(), "browser-experience");
 
         assertThat(first).isEqualTo(second);
         assertThat(first.planJson())
@@ -69,11 +69,11 @@ class PlaywrightEngineProviderTest {
     @Test
     @DisplayName("rendered shard plan injects the resolved target and correlation identity")
     void render() {
-        EnginePlan compiled = provider.compile(specification());
+        EnginePlan compiled = provider.compile(specification(), "browser-experience");
         ExecutionPlan plan = new ExecutionPlan(
                 ExecutionPlanId.generate(),
                 TestDefinitionVersionId.generate(),
-                provider.engineId(),
+                "browser-experience", provider.engineId(),
                 compiled.planJson(),
                 SpecificationDigest.ofCanonicalForm(compiled.planJson()),
                 new ExecutionPlan.CapacityEstimate(1, 5, 900),
