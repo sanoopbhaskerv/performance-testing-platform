@@ -253,10 +253,101 @@ export function LoadStep({ draft, onChange }: StepProps) {
 
   const total = totalDurationSeconds(draft);
   const browser = draft.testType === 'web-experience';
+  // A browser cohort is a fixed number of real browsers measuring the experience. Asking for a
+  // rate of browser journeys would be asking for a number of machines, not a load shape.
+  const rate = !browser && draft.load.model === 'rate';
+
+  // Little's law, which is the whole of what the ceiling means: sustaining R requests a second with
+  // at most C in flight requires every response inside C/R seconds. Shown rather than validated
+  // silently, because only the person typing it knows how fast their endpoint is.
+  const impliedBudgetMillis =
+    draft.load.peakRate > 0
+      ? Math.round((draft.load.maxConcurrency * 1000) / draft.load.peakRate)
+      : 0;
 
   return (
     <>
+      {!browser && (
+        <fieldset className="studio-field studio-choice">
+          <legend>What are you holding steady?</legend>
+          <label>
+            <input
+              type="radio"
+              name="load-model"
+              checked={draft.load.model === 'users'}
+              onChange={() => set({ model: 'users' })}
+            />
+            <span>
+              <strong>A number of people</strong>
+              <span className="studio-hint">
+                Each one waits for a response before sending the next request, so if the system
+                slows down the test sends less. This is what most load tests want.
+              </span>
+            </span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="load-model"
+              checked={rate}
+              onChange={() => set({ model: 'rate' })}
+            />
+            <span>
+              <strong>A number of requests per second</strong>
+              <span className="studio-hint">
+                Requests keep arriving at the rate you ask for whatever the system does with them.
+                Use this for traffic the system does not control — a queue, a batch, a public
+                endpoint — or to ask whether it can sustain a specific rate.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+      )}
+
       <div className="studio-grid">
+        {rate ? (
+          <>
+            <div className="studio-field">
+              <label htmlFor="peak-rate">Requests per second</label>
+              <input
+                id="peak-rate"
+                type="number"
+                min={1}
+                value={draft.load.peakRate}
+                onChange={(e) => set({ peakRate: Number(e.target.value) })}
+                aria-describedby="peak-rate-hint"
+              />
+              <p className="studio-hint" id="peak-rate-hint">
+                The rate at the busiest point. The test builds up to it and holds it.
+              </p>
+            </div>
+
+            <div className="studio-field">
+              <label htmlFor="max-concurrency">At most this many at once</label>
+              <input
+                id="max-concurrency"
+                type="number"
+                min={1}
+                value={draft.load.maxConcurrency}
+                onChange={(e) => set({ maxConcurrency: Number(e.target.value) })}
+                aria-describedby="max-concurrency-hint"
+              />
+              <p className="studio-hint" id="max-concurrency-hint">
+                A safety limit on requests waiting for an answer. If the system stalls, requests
+                pile up — without a limit the load generator runs out of memory and the test
+                reports its own failure as the system&apos;s.
+                {impliedBudgetMillis > 0 && (
+                  <>
+                    {' '}
+                    At {draft.load.peakRate}/s this one is reached if responses take longer than{' '}
+                    <strong>{impliedBudgetMillis} ms</strong>; past that, the limit rather than your
+                    rate is what the test measures.
+                  </>
+                )}
+              </p>
+            </div>
+          </>
+        ) : (
         <div className="studio-field">
           <label htmlFor="peak-users">{browser ? 'Browsers at once' : 'People at once'}</label>
           <input
@@ -280,6 +371,7 @@ export function LoadStep({ draft, onChange }: StepProps) {
               : 'The number of simultaneous users the test simulates at its busiest.'}
           </p>
         </div>
+        )}
 
         <div className="studio-field">
           <label htmlFor="ramp-up">Ramp up over (seconds)</label>
@@ -332,9 +424,13 @@ export function LoadStep({ draft, onChange }: StepProps) {
       <p className="studio-summary">
         This test will run for about <strong>{approximateDuration(total)}</strong>, reaching{' '}
         <strong>
-          {draft.load.peakUsers} {browser ? 'browsers' : 'people'}
+          {rate
+            ? `${draft.load.peakRate} requests per second`
+            : `${draft.load.peakUsers} ${browser ? 'browsers' : 'people'}`}
         </strong>{' '}
-        at its busiest.
+        at its busiest
+        {rate && <> , with at most {draft.load.maxConcurrency} waiting for an answer at any moment</>}
+        .
       </p>
     </>
   );

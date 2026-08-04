@@ -1,0 +1,38 @@
+# INVALID FIXTURE — expected finding: spec.workload.stage.rate.notApplicable
+#
+# A closed model whose stages ask for a rate. Refused rather than ignored: whoever wrote this
+# believes the run will send 400 requests a second, and it will not — it will send whatever 50 users
+# can produce, which is a different and unknown number.
+#
+# Dropping the field silently would leave them reading a report against an expectation the platform
+# never agreed to, which is the most expensive kind of wrong answer this platform can give: one that
+# looks entirely ordinary.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: stages-with-rate
+  team: advice-implementation
+  application: quotes
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads:
+    - name: quotes-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          - duration: 2m
+            targetUsers: 50
+            targetRate: 400
+      scenarios:
+        - name: request-quote
+          weight: 100
+          method: GET
+          path: /api/quotes/latest

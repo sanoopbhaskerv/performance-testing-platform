@@ -206,7 +206,20 @@ public record PerformanceTestSpecification(
             scenarios = immutable(scenarios);
         }
 
-        /** Peak concurrent users this workload asks for, used by admission control. */
+        /**
+         * Peak concurrent users this workload asks for, used by admission control.
+         *
+         * <p>For an open model this is the declared {@code maxConcurrency}, <b>not</b> the arrival
+         * rate. The two are different quantities and only one of them describes how much of a
+         * generator the test occupies: 500 requests a second against a 20 ms endpoint is about ten
+         * concurrent requests, and against a 2 s endpoint it is a thousand. Budgeting against the
+         * rate would make a heavy test look free and a light one look enormous, and admission would
+         * be protecting the wrong number.
+         *
+         * <p>A model with no ceiling reports zero rather than guessing one. The validator refuses
+         * such a specification outright, so this is only reached while validating a document that
+         * is already going to be rejected.
+         */
         public int peakUsers() {
             if (type == WorkloadType.BROWSER) {
                 return browserUsers == null ? 0 : browserUsers;
@@ -214,7 +227,29 @@ public record PerformanceTestSpecification(
             if (model == null || model.stages().isEmpty()) {
                 return 0;
             }
+            if (model.isArrivalRate()) {
+                return model.maxConcurrency() == null ? 0 : model.maxConcurrency();
+            }
             return model.stages().stream().mapToInt(LoadStage::targetUsers).max().orElse(0);
+        }
+
+        /**
+         * Peak requests per second this workload asks for, or zero in a closed model.
+         *
+         * <p>Reported alongside the concurrency ceiling rather than instead of it: a rate is what a
+         * consumer asked for and what the report should quote back, and the ceiling is what the
+         * platform reserved.
+         */
+        public int peakArrivalRate() {
+            if (model == null || !model.isArrivalRate()) {
+                return 0;
+            }
+            return model.stages().stream()
+                    .map(LoadStage::targetRate)
+                    .filter(java.util.Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .max()
+                    .orElse(0);
         }
 
         /**
@@ -279,19 +314,64 @@ public record PerformanceTestSpecification(
         }
     }
 
-    /** How load is shaped over time. */
-    public record LoadModel(LoadModelType type, List<LoadStage> stages) {
+    /**
+     * How load is shaped over time.
+     *
+     * @param type    closed ({@code stages}) or open ({@code arrival-rate}); see {@link LoadModelType}
+     * @param stages  the shape, in order. Stage order is meaningful — reordering describes a
+     *                different test
+     * @param maxConcurrency the ceiling on requests in flight at once. <b>Required for
+     *                {@code arrival-rate} and refused for {@code stages}</b>, where the user count
+     *                <em>is</em> the concurrency. In an open model this is the only thing standing
+     *                between a stalled target and a generator that accumulates in-flight requests
+     *                until it dies and reports its own failure as the target's — and it is what
+     *                admission control budgets against, because a rate says nothing about how much
+     *                of a generator a test will occupy
+     */
+    public record LoadModel(LoadModelType type, List<LoadStage> stages, Integer maxConcurrency) {
 
         public LoadModel {
             stages = immutable(stages);
         }
+
+        /** The shape that predates the open model. */
+        public LoadModel(LoadModelType type, List<LoadStage> stages) {
+            this(type, stages, null);
+        }
+
+        public boolean isArrivalRate() {
+            return type != null && type.isOpen();
+        }
     }
 
     /**
-     * One stage of a staged load model: hold or ramp toward {@code targetUsers} over
-     * {@code duration}. A final stage targeting zero users expresses ramp-down.
+     * One stage of a load model: hold or move toward a target over {@code duration}.
+     *
+     * <p>Which target depends on the model. A closed model reads {@code targetUsers}; an open one
+     * reads {@code targetRate}. A final stage targeting zero expresses ramp-down in either.
+     *
+     * <p>Both fields exist on one record rather than in two stage types because a stage is a
+     * point on a shape, and the shape's arithmetic — durations, ordering, ramp-down — is identical
+     * whichever quantity is being ramped. The validator refuses a stage that sets the field its
+     * model does not read, so a document cannot quietly mean something other than it says.
+     *
+     * @param targetUsers concurrent users, for a closed model
+     * @param targetRate  requests per second, for an open model. Null in a closed model
      */
-    public record LoadStage(Duration duration, int targetUsers) {
+    public record LoadStage(Duration duration, int targetUsers, Integer targetRate) {
+
+        /** The shape that predates the open model. */
+        public LoadStage(Duration duration, int targetUsers) {
+            this(duration, targetUsers, null);
+        }
+
+        /** What this stage asks for, in whichever unit its model reads. Zero means ramp-down. */
+        public int target(LoadModelType type) {
+            if (type != null && type.isOpen()) {
+                return targetRate == null ? 0 : targetRate;
+            }
+            return targetUsers;
+        }
     }
 
     /**

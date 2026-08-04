@@ -509,13 +509,19 @@
         "stages"
       ],
       "additionalProperties": false,
-      "description": "Load, stress, spike and endurance tests are all expressed as a staged ramp. The platform models the shape rather than naming fixed test types.",
+      "description": "Load, stress, spike and endurance tests are all expressed as a staged shape; the platform models the shape rather than naming fixed test types. Two shapes: stages holds a number of concurrent users and lets throughput be whatever they produce, and arrival-rate sends a stated number of requests per second whatever the system does with them. See docs/operations/load-models.md.",
       "properties": {
         "type": {
           "type": "string",
           "enum": [
-            "stages"
+            "stages",
+            "arrival-rate"
           ]
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The most requests allowed in flight at once. Required for arrival-rate and refused for stages, where the user count is the concurrency. In an open model a stalled target accumulates in-flight requests without bound until the generator itself fails and the run reports that as the target's failure. Admission control budgets against this number, never against the rate."
         },
         "stages": {
           "type": "array",
@@ -523,8 +529,7 @@
           "items": {
             "type": "object",
             "required": [
-              "duration",
-              "targetUsers"
+              "duration"
             ],
             "additionalProperties": false,
             "properties": {
@@ -534,12 +539,83 @@
               "targetUsers": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Stage order is significant: stages run in sequence, and a final stage targeting zero expresses ramp-down."
+                "description": "Concurrent users, for a stages model. Stage order is significant: stages run in sequence, and a final stage targeting zero expresses ramp-down."
+              },
+              "targetRate": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Requests per second, for an arrival-rate model. A final stage targeting zero expresses ramp-down."
               }
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "arrival-rate"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "maxConcurrency"
+            ],
+            "properties": {
+              "stages": {
+                "items": {
+                  "required": [
+                    "targetRate"
+                  ],
+                  "not": {
+                    "required": [
+                      "targetUsers"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "stages"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "maxConcurrency"
+              ]
+            },
+            "properties": {
+              "stages": {
+                "items": {
+                  "required": [
+                    "targetUsers"
+                  ],
+                  "not": {
+                    "required": [
+                      "targetRate"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "scenario": {
       "type": "object",

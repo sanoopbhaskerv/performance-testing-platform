@@ -135,6 +135,53 @@ else
   PROVIDER="fake"
 fi
 
+# ── The Custom Thread Groups plugin ───────────────────────────────────────
+#
+# Every plan the platform renders needs it: staged load uses the Ultimate Thread Group so
+# concurrency glides rather than steps at stage boundaries, and an arrival-rate model uses the
+# Free-Form Arrivals Thread Group, which has no vanilla equivalent at all.
+#
+# Installed here rather than left as an instruction because the control plane refuses to start
+# without it — and it refuses because JMeter does not fail on an element it cannot resolve. It logs,
+# skips the thread group, and exits successfully, so a missing plugin would present as a run that
+# succeeded having generated no load.
+ensure_jmeter_plugin() {
+  local home ext
+  home="$(dirname "$(dirname "$(readlink -f "$(command -v jmeter)" 2>/dev/null || command -v jmeter)")")"
+  # Homebrew's `jmeter` is a wrapper in bin/; the real install is under libexec.
+  [ -d "$home/libexec/lib/ext" ] && home="$home/libexec"
+  ext="$home/lib/ext"
+
+  if ls "$ext"/jmeter-plugins-casutg*.jar >/dev/null 2>&1; then
+    return 0
+  fi
+
+  step "Installing the JMeter Custom Thread Groups plugin"
+  if [ ! -x "$home/bin/PluginsManagerCMD.sh" ]; then
+    # The plugins manager ships with JMeter but its CLI wrapper is generated, and it needs
+    # cmdrunner under exactly this name to run at all.
+    curl -fsSL "https://repo1.maven.org/maven2/kg/apc/cmdrunner/2.3/cmdrunner-2.3.jar" \
+      -o "$home/lib/cmdrunner-2.3.jar" 2>/dev/null || true
+    java -cp "$ext"/jmeter-plugins-manager-*.jar \
+      org.jmeterplugins.repository.PluginManagerCMDInstaller >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$home/bin/PluginsManagerCMD.sh" ] \
+      && "$home/bin/PluginsManagerCMD.sh" install jpgc-casutg >/dev/null 2>&1 \
+      && ls "$ext"/jmeter-plugins-casutg*.jar >/dev/null 2>&1; then
+    ok "Installed jpgc-casutg into $ext"
+  else
+    warn "Could not install the plugin automatically. Run:"
+    warn "  $home/bin/PluginsManagerCMD.sh install jpgc-casutg"
+    warn "Falling back to the fake provider, which generates no load."
+    PROVIDER="fake"
+  fi
+}
+
+if [ "$PROVIDER" = "local-jmeter" ]; then
+  ensure_jmeter_plugin
+fi
+
 mkdir -p "$LOG_DIR"
 
 # Readiness is "the server answered at all", deliberately — note the absence of curl's -f.

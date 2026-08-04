@@ -349,31 +349,54 @@ public final class SpecificationParser {
             findings.add(typeError(path, "an object"));
             return null;
         }
-        rejectUnknownFields(node, path, Set.of("type", "stages"), findings);
+        rejectUnknownFields(node, path, Set.of("type", "stages", "maxConcurrency"), findings);
+
+        LoadModelType type = enumValue(node, "type", path + "/type", LoadModelType::from, findings);
+
+        // The stage parser needs to know which quantity this model reads, so it can say which field
+        // is missing rather than reporting the closed model's requirement to somebody writing an
+        // open one. A model whose type failed to parse is read as closed: its stages will be
+        // reported against the type the document appears to have asked for.
+        boolean arrivalRate = type != null && type.isOpen();
 
         return new LoadModel(
-                enumValue(node, "type", path + "/type", LoadModelType::from, findings),
-                each(node.get("stages"), path + "/stages", this::loadStage, findings));
+                type,
+                each(node.get("stages"), path + "/stages",
+                        (stageNode, stagePath, stageFindings) ->
+                                loadStage(stageNode, stagePath, stageFindings, arrivalRate),
+                        findings),
+                integer(node, "maxConcurrency", path + "/maxConcurrency", findings));
     }
 
-    private LoadStage loadStage(JsonNode node, String path, List<ValidationFinding> findings) {
-        rejectUnknownFields(node, path, Set.of("duration", "targetUsers"), findings);
+    private LoadStage loadStage(JsonNode node, String path, List<ValidationFinding> findings,
+            boolean arrivalRate) {
+
+        rejectUnknownFields(node, path, Set.of("duration", "targetUsers", "targetRate"), findings);
 
         Duration duration = duration(node, "duration", path + "/duration", findings);
 
         // Absence must be reported here rather than defaulting to zero. Zero is a legitimate
-        // authored value — a final stage targeting zero users is how ramp-down is expressed — so
-        // once the default is applied, a stage that forgot its user count is indistinguishable
-        // from one that deliberately generates no load.
-        if (!node.hasNonNull("targetUsers")) {
+        // authored value — a final stage targeting zero is how ramp-down is expressed — so once the
+        // default is applied, a stage that forgot its target is indistinguishable from one that
+        // deliberately generates no load.
+        String required = arrivalRate ? "targetRate" : "targetUsers";
+        if (!node.hasNonNull(required)) {
             findings.add(ValidationFinding.error("spec.parse.requiredField.missing",
-                    path + "/targetUsers",
-                    "targetUsers is required.",
-                    "State the target concurrent users for this stage. Use 0 to ramp down."));
+                    path + "/" + required,
+                    required + " is required.",
+                    arrivalRate
+                            ? "State the requests per second for this stage. Use 0 to ramp down."
+                            : "State the target concurrent users for this stage. Use 0 to ramp "
+                                    + "down."));
         }
 
         Integer targetUsers = integer(node, "targetUsers", path + "/targetUsers", findings);
-        return new LoadStage(duration, targetUsers == null ? 0 : targetUsers);
+        Integer targetRate = integer(node, "targetRate", path + "/targetRate", findings);
+
+        // Both are carried through as authored, including the one this model does not read. The
+        // semantic validator refuses a stage that sets the wrong field, and it can only do that if
+        // the parser has not already dropped it.
+        return new LoadStage(duration, targetUsers == null ? 0 : targetUsers, targetRate);
     }
 
     private ScenarioSpec scenario(JsonNode node, String path, List<ValidationFinding> findings) {

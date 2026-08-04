@@ -66,7 +66,18 @@ export function blockerFor(step: StepId, draft: StudioDraft): string | null {
       return null;
 
     case 'load':
-      if (draft.load.peakUsers < 1) {
+      if (draft.load.model === 'rate') {
+        if (draft.load.peakRate < 1) {
+          return 'The test needs at least one request per second.';
+        }
+        // Not a nicety. A rate model with no ceiling accumulates in-flight requests whenever the
+        // target slows, until the load generator fails and the run reports that as the target's
+        // failure — so the platform refuses the specification outright, and this says so before
+        // somebody reaches Save and meets the refusal there.
+        if (draft.load.maxConcurrency < 1) {
+          return 'A rate test needs a limit on how many requests can be waiting at once.';
+        }
+      } else if (draft.load.peakUsers < 1) {
         return 'The test needs at least one user.';
       }
       if (

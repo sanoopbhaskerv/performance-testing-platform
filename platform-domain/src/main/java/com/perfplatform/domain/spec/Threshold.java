@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 
 /**
  * A typed objective threshold parsed from its authored form: {@code 750ms}, {@code 8s},
- * {@code 1%}, {@code 0.1score}.
+ * {@code 1%}, {@code 0.1score}, {@code 380/s}.
  *
  * <p>Objectives are the pass/fail contract of a performance test, so a threshold must never be
  * compared as text. Parsing it into a value and a unit at specification time means an unreadable
@@ -27,11 +27,23 @@ public record Threshold(BigDecimal value, Unit unit) {
         /** A rate expressed as a percentage, such as an error-rate ceiling. */
         PERCENT,
         /** A unit interval score, normalized to milli-score so comparisons stay integral. */
-        SCORE
+        SCORE,
+        /**
+         * A rate of events per second, such as a throughput floor.
+         *
+         * <p>Added with the open load model, where it stops being optional: when the arrival rate is
+         * an input rather than an output, failing to <em>achieve</em> the rate is the finding, and
+         * an objective is the only place a run can say so. Until then a throughput objective could
+         * not be written at all — every unit this type accepted described a duration, a proportion
+         * or a score, so {@code 380/s} was refused and the studio's own throughput objective was
+         * unusable.
+         */
+        PER_SECOND
     }
 
+    // "/s" is listed before "s" so that 380/s matches the rate rather than failing on the slash.
     private static final Pattern PATTERN =
-            Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|s|%|score)$");
+            Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|/s|s|%|score)$");
 
     public Threshold {
         if (value == null) {
@@ -66,8 +78,8 @@ public record Threshold(BigDecimal value, Unit unit) {
         Matcher matcher = PATTERN.matcher(text);
         if (!matcher.matches()) {
             throw new IllegalArgumentException(
-                    "Threshold '" + raw + "' must be a number followed by ms, s, %, or score "
-                            + "(for example 750ms, 8s, 1%, or 0.1score)");
+                    "Threshold '" + raw + "' must be a number followed by ms, s, %, score or /s "
+                            + "(for example 750ms, 8s, 1%, 0.1score, or 380/s)");
         }
 
         BigDecimal amount = new BigDecimal(matcher.group(1));
@@ -75,6 +87,7 @@ public record Threshold(BigDecimal value, Unit unit) {
             case "ms" -> new Threshold(amount, Unit.MILLISECONDS);
             case "s" -> new Threshold(amount.multiply(BigDecimal.valueOf(1000)), Unit.MILLISECONDS);
             case "%" -> new Threshold(amount, Unit.PERCENT);
+            case "/s" -> new Threshold(amount, Unit.PER_SECOND);
             case "score" -> new Threshold(amount.multiply(BigDecimal.valueOf(1000)), Unit.SCORE);
             default -> throw new IllegalStateException("Unreachable unit: " + matcher.group(2));
         };
@@ -92,6 +105,7 @@ public record Threshold(BigDecimal value, Unit unit) {
             case PERCENT -> "%";
             case SCORE -> "score";
             case MILLISECONDS -> "ms";
+            case PER_SECOND -> "/s";
         };
     }
 

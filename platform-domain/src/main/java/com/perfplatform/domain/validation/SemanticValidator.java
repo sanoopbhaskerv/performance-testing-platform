@@ -54,6 +54,16 @@ public final class SemanticValidator {
 
     private static final int MAX_NAME_LENGTH = 63;
 
+    /**
+     * Below this implied response-time budget, a concurrency ceiling is worth mentioning.
+     *
+     * <p>A hundred milliseconds is the point where "only a cache lookup can keep up with this" stops
+     * being an exaggeration. Above it the ceiling is plausible for an ordinary API and the platform
+     * has nothing useful to say; below it, most targets will be throttled by the ceiling rather than
+     * measured at the rate.
+     */
+    private static final long TIGHT_RESPONSE_BUDGET_MILLIS = 100;
+
     private SemanticValidator() {
     }
 
@@ -524,9 +534,11 @@ public final class SemanticValidator {
                 findings.add(ValidationFinding.error("spec.workload.model.type.missing",
                         path + "/model/type",
                         "A load model requires a type.",
-                        "Set type: stages. Load, stress, spike and endurance tests are all "
-                                + "expressed as a staged ramp."));
+                        "Set type: stages for a fixed number of concurrent users, or "
+                                + "type: arrival-rate for a fixed number of requests per second."));
             }
+
+            boolean arrivalRate = workload.model().isArrivalRate();
             var stages = workload.model().stages();
             for (int s = 0; s < stages.size(); s++) {
                 var stage = stages.get(s);
@@ -537,13 +549,16 @@ public final class SemanticValidator {
                             stagePath + "/duration",
                             "A stage requires a positive duration.", null));
                 }
-                if (stage.targetUsers() < 0) {
-                    findings.add(ValidationFinding.error("spec.workload.stage.users.negative",
-                            stagePath + "/targetUsers",
-                            "targetUsers must not be negative.", null));
+                if (arrivalRate) {
+                    validateArrivalRateStage(stage, stagePath, findings);
+                } else {
+                    validateStagedStage(stage, stagePath, findings);
                 }
             }
-            if (workload.peakUsers() == 0) {
+
+            if (arrivalRate) {
+                validateConcurrencyCeiling(workload, path, findings);
+            } else if (workload.peakUsers() == 0) {
                 findings.add(ValidationFinding.error("spec.workload.stage.users.allZero",
                         path + "/model/stages",
                         "Every stage targets zero users, so this workload generates no load.",
@@ -565,6 +580,120 @@ public final class SemanticValidator {
                     path + "/browserProfile",
                     "browserProfile is ignored for a protocol workload.",
                     "Move it to a browser workload, or remove it from this workload."));
+        }
+    }
+
+    /** A closed-model stage: users are the target, and a rate would not be read. */
+    private static void validateStagedStage(PerformanceTestSpecification.LoadStage stage,
+            String stagePath, List<ValidationFinding> findings) {
+
+        if (stage.targetUsers() < 0) {
+            findings.add(ValidationFinding.error("spec.workload.stage.users.negative",
+                    stagePath + "/targetUsers",
+                    "targetUsers must not be negative.", null));
+        }
+        // Refused rather than ignored. A stage carrying a rate in a closed model was written by
+        // somebody who believes the run will send that many requests a second, and it will not —
+        // it will send whatever the users can. Silently dropping the field would leave them
+        // reading a result against an expectation the platform never agreed to.
+        if (stage.targetRate() != null) {
+            findings.add(ValidationFinding.error("spec.workload.stage.rate.notApplicable",
+                    stagePath + "/targetRate",
+                    "targetRate has no meaning in a stages model, where throughput is whatever "
+                            + "the declared users produce.",
+                    "Set type: arrival-rate to ask for a rate, or remove targetRate and state the "
+                            + "users you want."));
+        }
+    }
+
+    /** An open-model stage: the rate is the target, and a user count would not be read. */
+    private static void validateArrivalRateStage(PerformanceTestSpecification.LoadStage stage,
+            String stagePath, List<ValidationFinding> findings) {
+
+        if (stage.targetRate() == null) {
+            findings.add(ValidationFinding.error("spec.workload.stage.rate.missing",
+                    stagePath + "/targetRate",
+                    "An arrival-rate stage requires targetRate.",
+                    "State the requests per second this stage should send. A final stage with "
+                            + "targetRate: 0 expresses ramp-down."));
+        } else if (stage.targetRate() < 0) {
+            findings.add(ValidationFinding.error("spec.workload.stage.rate.negative",
+                    stagePath + "/targetRate",
+                    "targetRate must not be negative.", null));
+        }
+        if (stage.targetUsers() != 0) {
+            findings.add(ValidationFinding.error("spec.workload.stage.users.notApplicable",
+                    stagePath + "/targetUsers",
+                    "targetUsers has no meaning in an arrival-rate model, where concurrency is "
+                            + "whatever the target's latency produces.",
+                    "Remove targetUsers. The ceiling on concurrency is model.maxConcurrency."));
+        }
+    }
+
+    /**
+     * The ceiling an open model cannot run without.
+     *
+     * <p>Three findings, in descending order of how badly things go without them.
+     *
+     * <p><b>No ceiling at all is an error.</b> In an open model a stalled target accumulates
+     * in-flight requests without bound: arrivals keep producing them and nothing completes. The
+     * generator exhausts its threads or its heap, dies, and the run reports the generator's failure
+     * as the target's — a result that looks like evidence and is not.
+     *
+     * <p><b>A ceiling that implies an unreachable response time is a warning.</b> The relationship
+     * is Little's law: sustaining a rate {@code R} with at most {@code C} requests in flight
+     * requires every response to arrive within {@code C / R} seconds. A ceiling of 20 against 400
+     * requests a second means 50 ms — achievable for a cache lookup and not for much else, and if
+     * the target is slower then the ceiling rather than the rate is what limits the run, which
+     * measures the platform's own throttle rather than the system.
+     *
+     * <p>The finding states the implied budget rather than prescribing a ceiling, because only the
+     * author knows how fast their endpoint is. A warning, not an error: throttling deliberately is
+     * a legitimate thing to want.
+     *
+     * <p><b>Every stage at zero is an error</b>, for the same reason it is in a closed model: the
+     * workload would generate nothing.
+     */
+    private static void validateConcurrencyCeiling(WorkloadSpec workload, String path,
+            List<ValidationFinding> findings) {
+
+        Integer ceiling = workload.model().maxConcurrency();
+        int peakRate = workload.peakArrivalRate();
+
+        if (ceiling == null) {
+            findings.add(ValidationFinding.error("spec.workload.model.maxConcurrency.missing",
+                    path + "/model/maxConcurrency",
+                    "An arrival-rate model requires maxConcurrency.",
+                    "Set the most requests you are willing to have in flight at once. Without it, "
+                            + "a target that stalls makes this run accumulate requests until the "
+                            + "load generator itself fails — and the run would report that as the "
+                            + "target's failure."));
+        } else if (ceiling < 1) {
+            findings.add(ValidationFinding.error("spec.workload.model.maxConcurrency.invalid",
+                    path + "/model/maxConcurrency",
+                    "maxConcurrency must be at least 1.", null));
+        } else if (peakRate > 0) {
+            long impliedBudgetMillis = (ceiling * 1000L) / peakRate;
+            if (impliedBudgetMillis < TIGHT_RESPONSE_BUDGET_MILLIS) {
+                findings.add(ValidationFinding.warning(
+                        "spec.workload.model.maxConcurrency.tight",
+                        path + "/model/maxConcurrency",
+                        "With maxConcurrency " + ceiling + " and a peak of " + peakRate
+                                + "/s, this run can only reach its rate if every response arrives "
+                                + "within " + impliedBudgetMillis + "ms.",
+                        "If the target is slower than that, the ceiling rather than the rate is "
+                                + "what limits the test. Raise it to roughly rate × the slowest "
+                                + "response you expect, in seconds — or leave it if throttling is "
+                                + "what you intended."));
+            }
+        }
+
+        if (peakRate == 0) {
+            findings.add(ValidationFinding.error("spec.workload.stage.rate.allZero",
+                    path + "/model/stages",
+                    "Every stage targets zero requests per second, so this workload generates no "
+                            + "load.",
+                    "Set a positive targetRate on at least one stage."));
         }
     }
 

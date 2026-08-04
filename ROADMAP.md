@@ -17,15 +17,17 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S7** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S8** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
 > delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook,
 > browser-only Playwright execution behind the SPI and Core Web Vitals objective evaluation, and
-> **live monitoring** — runner-published snapshots, a merged durable series, live objectives and
-> rule-based observations in the console. `HANDOFF.md` §3n–§3w.
+>**live monitoring** — runner-published snapshots, a merged durable series, live objectives and
+> rule-based observations in the console — and **load models**: requests per second as well as
+> concurrent users, with the concurrency ceiling an open model cannot run without, and staged
+> concurrency that glides rather than steps. `HANDOFF.md` §3n–§3x.
 >
-> **Next: S8**, load profiles — arrival rate as well as concurrent users.
+> **Next: S9**, one run with many workloads.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -38,7 +40,7 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
-slice and S7's live monitoring are built. Everything below is still an accurate inventory of what exists and what
+slice, S7's live monitoring and S8's load models are built. Everything below is still an accurate inventory of what exists and what
 does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
@@ -171,13 +173,17 @@ Each is real, none blocks anything.
   `api_key`, `access_token` and `token` are not, so `?api_key=short-value` passes. A query string
   reaches every access log between the runner and the target. Uncovered during S3 and deliberately
   not widened there: it changes what every existing document validates as.
-- **`ConcurrencyThreadGroup` is in the runner image but unused.** The plan generator still emits
-  stepwise thread groups, so concurrency steps at stage boundaries rather than gliding. A change to
-  `JmeterWorkloadRenderer`, and it changes what the numbers mean at transitions. **This is S8's
-  work** (`PLAN.md` §11).
+- ~~**`ConcurrencyThreadGroup` is in the runner image but unused.**~~ **Done in S8** — both models
+  now render through the Custom Thread Groups plugin: the Ultimate Thread Group for staged
+  concurrency, so it glides rather than steps, and the Free-Form Arrivals Thread Group for the open
+  model. The control plane refuses to start without the plugin, because JMeter would otherwise skip
+  the thread group and report a successful run that generated no load. `HANDOFF.md` §3x.
+- ~~**Throughput objectives could not be written.**~~ **Done in S8** — `Threshold` had no per-second
+  unit, so `380/s` was refused and the studio's own throughput objective produced an invalid
+  document.
 - **Not run on EKS.** IRSA is unexercised; the kind run used a credentials Secret.
 - ~~**`platform-ui` has no test runner.**~~ **Done in S1**: vitest, jsdom and testing-library.
-  **154 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
+  **157 UI tests** now, covering `scenarioYaml.ts`, the design tokens, the studio's specification
   emitter and step rules, the report narrative, run progress and the live view's unscaling layer.
 - **`/actuator/health` returns 503 locally** (defect D6): the mail health indicator cannot reach
   SMTP. Readiness should distinguish essential dependencies from optional enrichment (CLAUDE.md §26).

@@ -63,14 +63,36 @@ export interface ValidatorDraft {
 }
 
 /**
- * The shape of the load, in the three parts a person actually thinks in.
+ * Which question the test is asking.
+ *
+ * `users` holds a number of people using the system: throughput is whatever they produce, and if the
+ * system slows down they send less. `rate` sends a stated number of requests per second whatever the
+ * system does with them, which is the only way to ask "can it sustain 400 a second?".
+ *
+ * See docs/operations/load-models.md.
+ */
+export type LoadModel = 'users' | 'rate';
+
+/**
+ * The shape of the load, in the parts a person actually thinks in.
  *
  * Not a list of stages. A stage list is how the platform expresses this and it is a poor way to ask
  * the question: someone who has never run a performance test knows how many people they expect and
  * roughly how long to hold it, and does not know that the last stage has to target zero users.
  */
 export interface LoadShape {
+  model: LoadModel;
   peakUsers: number;
+  /** Requests per second at the busiest point. Only read when the model is `rate`. */
+  peakRate: number;
+  /**
+   * The most requests allowed in flight at once, for a rate model.
+   *
+   * Mandatory in the specification and therefore here: without it a target that stalls makes the
+   * run accumulate requests until the load generator itself fails — and the run would report that
+   * as the target's failure.
+   */
+  maxConcurrency: number;
   rampUpSeconds: number;
   steadySeconds: number;
   rampDownSeconds: number;
@@ -119,7 +141,17 @@ export function newDraft(testType: TestType, team: string): StudioDraft {
     environment: 'performance',
     runnerCell: 'local',
     journeys: [],
-    load: { peakUsers: 10, rampUpSeconds: 30, steadySeconds: 120, rampDownSeconds: 15 },
+    load: {
+      model: 'users',
+      peakUsers: 10,
+      peakRate: 50,
+      // Room for half a second of response time at the default rate, which is unremarkable for an
+      // API. The screen explains the arithmetic rather than leaving this as a magic number.
+      maxConcurrency: 25,
+      rampUpSeconds: 30,
+      steadySeconds: 120,
+      rampDownSeconds: 15,
+    },
     objectives: [
       { metric: 'http.response.time', percentile: 95, journey: null, value: 1000 },
       { metric: 'http.error.rate', percentile: null, journey: null, value: 1 },

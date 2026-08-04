@@ -1,0 +1,38 @@
+# INVALID FIXTURE — expected finding: spec.workload.model.maxConcurrency.missing
+#
+# An open model with no ceiling on requests in flight. This is the failure the ceiling exists to
+# prevent: if the target stalls, arrivals keep producing requests and nothing completes, so the load
+# generator exhausts its threads or its heap and dies — and the run reports the generator's failure
+# as the target's.
+#
+# Refused at validation rather than warned about, because there is no safe default. The right
+# ceiling depends on the rate and on how slow the target is allowed to get, and a platform that
+# guessed one would be choosing how much load to abandon on the consumer's behalf.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: arrival-rate-without-ceiling
+  team: advice-implementation
+  application: quotes
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads:
+    - name: quotes-rate
+      type: protocol
+      engine: jmeter
+      model:
+        type: arrival-rate
+        stages:
+          - duration: 2m
+            targetRate: 400
+      scenarios:
+        - name: request-quote
+          weight: 100
+          method: GET
+          path: /api/quotes/latest

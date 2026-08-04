@@ -4,7 +4,7 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S7. Increments 0–2h and S1–S7 are complete.
+**Last updated:** Studio increment S8. Increments 0–2h and S1–S8 are complete.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -28,7 +28,7 @@ protocol results.
 
 Scope decisions taken with the user, recorded so they are not relitigated:
 
-- **vitest is approved** (§31 pause cleared) and was added in S1. **154 UI tests** where there were
+- **vitest is approved** (§31 pause cleared) and was added in S1. **157 UI tests** where there were
   none.
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
   the studio build phases. S5 removed the credentials/session blocker, but API removal still needs a
@@ -85,13 +85,14 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S6a — broker path production-readiness validation** | **Complete** | see §3u |
 | **S6 — the browser engine and Core Web Vitals** | **Complete** | see §3v |
 | **S7 — live monitoring** | **Complete** | see §3w |
-| **S8–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S8 — load profiles: rate as well as users** | **Complete** | see §3x |
+| **S9–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**1,058 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
+**1,093 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
 Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3 Rules,
-941 at S4 Validator, 1,058 at S7).
+941 at S4 Validator, 1,058 at S7, 1,093 at S8).
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -99,7 +100,7 @@ because two beans matched `TargetResolver`, and that failure hid seventeen end-t
 had been broken since S5 made target registration mandatory. The environment limits earlier sessions
 recorded — Mockito self-attach, socket binding — did not recur with Docker running.
 
-**154 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
+**157 UI tests green** — there were none before S1. `npm --prefix platform-ui test`.
 
 **Nothing is pushed.** Pushing, tagging and opening a PR still require explicit authorization
 (CLAUDE.md §6).
@@ -1574,7 +1575,7 @@ hybrid execution is now rejected explicitly until the S9/S11 multi-plan work.
 ### Deliberately left for S7 and later
 
 - ~~Live progress snapshots from runners are S7.~~ Built — §3w.
-- Arrival-rate sizing is S8.
+- ~~Arrival-rate sizing is S8.~~ Built — §3x.
 - Multi-plan hybrid orchestration is S9/S11.
 - Git-pinned Playwright import and the recorder remain S10.
 
@@ -1673,7 +1674,7 @@ made target registration mandatory, `RunLifecycleEndToEndTest` had been provisio
 with no registered target and failing with `PROVISIONING_FAILED` — the platform behaving correctly.
 The test now registers one explicitly rather than relying on YAML rows the truncate removes.
 
-Together these are why the branch now has its first fully green `mvn clean verify`: **1,058 tests,
+Together these are why the branch got its first fully green `mvn clean verify` at S7: **1,058 tests,
 0 failures, 0 skipped**, across all 15 modules with Testcontainers.
 
 ### Verified with real load
@@ -1704,6 +1705,112 @@ severities.
 - **Cluster verification.** The Python and Node reducers and both entrypoint loops have not run in a
   pod. `docs/operations/local-kubernetes-run.md` §7 is the procedure, including the two-shard
   generator-kill check that is the only real test of `RUNNER_SILENT`.
+
+---
+
+## 3x. S8 — load profiles: rate as well as users
+
+**S8 is complete.** A test can now hold a number of **requests per second** instead of a number of
+users, and staged concurrency **glides** through its profile instead of stepping at every boundary.
+Both were verified against a real JMeter with the plugin installed, through the local provider, with
+real load.
+
+**The contract is [`docs/operations/load-models.md`](docs/operations/load-models.md).** What follows
+is why it is shaped this way.
+
+### Two models, because they answer different questions
+
+A closed model (`stages`) holds users, and throughput is an *output*: if the system slows down the
+users send less, so the applied load falls with the system's health. An open model (`arrival-rate`)
+holds a rate, and throughput is an *input*. Only the second can ask "can it sustain 400 a second?",
+and only the second shows a stall for what it was — the closed model's well-known blind spot is that
+a stalled system receives less traffic during the stall and the test under-reports it.
+
+A stage sets the field its model reads and **not the other one**, refused rather than ignored.
+Whoever writes `targetRate: 400` under a staged model believes the run will send 400 a second; it
+will send whatever 50 users produce, and they would read the report against an expectation the
+platform never agreed to.
+
+### `maxConcurrency` is mandatory, and admission reads it rather than the rate
+
+In an open model a stalled target accumulates in-flight requests without bound: at 400/s, ten seconds
+of stall is four thousand requests. The generator exhausts its threads or heap, dies, and the run
+reports the generator's failure as the target's. There is no safe default — the right ceiling depends
+on the rate and on how slow the target may get — so a specification without one is refused.
+
+Admission budgets against the ceiling because **a rate says nothing about how much of a generator a
+test occupies**: 500/s against a 20 ms endpoint is about ten concurrent requests, and against a 2 s
+endpoint it is a thousand. Budgeting against the rate would let a heavy test through as free and hold
+a light one back as enormous.
+
+Validation warns when the ceiling implies a response-time budget under 100 ms (Little's law:
+`C / R` seconds), stating the figure rather than prescribing a ceiling — only the author knows how
+fast their endpoint is. A warning and not an error, because throttling deliberately is legitimate.
+
+### Both models render through the Custom Thread Groups plugin
+
+Closed models became one vanilla thread group per stage, each starting from zero, so concurrency
+stepped at every boundary. They now become **one Ultimate Thread Group** whose layers sum to the
+requested curve ({@code ConcurrencyProfile}); open models become **one Free-Form Arrivals Thread
+Group** whose schedule rows map one-to-one onto the stages.
+
+The decomposition walks the stages carrying a stack of layers: a rise pushes the difference, a fall
+pops newest-first and splits the top layer when it holds more than the fall removes, and whatever is
+still standing at the end stops immediately. Newest-first is about the story rather than the
+arithmetic — closing the oldest layer gives the right total at every instant while claiming the users
+who arrived for a spike were the ones that stayed.
+
+**This changed what existing numbers mean at stage transitions**, which the plan required be said out
+loud. Steady-state figures are unaffected; runs either side of this change are not directly
+comparable while load is moving.
+
+### The plugin is now a hard requirement, and the control plane refuses to start without it
+
+`jpgc-casutg` was already in the runner image and unused (the outstanding `ROADMAP.md` item, now
+closed). A local development JMeter usually does not have it, so `./scripts/start-platform.sh`
+installs it, and `LocalJmeterExecutionProvider.requireCustomThreadGroups` refuses startup otherwise.
+
+A refusal rather than a warning because **JMeter does not fail on an element it cannot resolve** — it
+logs, skips the thread group, and exits successfully. A missing plugin would present as a run that
+completed having generated no load, which is the single worst outcome this platform can produce. The
+check searches both `lib/ext` and `libexec/lib/ext` after resolving symlinks, because a package
+manager's `jmeter` is usually a wrapper somewhere else entirely (found the hard way: the first
+version refused to start on a machine where the plugin was correctly installed).
+
+### A throughput objective was unwritable, and now is not
+
+`http.throughput` has been an evaluated metric since 1D, but `Threshold` accepted only `ms`, `s`, `%`
+and `score` — so `380/s` was refused and the studio's own throughput objective produced an invalid
+document. `Unit.PER_SECOND` fixes it. This stops being optional in an open model: when the rate is an
+input, failing to *achieve* it is the finding, and an objective is the only place a run can say so.
+
+### Extending the canonical form without invalidating every stored digest
+
+The open model's two fields are emitted into the canonical form **only for an open model**, so a
+closed-model document canonicalizes byte-for-byte as before and every stored definition version still
+verifies against its recorded digest. Safe against collision because the discriminator is inside the
+canonical form one line above: a reader knows from `.model.type` which fields to expect. Conditional
+on the *type*, never on whether a value is present — that distinction is what keeps "absent" and
+"empty" from colliding everywhere else in that encoding.
+
+### Verified with real load
+
+- **Open model**, demo service, 20s→20/s, 40s→60/s, 15s→0: **2,239 samples against ~2,250
+  specified** (0.5%), with the live rate climbing 17 → 23 → 34.6 → 46.1 → 51.9/s and the throughput
+  objective passing at 30/s against a 25/s floor.
+- **Closed model**, the shipped demo specification: active users climbed **1 → 3 → 4 → 5 → 6 → 7 → 8
+  → 9** and back down. The old rendering would have jumped 5 → 10 at the boundary. The glide is
+  visible in S7's live view, which is a pleasant accident of doing them in this order.
+- Both thread-group elements were validated by running candidate plans through JMeter and checking
+  observed behaviour — arrival counts and the active-thread curve — rather than by reading plugin
+  documentation.
+
+### Deliberately not done
+
+- **Arrival rate for browser workloads.** A browser cohort is a fixed number of real browsers
+  measuring the experience; a rate of browser journeys would be a request for a number of machines.
+- **Per-scenario rates.** A rate applies to the workload and scenarios divide it by weight.
+- **Cluster verification.** As with S7, the runner image path is unexercised.
 
 ---
 
@@ -1785,10 +1892,12 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: S8, load profiles — arrival rate as well as concurrent users.** `PLAN.md` §11. Add
-`LoadModelType.ARRIVAL_RATE` beside `STAGES`, with a required `maxConcurrency` ceiling that admission
-reads instead of the rate, and use the `ConcurrencyThreadGroup` already sitting unused in the runner
-image so staged load glides instead of stepping.
+**Next: S9, one run with many workloads.** `PLAN.md` §11 — the structural change §2 identified.
+`execution_plans` gains `workload_name` and a run references a set of them; `runner_shards` gains
+`workload_name` with a unique key on `(run_id, workload_name, shard_index)`; `RunWorkloadService`
+becomes per-workload and analysis merges sample sets across engines. Its acceptance test is a
+specification whose second workload names an unregistered engine being **refused at validation**
+rather than silently dropped.
 
 Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
 `docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static
@@ -1798,8 +1907,9 @@ Already done, so **do not** repeat from earlier plans: the report endpoint, arti
 per-request authorization and digest verification, persisted run metrics, the Kubernetes provider,
 the S3 artifact store, importers, datasets, the studio screens through S6, broker-backed
 `run://session` delivery, S6a's production-readiness runbook, browser-only Playwright/Core Web
-Vitals support, and **S7's live monitoring** — runner snapshots, the merge, the series, the progress
-endpoint and the Monitor screen.
+Vitals support, **S7's live monitoring** — runner snapshots, the merge, the series, the progress
+endpoint and the Monitor screen — and **S8's load models**: the arrival-rate model, its mandatory
+concurrency ceiling, gliding staged concurrency, and the per-second threshold unit.
 
 Also worth knowing: `platform-ui/src/App.css` is **not imported by anything** — `main.tsx` loads
 only `index.css`. Rules added to App.css silently do nothing.

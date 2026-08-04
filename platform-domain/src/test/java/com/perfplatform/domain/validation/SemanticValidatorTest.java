@@ -177,6 +177,103 @@ class SemanticValidatorTest {
                     .contains("spec.workload.stage.duration.invalid");
         }
 
+        // ── The open model ───────────────────────────────────────────────────
+        //
+        // The rules here exist because an open model can destroy the thing measuring it. Arrivals
+        // keep producing requests whatever the target does with them, so a stall accumulates work
+        // without bound until the generator fails — and reports its own failure as the target's.
+
+        @Test
+        @DisplayName("an arrival-rate model with no concurrency ceiling is rejected outright")
+        void rejectsArrivalRateWithoutCeiling() {
+            var workload = arrivalRate(null, new LoadStage(Duration.ofMinutes(2), 0, 400));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.model.maxConcurrency.missing");
+        }
+
+        @Test
+        @DisplayName("a ceiling implying an unreachable response time is a warning, with the figure")
+        void warnsWhenTheImpliedResponseBudgetIsTight() {
+            // Little's law: 400 a second through 20 in flight needs every response inside 50ms.
+            // Achievable for a cache lookup and not for much else — so if the target is slower, the
+            // ceiling rather than the rate is what limits the run. A warning rather than an error,
+            // because throttling deliberately is a legitimate thing to want.
+            var workload = arrivalRate(20, new LoadStage(Duration.ofMinutes(2), 0, 400));
+
+            var findings = SemanticValidator.validate(withWorkloads(List.of(workload)));
+
+            assertThat(findings.codes()).contains("spec.workload.model.maxConcurrency.tight");
+            assertThat(findings.errors()).isEmpty();
+            assertThat(findings.findings())
+                    .filteredOn(finding -> finding.code()
+                            .equals("spec.workload.model.maxConcurrency.tight"))
+                    .singleElement()
+                    // The figure, not a prescription: only the author knows how fast the endpoint is.
+                    .satisfies(finding -> assertThat(finding.message()).contains("within 50ms"));
+        }
+
+        @Test
+        @DisplayName("a ceiling that leaves an ordinary API room passes without comment")
+        void acceptsASufficientCeiling() {
+            // 250 in flight at 400 a second implies a 625ms budget, which is unremarkable.
+            var workload = arrivalRate(250, new LoadStage(Duration.ofMinutes(2), 0, 400));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .doesNotContain("spec.workload.model.maxConcurrency.tight",
+                            "spec.workload.model.maxConcurrency.missing");
+        }
+
+        @Test
+        @DisplayName("an arrival-rate stage with no rate is rejected")
+        void rejectsArrivalRateStageWithoutRate() {
+            var workload = arrivalRate(100, new LoadStage(Duration.ofMinutes(2), 0, null));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.rate.missing");
+        }
+
+        @Test
+        @DisplayName("every stage at zero requests per second generates nothing, and is rejected")
+        void rejectsAllZeroRates() {
+            var workload = arrivalRate(100, new LoadStage(Duration.ofMinutes(2), 0, 0));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.rate.allZero");
+        }
+
+        @Test
+        @DisplayName("a user count in an open model is refused, not ignored")
+        void rejectsUsersInAnOpenModel() {
+            // Ignoring it would leave the author believing they had capped concurrency at 50 when
+            // the only thing capping it is maxConcurrency.
+            var workload = arrivalRate(250, new LoadStage(Duration.ofMinutes(2), 50, 400));
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.users.notApplicable");
+        }
+
+        @Test
+        @DisplayName("a rate in a closed model is refused, not ignored")
+        void rejectsRateInAClosedModel() {
+            // Whoever wrote this expects 400 requests a second. The run will send whatever 50 users
+            // produce, which is a different and unknown number — so they would be reading a report
+            // against an expectation the platform never agreed to.
+            var workload = new WorkloadSpec("api-load", WorkloadType.PROTOCOL, "jmeter", null,
+                    new LoadModel(LoadModelType.STAGES,
+                            List.of(new LoadStage(Duration.ofMinutes(2), 50, 400))),
+                    List.of(), null, null, null);
+
+            assertThat(SemanticValidator.validate(withWorkloads(List.of(workload))).codes())
+                    .contains("spec.workload.stage.rate.notApplicable");
+        }
+
+        private WorkloadSpec arrivalRate(Integer maxConcurrency, LoadStage... stages) {
+            return new WorkloadSpec("api-rate", WorkloadType.PROTOCOL, "jmeter", null,
+                    new LoadModel(LoadModelType.ARRIVAL_RATE, List.of(stages), maxConcurrency),
+                    List.of(), null, null, null);
+        }
+
         @Test
         @DisplayName("duplicate workload names are rejected, because objectives reference them")
         void rejectsDuplicateWorkloadNames() {

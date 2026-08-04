@@ -186,6 +186,30 @@ public final class SpecificationCanonicalizer {
                 field(out, prefix + ".model", null);
             } else {
                 field(out, prefix + ".model.type", name(model.type()));
+
+                // ── Extending this encoding without invalidating every stored digest ──────────
+                //
+                // The open model's two fields are emitted *only for an open model*. A closed-model
+                // document therefore canonicalizes byte-for-byte as it did before they existed, so
+                // every definition version already stored still verifies against its recorded
+                // digest — which is the whole point of storing one.
+                //
+                // This is safe against collision because the discriminator is inside the canonical
+                // form itself, one line above: a reader knows from `.model.type` exactly which
+                // fields to expect, and no other field can produce these keys. It is conditional on
+                // the *type*, never on whether a value happens to be present — that distinction is
+                // what keeps "absent" and "empty" from colliding everywhere else in this file.
+                //
+                // The ceiling is part of an open-model test's identity, not metadata about it: two
+                // runs at the same rate through different ceilings are different tests, and the one
+                // with the lower ceiling may never have reached the rate at all.
+                boolean openModel = model.type() != null && model.type().isOpen();
+                if (openModel) {
+                    field(out, prefix + ".model.maxConcurrency",
+                            model.maxConcurrency() == null
+                                    ? null : String.valueOf(model.maxConcurrency()));
+                }
+
                 field(out, prefix + ".model.stages.count", String.valueOf(model.stages().size()));
                 for (int s = 0; s < model.stages().size(); s++) {
                     LoadStage stage = model.stages().get(s);
@@ -194,6 +218,11 @@ public final class SpecificationCanonicalizer {
                     field(out, prefix + ".model.stages[" + s + "].duration", duration(stage.duration()));
                     field(out, prefix + ".model.stages[" + s + "].targetUsers",
                             String.valueOf(stage.targetUsers()));
+                    if (openModel) {
+                        field(out, prefix + ".model.stages[" + s + "].targetRate",
+                                stage.targetRate() == null
+                                        ? null : String.valueOf(stage.targetRate()));
+                    }
                 }
             }
 

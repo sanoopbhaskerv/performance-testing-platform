@@ -12,6 +12,24 @@ import { newDraft, normalizeShares, toResourceName, includedJourneys } from './d
 import type { Journey, StudioDraft } from './draft';
 
 /**
+ * The default load shape, spread into partial overrides.
+ *
+ * Present so a test that cares about durations does not have to restate the load model, the rate
+ * and the concurrency ceiling — and so adding a field to the shape does not break tests that have
+ * nothing to say about it.
+ */
+const LOAD = {
+  model: 'users' as const,
+  peakUsers: 10,
+  peakRate: 50,
+  maxConcurrency: 25,
+  rampUpSeconds: 30,
+  steadySeconds: 120,
+  rampDownSeconds: 15,
+};
+
+
+/**
  * The studio's central claim, tested: a test built by clicking is the same document as a test
  * written by hand.
  *
@@ -56,7 +74,7 @@ describe('toSpecification', () => {
           journey({ name: 'browse-users', share: 80 }),
           journey({ name: 'submit-payment', share: 20, method: 'POST', path: '/api/payments' }),
         ],
-        load: { peakUsers: 10, rampUpSeconds: 30, steadySeconds: 60, rampDownSeconds: 15 },
+        load: { ...LOAD, peakUsers: 10, rampUpSeconds: 30, steadySeconds: 60, rampDownSeconds: 15 },
         objectives: [
           { metric: 'http.response.time', percentile: 95, journey: null, value: 400 },
           { metric: 'http.error.rate', percentile: null, journey: 'browse-users', value: 1 },
@@ -121,7 +139,7 @@ spec:
   it('states a governance ceiling, so no consumer sees a warning they cannot act on', () => {
     // The validator warns when maxDuration is absent. The studio knows the answer, so it says it.
     const spec = toSpecification(
-      draft({ load: { peakUsers: 5, rampUpSeconds: 0, steadySeconds: 300, rampDownSeconds: 0 } }),
+      draft({ load: { ...LOAD, peakUsers: 5, rampUpSeconds: 0, steadySeconds: 300, rampDownSeconds: 0 } }),
     );
 
     expect(spec).toContain('maxDuration: 15m');
@@ -323,7 +341,7 @@ spec:
 
     it('omits a zero-length ramp rather than emitting a stage with no duration', () => {
       const spec = toSpecification(
-        draft({ load: { peakUsers: 5, rampUpSeconds: 0, steadySeconds: 60, rampDownSeconds: 0 } }),
+        draft({ load: { ...LOAD, peakUsers: 5, rampUpSeconds: 0, steadySeconds: 60, rampDownSeconds: 0 } }),
       );
       const stages = spec.slice(spec.indexOf('stages:'), spec.indexOf('scenarios:'));
 
@@ -334,7 +352,7 @@ spec:
 
     it('still emits a stage when every duration is zero, so the document stays valid', () => {
       const spec = toSpecification(
-        draft({ load: { peakUsers: 5, rampUpSeconds: 0, steadySeconds: 0, rampDownSeconds: 0 } }),
+        draft({ load: { ...LOAD, peakUsers: 5, rampUpSeconds: 0, steadySeconds: 0, rampDownSeconds: 0 } }),
       );
 
       expect(spec).toContain('- duration: 1m');
@@ -463,7 +481,7 @@ describe('toResourceName', () => {
 describe('totalDurationSeconds', () => {
   it('adds the three parts, so the studio can say how long this will take', () => {
     expect(
-      totalDurationSeconds(draft({ load: { peakUsers: 1, rampUpSeconds: 30, steadySeconds: 120, rampDownSeconds: 15 } })),
+      totalDurationSeconds(draft({ load: { ...LOAD, peakUsers: 1, rampUpSeconds: 30, steadySeconds: 120, rampDownSeconds: 15 } })),
     ).toBe(165);
   });
 });
@@ -472,7 +490,7 @@ describe('governanceCeilingSeconds', () => {
   it('clears the stages by the platform\u2019s own execution grace', () => {
     // Startup, ramp-down and artifact upload all sit outside the stage arithmetic. A ceiling that
     // clipped them would kill healthy runs exactly when they were writing their evidence.
-    const shape = draft({ load: { peakUsers: 1, rampUpSeconds: 30, steadySeconds: 120, rampDownSeconds: 15 } });
+    const shape = draft({ load: { ...LOAD, peakUsers: 1, rampUpSeconds: 30, steadySeconds: 120, rampDownSeconds: 15 } });
 
     expect(governanceCeilingSeconds(shape)).toBeGreaterThanOrEqual(totalDurationSeconds(shape) + 600);
   });
@@ -480,7 +498,7 @@ describe('governanceCeilingSeconds', () => {
   it('rounds up to a whole minute, never down', () => {
     // 105s of stages plus ten minutes is 705s. Rounding down would give 11m, which is under the
     // grace the ceiling exists to allow.
-    const shape = draft({ load: { peakUsers: 1, rampUpSeconds: 30, steadySeconds: 60, rampDownSeconds: 15 } });
+    const shape = draft({ load: { ...LOAD, peakUsers: 1, rampUpSeconds: 30, steadySeconds: 60, rampDownSeconds: 15 } });
 
     expect(governanceCeilingSeconds(shape)).toBe(720);
     expect(toSpecification(shape)).toContain('maxDuration: 12m');
@@ -494,5 +512,60 @@ describe('includedJourneys', () => {
     );
 
     expect(kept.map((j) => j.name)).toEqual(['a']);
+  });
+
+  describe('the open load model', () => {
+    /**
+     * The studio's whole job here is that a person picks a question and gets a document that asks
+     * it. A rate model that emitted targetUsers would be refused by the validator — and rightly,
+     * because the run would send whatever the users produced rather than the rate that was asked
+     * for.
+     */
+    it('emits a rate profile with its ceiling when the model is a rate', () => {
+      const spec = toSpecification({
+        ...draft(),
+        load: {
+          model: 'rate',
+          peakUsers: 10,
+          peakRate: 400,
+          maxConcurrency: 250,
+          rampUpSeconds: 60,
+          steadySeconds: 300,
+          rampDownSeconds: 30,
+        },
+      });
+
+      expect(spec).toContain('type: arrival-rate');
+      expect(spec).toContain('maxConcurrency: 250');
+      expect(spec).toContain('targetRate: 400');
+      expect(spec).not.toContain('targetUsers');
+    });
+
+    it('emits a user profile with no ceiling when the model is users', () => {
+      const spec = toSpecification(draft());
+
+      expect(spec).toContain('type: stages');
+      expect(spec).toContain('targetUsers:');
+      // Refused by the validator on a staged model: the user count already is the concurrency.
+      expect(spec).not.toContain('maxConcurrency');
+      expect(spec).not.toContain('targetRate');
+    });
+
+    it('ends a rate profile at zero, which is what expresses ramp-down', () => {
+      const spec = toSpecification({
+        ...draft(),
+        load: {
+          model: 'rate',
+          peakUsers: 10,
+          peakRate: 400,
+          maxConcurrency: 250,
+          rampUpSeconds: 60,
+          steadySeconds: 300,
+          rampDownSeconds: 30,
+        },
+      });
+
+      expect(spec.trimEnd()).toContain('targetRate: 0');
+    });
   });
 });

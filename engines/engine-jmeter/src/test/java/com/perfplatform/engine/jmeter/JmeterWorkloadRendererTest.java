@@ -8,6 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -44,7 +46,8 @@ class JmeterWorkloadRendererTest {
         void thousandUsersRenderPlainly() {
             String jmx = renderDefault(JmeterFixtures.atMaximumConcurrency());
 
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.num_threads\">1000</stringProp>");
+            // The layer's thread count, in the Ultimate Thread Group's first column.
+            assertThat(jmx).contains("<stringProp name=\"1\">1000</stringProp>");
             assertThat(jmx).doesNotContain("1,000");
         }
 
@@ -54,7 +57,8 @@ class JmeterWorkloadRendererTest {
             String jmx = renderDefault(JmeterFixtures.atMaximumConcurrency());
 
             // 3600, the value V1 rendered as "3,600" — its documented default endurance duration.
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.duration\">3600</stringProp>");
+            // Now the layer's ramp, since a single stage glides across its whole duration.
+            assertThat(jmx).contains("<stringProp name=\"3\">3600</stringProp>");
             assertThat(jmx).doesNotContain("3,600");
         }
 
@@ -114,45 +118,73 @@ class JmeterWorkloadRendererTest {
         }
     }
 
+    /**
+     * The load shape, which S8 changed on purpose.
+     *
+     * <p>A staged profile used to become one vanilla thread group per stage, each starting from
+     * zero, so concurrency <b>stepped</b> at every boundary: the previous stage's threads stopped
+     * and the next stage's started. It now becomes one Ultimate Thread Group whose layers sum to the
+     * curve, so concurrency <b>glides</b>. That is a different test at every transition, which is
+     * why these assertions were rewritten rather than adjusted.
+     */
     @Nested
-    @DisplayName("workload stages")
+    @DisplayName("workload stages — a gliding concurrency profile")
     class Stages {
 
         @Test
-        @DisplayName("each stage becomes its own thread group")
-        void oneThreadGroupPerStage() {
+        @DisplayName("the whole profile is one thread group, not one per stage")
+        void oneThreadGroupForTheProfile() {
             String jmx = renderDefault(JmeterFixtures.twoStagesThreeScenarios());
 
-            assertThat(jmx).contains("api-load / stage 1").contains("api-load / stage 2");
-            assertThat(countOf(jmx, "testclass=\"ThreadGroup\"")).isEqualTo(2);
+            assertThat(countOf(jmx, "testclass=\"kg.apc.jmeter.threads.UltimateThreadGroup\""))
+                    .isEqualTo(1);
+            // And none of the vanilla groups that used to step between stages.
+            assertThat(jmx).doesNotContain("testclass=\"ThreadGroup\"");
         }
 
         @Test
-        @DisplayName("a later stage is delayed by the stages before it, so they do not overlap")
-        void stagesAreSequenced() {
+        @DisplayName("a rise becomes a layer that starts where the previous stage ended")
+        void risesBecomeDelayedLayers() {
             String jmx = renderDefault(JmeterFixtures.twoStagesThreeScenarios());
 
-            // Stage 1 starts immediately; stage 2 after stage 1's five minutes.
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.delay\">0</stringProp>");
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.delay\">300</stringProp>");
-        }
-
-        @Test
-        @DisplayName("each stage carries its own target concurrency")
-        void stagesCarryTheirOwnConcurrency() {
-            String jmx = renderDefault(JmeterFixtures.twoStagesThreeScenarios());
-
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.num_threads\">100</stringProp>");
-            assertThat(jmx).contains("<stringProp name=\"ThreadGroup.num_threads\">200</stringProp>");
+            // 0 → 100 over five minutes, then 100 → 200 over ten. The second layer carries the
+            // difference and starts where the first stage ended — their sum is the requested curve.
+            // The first layer holds through the second stage rather than ending with it: those
+            // hundred users are still there while the next hundred arrive. That is the glide.
+            assertThat(layersIn(jmx))
+                    .containsExactly(
+                            List.of(100L, 0L, 300L, 600L, 0L),
+                            List.of(100L, 300L, 600L, 0L, 0L));
         }
 
         /**
-         * A stage targeting zero users expresses ramp-down. Emitting a thread group with no threads
-         * would produce a group JMeter starts and immediately ends.
+         * The point of the change. A boundary between two stages is a ramp, not a restart.
          */
         @Test
-        @DisplayName("a ramp-down stage produces no thread group")
-        void rampDownStageIsNotAThreadGroup() {
+        @DisplayName("concurrency glides through a boundary rather than stepping at it")
+        void concurrencyGlidesAcrossTheBoundary() {
+            var stages = java.util.List.of(
+                    new PerformanceTestSpecification.LoadStage(java.time.Duration.ofSeconds(60), 100),
+                    new PerformanceTestSpecification.LoadStage(java.time.Duration.ofSeconds(60), 200));
+
+            var layers = ConcurrencyProfile.layersFor(stages);
+
+            // Halfway through the second stage the profile sits between the two levels, which a
+            // stepwise rendering could never produce: it would read 100 until the boundary and 200
+            // after it.
+            assertThat(ConcurrencyProfile.concurrencyAt(layers, 60)).isEqualTo(100);
+            assertThat(ConcurrencyProfile.concurrencyAt(layers, 90)).isBetween(140, 160);
+            assertThat(ConcurrencyProfile.concurrencyAt(layers, 119)).isBetween(190, 200);
+        }
+
+        /**
+         * A stage targeting zero users expresses ramp-down. It is now the shutdown of the layers
+         * already standing rather than an omitted thread group, so the descent is a ramp and not a
+         * cliff.
+         */
+        @Test
+        @DisplayName("a ramp-down stage becomes the layer's shutdown, not a missing group")
+        void rampDownBecomesAShutdown() {
             PerformanceTestSpecification withRampDown = JmeterFixtures.specification(
                     java.util.List.of(JmeterFixtures.workload("api-load",
                             java.util.List.of(
@@ -163,7 +195,12 @@ class JmeterWorkloadRendererTest {
                             java.util.List.of(new PerformanceTestSpecification.ScenarioSpec(
                                     "search-client", 100, "searchClient")))));
 
-            assertThat(countOf(renderDefault(withRampDown), "testclass=\"ThreadGroup\"")).isEqualTo(1);
+            String jmx = renderDefault(withRampDown);
+
+            assertThat(countOf(jmx, "testclass=\"kg.apc.jmeter.threads.UltimateThreadGroup\""))
+                    .isEqualTo(1);
+            // 100 threads, no delay, five-minute rise, no hold, two-minute descent.
+            assertThat(layersIn(jmx)).containsExactly(List.of(100L, 0L, 300L, 0L, 120L));
         }
     }
 
@@ -596,6 +633,154 @@ class JmeterWorkloadRendererTest {
             assertThat(renderDefault(JmeterFixtures.twoStagesThreeScenarios()))
                     .doesNotContain("CSVDataSet");
         }
+    }
+
+    /**
+     * The open model, which vanilla JMeter cannot express at all.
+     *
+     * <p>Requests arrive at a stated rate whatever the target does with them, so throughput is an
+     * input rather than an output — and a stalled target accumulates work until something stops it.
+     * That something is the concurrency limit, which is why these tests care about it more than
+     * about the rate.
+     */
+    @Nested
+    @DisplayName("an arrival-rate workload")
+    class ArrivalRate {
+
+        private String renderRateProfile() {
+            var specification = JmeterFixtures.specification(List.of(
+                    JmeterFixtures.arrivalRateWorkload("quotes-rate", 250, List.of(
+                                    new PerformanceTestSpecification.LoadStage(
+                                            java.time.Duration.ofSeconds(60), 0, 100),
+                                    new PerformanceTestSpecification.LoadStage(
+                                            java.time.Duration.ofSeconds(300), 0, 400),
+                                    new PerformanceTestSpecification.LoadStage(
+                                            java.time.Duration.ofSeconds(30), 0, 0)),
+                            List.of(new PerformanceTestSpecification.ScenarioSpec(
+                                    "request-quote", 100, "requestQuote")))));
+            return renderDefault(specification);
+        }
+
+        @Test
+        @DisplayName("it renders an arrivals thread group, never a concurrency one")
+        void rendersAnArrivalsGroup() {
+            String jmx = renderRateProfile();
+
+            assertThat(jmx).contains(
+                    "testclass=\"com.blazemeter.jmeter.threads.arrivals.FreeFormArrivalsThreadGroup\"");
+            assertThat(jmx).doesNotContain("kg.apc.jmeter.threads.UltimateThreadGroup");
+        }
+
+        @Test
+        @DisplayName("each stage becomes a schedule row gliding from the previous rate")
+        void stagesBecomeScheduleRows() {
+            String jmx = renderRateProfile();
+
+            // 0→100 over a minute, 100→400 over five, 400→0 over thirty seconds. The rows map
+            // one-to-one onto the stages, which is why this group is used rather than the
+            // fixed-shape arrivals group: nothing is approximated and nothing needs explaining.
+            assertThat(scheduleIn(jmx)).containsExactly(
+                    List.of(0L, 100L, 60L),
+                    List.of(100L, 400L, 300L),
+                    List.of(400L, 0L, 30L));
+        }
+
+        /**
+         * The one field an open model cannot run without. Without it a target that stalls makes
+         * arrivals accumulate until the generator exhausts its threads or its heap — and the run
+         * reports the generator's death as the target's failure.
+         */
+        @Test
+        @DisplayName("the concurrency ceiling reaches the plan")
+        void ceilingReachesThePlan() {
+            assertThat(renderRateProfile())
+                    .contains("<stringProp name=\"ConcurrencyLimit\">250</stringProp>");
+        }
+
+        @Test
+        @DisplayName("a workload with no ceiling is refused rather than rendered unbounded")
+        void refusesToRenderWithoutACeiling() {
+            var specification = JmeterFixtures.specification(List.of(
+                    JmeterFixtures.arrivalRateWorkload("quotes-rate", 0, List.of(
+                                    new PerformanceTestSpecification.LoadStage(
+                                            java.time.Duration.ofSeconds(60), 0, 100)),
+                            List.of(new PerformanceTestSpecification.ScenarioSpec(
+                                    "request-quote", 100, "requestQuote")))));
+
+            org.assertj.core.api.Assertions
+                    .assertThatThrownBy(() -> renderDefault(specification))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("maxConcurrency");
+        }
+
+        @Test
+        @DisplayName("both the rate and the ceiling are divided across shards")
+        void ratesAreSharded() {
+            var specification = JmeterFixtures.specification(List.of(
+                    JmeterFixtures.arrivalRateWorkload("quotes-rate", 250, List.of(
+                                    new PerformanceTestSpecification.LoadStage(
+                                            java.time.Duration.ofSeconds(60), 0, 400)),
+                            List.of(new PerformanceTestSpecification.ScenarioSpec(
+                                    "request-quote", 100, "requestQuote")))));
+
+            String jmx = render(specification, JmeterFixtures.shard(0, 4));
+
+            // A quarter each, so the shards together send what the document asked for. Rounding
+            // every shard up would send more traffic than the specification describes; rounding
+            // every shard down would quietly send less, and the run would report a rate it never
+            // achieved as though the target could not keep up.
+            assertThat(scheduleIn(jmx)).containsExactly(List.of(0L, 100L, 60L));
+            assertThat(jmx).contains("<stringProp name=\"ConcurrencyLimit\">63</stringProp>");
+        }
+    }
+
+    /**
+     * The Free-Form Arrivals schedule rows, as (start rate, end rate, duration).
+     */
+    private static List<List<Long>> scheduleIn(String jmx) {
+        java.util.regex.Matcher rows = java.util.regex.Pattern
+                .compile("<collectionProp name=\"stage-\\d+\">(.*?)</collectionProp>",
+                        java.util.regex.Pattern.DOTALL)
+                .matcher(jmx);
+
+        List<List<Long>> schedule = new java.util.ArrayList<>();
+        while (rows.find()) {
+            java.util.regex.Matcher values = java.util.regex.Pattern
+                    .compile("<stringProp name=\"\\d\">(\\d+)</stringProp>")
+                    .matcher(rows.group(1));
+            List<Long> row = new java.util.ArrayList<>();
+            while (values.find()) {
+                row.add(Long.parseLong(values.group(1)));
+            }
+            schedule.add(List.copyOf(row));
+        }
+        return List.copyOf(schedule);
+    }
+
+    /**
+     * The Ultimate Thread Group's rows, as (threads, delay, ramp, hold, shutdown).
+     *
+     * <p>Parsed rather than matched as text because the writer indents, and an assertion that also
+     * pinned the indentation would fail for a formatting change that means nothing.
+     */
+    private static List<List<Long>> layersIn(String jmx) {
+        java.util.regex.Matcher rows = java.util.regex.Pattern
+                .compile("<collectionProp name=\"layer-\\d+\">(.*?)</collectionProp>",
+                        java.util.regex.Pattern.DOTALL)
+                .matcher(jmx);
+
+        List<List<Long>> layers = new java.util.ArrayList<>();
+        while (rows.find()) {
+            java.util.regex.Matcher values = java.util.regex.Pattern
+                    .compile("<stringProp name=\"\\d\">(\\d+)</stringProp>")
+                    .matcher(rows.group(1));
+            List<Long> layer = new java.util.ArrayList<>();
+            while (values.find()) {
+                layer.add(Long.parseLong(values.group(1)));
+            }
+            layers.add(List.copyOf(layer));
+        }
+        return List.copyOf(layers);
     }
 
     private static int countOf(String haystack, String needle) {

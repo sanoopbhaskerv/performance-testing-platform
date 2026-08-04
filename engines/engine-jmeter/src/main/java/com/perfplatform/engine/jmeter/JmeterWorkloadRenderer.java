@@ -29,16 +29,24 @@ import java.util.Map;
  * their names appear in the results so per-scenario objectives can be evaluated, and the traffic mix
  * is the one the consumer asked for rather than an even spread across every endpoint.
  *
- * <h2>Stages</h2>
- * Each stage becomes its own thread group, delayed by the stages before it. Vanilla JMeter's thread
- * group has one ramp and one duration and cannot express a multi-stage profile; sequencing thread
- * groups is the approximation available without plugins, and it is deliberately a <em>stepwise</em>
- * one — concurrency changes at stage boundaries rather than gliding between them.
+ * <h2>Load shape</h2>
+ * Both shapes are rendered through the Custom Thread Groups plugin, which the runner image installs
+ * and which a local development JMeter must have too.
  *
- * <p>This is documented rather than hidden because it affects what the numbers mean: a stepwise
- * profile stresses a system differently from a smooth ramp at the transition. A true concurrency
- * profile needs the {@code ConcurrencyThreadGroup} plugin in the runner image, which is a runner
- * packaging decision that belongs with the Kubernetes provider in Increment 1E.
+ * <ul>
+ *   <li><b>A closed model</b> becomes one Ultimate Thread Group whose layers sum to the requested
+ *       concurrency curve ({@link ConcurrencyProfile}), so concurrency <em>glides</em> through the
+ *       profile. It previously became one vanilla thread group per stage, each starting from zero,
+ *       which stepped at every boundary — a different test, because pools, autoscalers and circuit
+ *       breakers respond to the transition and not only to the level.</li>
+ *   <li><b>An open model</b> becomes one Free-Form Arrivals Thread Group whose schedule rows map
+ *       one-to-one onto the specification's stages, with {@code maxConcurrency} as its concurrency
+ *       limit. Vanilla JMeter cannot express an open model at all.</li>
+ * </ul>
+ *
+ * <p>Both were verified against a real JMeter with the plugin installed rather than reasoned about
+ * from documentation: the observed arrival rate and the observed active-thread curve follow what the
+ * specification asked for.
  *
  * <h2>How a scenario becomes a request</h2>
  * A scenario that states its own {@code method} and {@code path} is rendered as written — the manual
@@ -125,28 +133,56 @@ final class JmeterWorkloadRenderer {
             return;
         }
 
-        long offsetSeconds = 0;
-        for (int index = 0; index < stages.size(); index++) {
-            LoadStage stage = stages.get(index);
-            long durationSeconds = stage.duration().toSeconds();
-
-            // A stage targeting zero users is a ramp-down instruction, not a thread group. Emitting
-            // one with no threads would produce a group JMeter starts and immediately ends.
-            if (stage.targetUsers() > 0) {
-                writeStageThreadGroup(jmx, workload, stage, index, offsetSeconds, durationSeconds,
-                        assignment, target, authentication);
-            }
-            offsetSeconds += durationSeconds;
+        if (workload.model() != null && workload.model().isArrivalRate()) {
+            writeArrivalsThreadGroup(jmx, workload, stages, assignment, target, authentication);
+        } else {
+            writeConcurrencyThreadGroup(jmx, workload, stages, assignment, target, authentication);
         }
     }
 
-    private static void writeStageThreadGroup(JmxWriter jmx, WorkloadSpec workload, LoadStage stage,
-            int stageIndex, long delaySeconds, long durationSeconds, ShardAssignment assignment,
-            TargetAddress target, AuthenticationSpec authentication) {
+    /**
+     * A closed model: concurrency gliding through the profile's shape.
+     *
+     * <p>One Ultimate Thread Group whose layers sum to the requested curve
+     * ({@link ConcurrencyProfile}). This replaces a thread group per stage, which stepped at every
+     * boundary — the previous stage's threads stopped and the next stage's started — and therefore
+     * measured something other than the ramp the consumer described.
+     */
+    private static void writeConcurrencyThreadGroup(JmxWriter jmx, WorkloadSpec workload,
+            List<LoadStage> stages, ShardAssignment assignment, TargetAddress target,
+            AuthenticationSpec authentication) {
 
-        jmx.element("ThreadGroup", attributes("ThreadGroupGui", "ThreadGroup",
-                        "%s / stage %d".formatted(workload.name(), stageIndex + 1)))
-                .stringProp("ThreadGroup.on_sample_error", "continue")
+        List<ConcurrencyProfile.Layer> layers = ConcurrencyProfile.layersFor(stages);
+        if (layers.isEmpty()) {
+            return;
+        }
+
+        jmx.element("kg.apc.jmeter.threads.UltimateThreadGroup",
+                        attributes("kg.apc.jmeter.threads.UltimateThreadGroupGui",
+                                "kg.apc.jmeter.threads.UltimateThreadGroup", workload.name()))
+                .raw("<collectionProp name=\"ultimatethreadgroupdata\">");
+
+        int row = 0;
+        for (ConcurrencyProfile.Layer layer : layers) {
+            long threads = threadsForShard(layer.threads(), assignment);
+            // A shard whose slice of a layer rounds to nothing emits no row. A row of zero threads
+            // is not a smaller layer, it is a group JMeter starts and immediately ends.
+            if (threads <= 0) {
+                continue;
+            }
+            jmx.raw("""
+                    <collectionProp name="layer-%d">
+                    <stringProp name="1">%d</stringProp>
+                    <stringProp name="2">%d</stringProp>
+                    <stringProp name="3">%d</stringProp>
+                    <stringProp name="4">%d</stringProp>
+                    <stringProp name="5">%d</stringProp>
+                    </collectionProp>"""
+                    .formatted(row++, threads, layer.delaySeconds(), layer.rampSeconds(),
+                            layer.holdSeconds(), layer.shutdownSeconds()));
+        }
+
+        jmx.raw("</collectionProp>")
                 .raw("""
                         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" \
                         guiclass="LoopControlPanel" testclass="LoopController">
@@ -154,15 +190,80 @@ final class JmeterWorkloadRenderer {
                         <intProp name="LoopController.loops">-1</intProp>
                         </elementProp>
                         """)
-                // Written as a number, never through a formatter. This is the line V1 corrupted at
-                // 1,000 users — exactly the platform's stated maximum (defect D1).
-                .longProp("ThreadGroup.num_threads", threadsForShard(stage.targetUsers(), assignment))
-                .longProp("ThreadGroup.ramp_time", rampSeconds(durationSeconds))
-                .boolProp("ThreadGroup.scheduler", true)
-                .longProp("ThreadGroup.duration", durationSeconds)
-                .longProp("ThreadGroup.delay", delaySeconds)
-                .boolProp("ThreadGroup.same_user_on_next_iteration", true)
+                .stringProp("ThreadGroup.on_sample_error", "continue")
                 .endWithChildren();
+
+        for (ScenarioSpec scenario : JmeterPlanCompiler.sortedScenarios(workload)) {
+            writeScenario(jmx, workload, scenario, target, authentication);
+        }
+
+        jmx.endChildren();
+    }
+
+    /**
+     * An open model: requests arriving at a stated rate, whatever the target does with them.
+     *
+     * <p>One Free-Form Arrivals Thread Group, whose schedule rows map one-to-one onto the
+     * specification's stages — each row glides from the previous stage's rate to this one's over the
+     * stage's duration. That correspondence is why this group is used rather than the fixed-shape
+     * Arrivals Thread Group: a staged rate profile is expressible exactly, with no approximation to
+     * explain afterwards.
+     *
+     * <p>{@code ConcurrencyLimit} is the specification's {@code maxConcurrency}, and it is the whole
+     * reason an open model is safe to run. Without it a target that stalls makes arrivals accumulate
+     * without bound until the generator exhausts its threads or its heap — and the run would report
+     * the generator's death as the target's failure.
+     */
+    private static void writeArrivalsThreadGroup(JmxWriter jmx, WorkloadSpec workload,
+            List<LoadStage> stages, ShardAssignment assignment, TargetAddress target,
+            AuthenticationSpec authentication) {
+
+        Integer ceiling = workload.model().maxConcurrency();
+        if (ceiling == null || ceiling < 1) {
+            // Unreachable for a validated specification, which is refused without a ceiling. Left
+            // as a refusal rather than a default because the alternative is rendering an unbounded
+            // open-model plan, and there is no safe number to invent.
+            throw new IllegalArgumentException(
+                    "An arrival-rate workload requires maxConcurrency before it can be rendered");
+        }
+
+        jmx.element("com.blazemeter.jmeter.threads.arrivals.FreeFormArrivalsThreadGroup",
+                        attributes(
+                                "com.blazemeter.jmeter.threads.arrivals.FreeFormArrivalsThreadGroupGui",
+                                "com.blazemeter.jmeter.threads.arrivals.FreeFormArrivalsThreadGroup",
+                                workload.name()))
+                .raw("""
+                        <elementProp name="ThreadGroup.main_controller" \
+                        elementType="com.blazemeter.jmeter.control.VirtualUserController"/>
+                        """)
+                .stringProp("ThreadGroup.on_sample_error", "continue")
+                .stringProp("Unit", "S")
+                .stringProp("ConcurrencyLimit",
+                        String.valueOf(rateForShard(ceiling, assignment)))
+                .stringProp("Iterations", "")
+                .stringProp("LogFilename", "")
+                .raw("<collectionProp name=\"Schedule\">");
+
+        int previousRate = 0;
+        int row = 0;
+        for (LoadStage stage : stages) {
+            int stageRate = stage.targetRate() == null ? 0 : Math.max(0, stage.targetRate());
+            long duration = stage.duration().toSeconds();
+
+            jmx.raw("""
+                    <collectionProp name="stage-%d">
+                    <stringProp name="1">%d</stringProp>
+                    <stringProp name="2">%d</stringProp>
+                    <stringProp name="3">%d</stringProp>
+                    </collectionProp>"""
+                    .formatted(row++,
+                            rateForShard(previousRate, assignment),
+                            rateForShard(stageRate, assignment),
+                            duration));
+            previousRate = stageRate;
+        }
+
+        jmx.raw("</collectionProp>").endWithChildren();
 
         for (ScenarioSpec scenario : JmeterPlanCompiler.sortedScenarios(workload)) {
             writeScenario(jmx, workload, scenario, target, authentication);
@@ -661,6 +762,18 @@ final class JmeterWorkloadRenderer {
         int base = targetUsers / assignment.shardCount();
         int remainder = targetUsers % assignment.shardCount();
         return base + (assignment.shardIndex() < remainder ? 1 : 0);
+    }
+
+    /**
+     * This shard's share of an arrival rate or a concurrency ceiling.
+     *
+     * <p>Divided exactly as users are, and for the same reason: the shards together must ask for
+     * what the specification asked for. Rounding each shard up would send more traffic than the
+     * document describes, and rounding each down would quietly send less — which is worse, because
+     * the run would report a rate it never achieved as though the target could not keep up.
+     */
+    static long rateForShard(int total, ShardAssignment assignment) {
+        return threadsForShard(total, assignment);
     }
 
     /**

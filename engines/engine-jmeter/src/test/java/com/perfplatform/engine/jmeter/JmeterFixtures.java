@@ -90,6 +90,14 @@ final class JmeterFixtures {
                 new LoadModel(LoadModelType.STAGES, stages), scenarios, null, null, null);
     }
 
+    /** An open-model workload: a rate profile with the ceiling it cannot legally run without. */
+    static WorkloadSpec arrivalRateWorkload(String name, int maxConcurrency, List<LoadStage> stages,
+            List<ScenarioSpec> scenarios) {
+        return new WorkloadSpec(name, WorkloadType.PROTOCOL, "jmeter", null,
+                new LoadModel(LoadModelType.ARRIVAL_RATE, stages, maxConcurrency), scenarios,
+                null, null, null);
+    }
+
     static ShardAssignment shard(int index, int count) {
         return new ShardAssignment(TestRunId.generate(), index, count, null);
     }

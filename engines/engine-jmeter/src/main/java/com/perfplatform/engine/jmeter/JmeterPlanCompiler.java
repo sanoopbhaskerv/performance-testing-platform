@@ -64,6 +64,8 @@ final class JmeterPlanCompiler {
                 .field("environment", environmentName(specification))
                 .field("correlationHeader", correlationHeader(specification))
                 .field("shardCount", DEFAULT_SHARD_COUNT)
+                // The concurrency the run reserves, which for an open model is its ceiling rather
+                // than its rate. Named for what it is so a plan reader is never left inferring it.
                 .field("peakVirtualUsers", specification.peakProtocolUsers())
                 .field("durationSeconds", totalDuration(workloads).toSeconds());
 
@@ -78,9 +80,16 @@ final class JmeterPlanCompiler {
     }
 
     private static void writeWorkload(CanonicalJson json, WorkloadSpec workload) {
+        boolean arrivalRate = workload.model() != null && workload.model().isArrivalRate();
+
         json.startElement()
                 .field("name", workload.name())
+                // Which quantity this workload's stages are expressed in. A plan that did not say
+                // would leave a reader unable to tell 400 users from 400 requests a second, and the
+                // two describe wildly different tests against the same numbers.
+                .field("model", arrivalRate ? "arrival-rate" : "stages")
                 .field("peakUsers", workload.peakUsers())
+                .field("peakArrivalRate", workload.peakArrivalRate())
                 .field("durationSeconds", workload.totalDuration().toSeconds());
 
         // Stages in declaration order, which is meaningful here: a staged model is a sequence, and
@@ -91,6 +100,7 @@ final class JmeterPlanCompiler {
                     .field("durationSeconds",
                             stage.duration() == null ? 0 : stage.duration().toSeconds())
                     .field("targetUsers", stage.targetUsers())
+                    .field("targetRate", stage.targetRate() == null ? 0 : stage.targetRate())
                     .endObject();
         }
         json.endArray();

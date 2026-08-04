@@ -348,3 +348,40 @@
 .v2 .studio-summary strong {
   color: var(--pf-text-strong);
 }
+
+/*
+ * The load-model choice: two options, each explained where it is chosen.
+ *
+ * A radio pair rather than a select, because the difference between holding users and holding a rate
+ * is the thing a novice most needs told — and a select hides every option but one behind a click,
+ * which is where an explanation goes to die.
+ */
+.v2 .studio-choice {
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  padding: var(--pf-space-5);
+  margin-bottom: var(--pf-space-6);
+}
+
+.v2 .studio-choice legend {
+  padding: 0 var(--pf-space-3);
+  font-weight: var(--pf-weight-strong);
+}
+
+.v2 .studio-choice > label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-4);
+  padding: var(--pf-space-3) 0;
+  cursor: pointer;
+}
+
+.v2 .studio-choice > label > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.v2 .studio-choice input[type='radio'] {
+  margin-top: 0.2rem;
+}

@@ -32,7 +32,7 @@ class SpecificationValidationServiceTest {
         @ParameterizedTest(name = "{0} parses and validates")
         @ValueSource(strings = {
                 "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml",
-                "session-broker-api.yaml"})
+                "session-broker-api.yaml", "arrival-rate.yaml"})
         @DisplayName("every shipped valid example is valid")
         void validExamplesValidate(String name) {
             var outcome = service.validate(ExampleFixtures.valid(name));
@@ -419,7 +419,9 @@ class SpecificationValidationServiceTest {
                 "unresolved-references.yaml, spec.workload.sourceRef.unresolved",
                 "unitless-threshold.yaml, spec.parse.threshold.invalid",
                 "duration-exceeds-governance.yaml, spec.governance.maxDuration.exceeded",
-                "unsupported-engine.yaml, spec.parse.enum.invalid"
+                "unsupported-engine.yaml, spec.parse.enum.invalid",
+                "arrival-rate-without-ceiling.yaml, spec.workload.model.maxConcurrency.missing",
+                "stages-with-rate.yaml, spec.workload.stage.rate.notApplicable"
         })
         @DisplayName("each invalid example produces its documented stable finding code")
         void invalidExamplesProduceStableCodes(String name, String expectedCode) {

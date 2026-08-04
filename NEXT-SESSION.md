@@ -19,6 +19,9 @@ One command. It starts the **demo service** (:8081), the **control plane** (:808
 what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was killed.
 
 - `--build` rebuilds the Java modules first. Without it, existing jars are reused.
+- It installs JMeter's **Custom Thread Groups plugin** (`jpgc-casutg`) if your JMeter lacks it. Every
+  plan needs it now, and the control plane refuses to start without it — JMeter would otherwise skip
+  the thread group it cannot resolve and report a successful run that generated no load.
 - `--fake` forces the non-load-generating provider.
 - It picks **local-jmeter** automatically when `jmeter` is on PATH, and says which it chose. With
   the fake provider a run ends in **`Failed` / `NO_LOAD_GENERATED`** — correct, not broken: the run
@@ -39,8 +42,8 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S7 ran this to completion: **1,058 tests, 0 failures, 0 skipped** across all 15 modules — the first
-fully green `mvn clean verify` on the branch. Docker must be running: Testcontainers uses PostgreSQL
+S8 ran this to completion: **1,093 tests, 0 failures, 0 skipped** across all 15 modules. S7 was the
+first fully green `mvn clean verify` on the branch and it has stayed green since. Docker must be running: Testcontainers uses PostgreSQL
 and MinIO. The environment limits earlier sessions recorded (Mockito inline self-attach, sockets
 refusing to bind) did **not** recur; if they reappear, note them rather than assuming they are
 permanent. If a PostgreSQL module fails wholesale with `An error occurred while setting up the SSL
@@ -48,7 +51,7 @@ connection`, that is a known flaky start — retry once. **If any integration te
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 154 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 157 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -93,11 +96,11 @@ that exposes it. Nothing lands API-only.
 
 | Decision | Chosen |
 |---|---|
-| **vitest** | **Approved and added in S1.** §31 pause cleared. **154 UI tests** now. |
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **157 UI tests** now. |
 | **Recorder** | Deferred to S10. Release 1 ships **guided capture wizards**: DevTools HAR for protocol journeys, `npx playwright codegen` for browser journeys. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
-| **Arrival-rate sizing, hybrid under-load testing** | Deferred to S8 and S11. |
+| **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. Hybrid under-load testing is still S11. |
 | **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. S5 removed the credentials/session blocker, but removal still needs a focused audit because development identity remains local-only and V1 endpoints must stay operational until that increment is explicitly picked up. |
 
 ### What is built
@@ -131,12 +134,20 @@ that exposes it. Nothing lands API-only.
   context could not start (two `TargetResolver` beans, since S5), and that masked seventeen broken
   end-to-end tests.
 
-**S7: 1,058 Java tests, 154 UI tests, `mvn clean verify` fully green for the first time.**
+- **S8** (§3x) — load models. A test can hold **requests per second** instead of users, with the
+  mandatory concurrency ceiling that admission budgets against instead of the rate; staged
+  concurrency now **glides** rather than stepping at boundaries. Both render through JMeter's Custom
+  Thread Groups plugin, which the start script installs and the control plane refuses to start
+  without. Also fixed a throughput objective that could not be written at all (`Threshold` had no
+  per-second unit).
 
-**Next: S8, load profiles — rate as well as users.** `PLAN.md` §11: add `LoadModelType.ARRIVAL_RATE`
-beside `STAGES` with a required `maxConcurrency` ceiling that admission reads instead of the rate,
-and use the `ConcurrencyThreadGroup` already in the runner image so staged load glides rather than
-steps.
+**S8: 1,093 Java tests, 157 UI tests, `mvn clean verify` fully green.**
+
+**Next: S9, one run with many workloads.** `PLAN.md` §11: `execution_plans` gains `workload_name` and
+a run references a set of them, `runner_shards` gains it too with a unique key on
+`(run_id, workload_name, shard_index)`, `RunWorkloadService` becomes per-workload, and analysis merges
+sample sets across engines. The acceptance test is a specification whose second workload names an
+unregistered engine being **refused at validation** rather than silently dropped.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

@@ -81,20 +81,43 @@ export function objectiveThreshold(objective: ObjectiveDraft): string {
  * single most common mistake in a hand-written load model: the test simply stops at full load, and
  * the last samples are taken while the generator is being torn down.
  */
+/**
+ * The model declaration, and the ceiling an open model cannot legally omit.
+ *
+ * The ceiling is emitted only for a rate model, because the validator refuses it on a staged one —
+ * where the user count already *is* the concurrency, a second limit would be either redundant or a
+ * contradiction, and the specification would rather say so than pick one.
+ */
+function modelLines(draft: StudioDraft): string[] {
+  if (draft.load.model !== 'rate') {
+    return ['        type: stages'];
+  }
+  return [
+    '        type: arrival-rate',
+    `        maxConcurrency: ${draft.load.maxConcurrency}`,
+  ];
+}
+
 function stageLines(draft: StudioDraft): string[] {
-  const { peakUsers, rampUpSeconds, steadySeconds, rampDownSeconds } = draft.load;
+  const { model, peakUsers, peakRate, rampUpSeconds, steadySeconds, rampDownSeconds } = draft.load;
+  const peak = model === 'rate' ? peakRate : peakUsers;
+  // Which field the stages carry. Emitting the other one is not a harmless extra: the validator
+  // refuses a stage that sets the field its model does not read, because whoever wrote it believes
+  // something about the run that will not be true.
+  const field = model === 'rate' ? 'targetRate' : 'targetUsers';
+
   const stages: Array<[number, number]> = [];
 
-  if (rampUpSeconds > 0) stages.push([rampUpSeconds, peakUsers]);
-  if (steadySeconds > 0) stages.push([steadySeconds, peakUsers]);
+  if (rampUpSeconds > 0) stages.push([rampUpSeconds, peak]);
+  if (steadySeconds > 0) stages.push([steadySeconds, peak]);
   if (rampDownSeconds > 0) stages.push([rampDownSeconds, 0]);
   // A shape with no duration anywhere would emit an empty stage list, which the validator refuses.
   // Holding at peak is the least surprising reading of "no ramp, no ramp-down".
-  if (stages.length === 0) stages.push([steadySeconds > 0 ? steadySeconds : 60, peakUsers]);
+  if (stages.length === 0) stages.push([steadySeconds > 0 ? steadySeconds : 60, peak]);
 
-  return stages.flatMap(([seconds, users]) => [
+  return stages.flatMap(([seconds, target]) => [
     `          - duration: ${humanDuration(seconds)}`,
-    `            targetUsers: ${users}`,
+    `            ${field}: ${target}`,
   ]);
 }
 
@@ -251,7 +274,7 @@ export function toSpecification(draft: StudioDraft): string {
     '      type: protocol',
     '      engine: jmeter',
     '      model:',
-    '        type: stages',
+    ...modelLines(draft),
     '        stages:',
     ...stageLines(draft),
     '',

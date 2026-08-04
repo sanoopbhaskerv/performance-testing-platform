@@ -12,8 +12,9 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S7 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3w for what each delivered. S8, load profiles, is next; everything after it is still a plan.
+**Status: S1 through S8 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3x for what each delivered. S9, one run with many workloads, is next; everything after it is
+still a plan.
 
 ---
 
@@ -715,7 +716,7 @@ else waits. Decisions taken, with the reasoning, so they are not relitigated:
 
 | Decision | Chosen | Why |
 |---|---|---|
-| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 154 UI tests now. |
+| **vitest** | **Yes — approved, added in S1** | `platform-ui` had no test runner at all. §31 pause cleared. 157 UI tests now. |
 | **Recorder** | **Deferred.** Guided capture wizards instead (§5) | A server-side recording browser is large and needs a security review. The wizards get most of the value for almost nothing. |
 | **Live monitoring** | **Deferred.** Existing status, plus elapsed/stage/progress bar | The cost is a runner-image change and re-verification on a cluster. The progress bar is derivable from data the control plane already has — no runner change. |
 | **The novice report** | **Kept** | Pure UI, cheap, and most of what "usable without experience" actually means. |
@@ -737,8 +738,8 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S6a** | Broker path production-readiness validation | Operations | Small | ✅ | **done** — `HANDOFF.md` §3u |
 | **S6** | The browser engine and Core Web Vitals | Test type 2 | Large | ✅ | **done** — `HANDOFF.md` §3v |
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
-| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | next |
-| **S9** | One run, many workloads | structural | Large | — | |
+| **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
+| **S9** | One run, many workloads | structural | Large | — | next |
 | **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
@@ -930,17 +931,22 @@ is still outstanding. A run that dies leaves its last snapshot as a durable seri
 the way out of `RUNNING` and again on cancellation. **Every interpretation message is pinned by a
 test naming its observation** (`ProgressInterpreterTest`).
 
-### S8 — load profiles: rate as well as users
+### S8 — load profiles: rate as well as users — **built**
 
-`LoadModelType.ARRIVAL_RATE` beside `STAGES`. `targetRate` per stage plus a required `maxConcurrency`
-safety ceiling — in an open model a stalled target accumulates in-flight requests without bound until
-the generator dies and reports its own failure as the target's. **Admission reads `maxConcurrency`,
-not the rate**, or a 500 req/s test looks free.
+`HANDOFF.md` §3x and `docs/operations/load-models.md`. Delivered as described, with two corrections
+the work itself forced:
 
-Uses `ConcurrencyThreadGroup`, already in the runner image and unused (`ROADMAP.md` §6) — closing that
-item, and making staged concurrency **glide instead of step** at stage boundaries, which changes what
-the numbers mean at transitions and must be said out loud. `docs/operations/load-models.md` documents
-open vs closed, as CLAUDE.md §15 requires.
+- The plugin group is the **Free-Form Arrivals Thread Group** for the open model and the **Ultimate
+  Thread Group** for the closed one, not `ConcurrencyThreadGroup`. That group ramps from zero and has
+  no delay, so a multi-stage profile built from a sequence of them would overlap; the two chosen
+  groups express a staged profile exactly. Established by running candidate plans through a real
+  JMeter rather than from documentation.
+- A **throughput objective was unwritable** — `Threshold` had no per-second unit, so the studio's own
+  `380/s` was refused. Fixed here because in an open model, failing to achieve the rate is the
+  finding.
+
+Verified with real load: 2,239 samples against ~2,250 specified for the open model, and a closed-model
+run whose active users climbed 1→9 where the old rendering jumped 5→10.
 
 ### S9 — one run, many workloads
 

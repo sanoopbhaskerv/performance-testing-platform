@@ -5,6 +5,24 @@ import { toSpecification } from './specification';
 import type { Journey, StudioDraft } from './draft';
 
 /**
+ * The default load shape, spread into partial overrides.
+ *
+ * Present so a test that cares about durations does not have to restate the load model, the rate
+ * and the concurrency ceiling — and so adding a field to the shape does not break tests that have
+ * nothing to say about it.
+ */
+const LOAD = {
+  model: 'users' as const,
+  peakUsers: 10,
+  peakRate: 50,
+  maxConcurrency: 25,
+  rampUpSeconds: 30,
+  steadySeconds: 120,
+  rampDownSeconds: 15,
+};
+
+
+/**
  * The rules that decide whether someone can move on.
  *
  * Tested because a wizard's worst failure is a disabled button with no explanation. The studio uses
@@ -61,10 +79,24 @@ describe('blockerFor', () => {
       .toMatch(/at least one journey/);
   });
 
+  it('requires a rate and a ceiling when the model is a rate', () => {
+    expect(
+      blockerFor('load', draft({ load: { ...LOAD, model: 'rate', peakRate: 0 } })),
+    ).toMatch(/at least one request per second/);
+
+    // The platform refuses a ceiling-less rate model outright, so the studio says so here rather
+    // than letting somebody reach Save and meet the refusal there.
+    expect(
+      blockerFor('load', draft({ load: { ...LOAD, model: 'rate', maxConcurrency: 0 } })),
+    ).toMatch(/waiting at once/);
+
+    expect(blockerFor('load', draft({ load: { ...LOAD, model: 'rate' } }))).toBeNull();
+  });
+
   it('requires a user and a duration', () => {
-    expect(blockerFor('load', draft({ load: { peakUsers: 0, rampUpSeconds: 10, steadySeconds: 10, rampDownSeconds: 0 } })))
+    expect(blockerFor('load', draft({ load: { ...LOAD, peakUsers: 0, rampUpSeconds: 10, steadySeconds: 10, rampDownSeconds: 0 } })))
       .toMatch(/at least one user/);
-    expect(blockerFor('load', draft({ load: { peakUsers: 5, rampUpSeconds: 0, steadySeconds: 0, rampDownSeconds: 0 } })))
+    expect(blockerFor('load', draft({ load: { ...LOAD, peakUsers: 5, rampUpSeconds: 0, steadySeconds: 0, rampDownSeconds: 0 } })))
       .toMatch(/needs a duration/);
   });
 

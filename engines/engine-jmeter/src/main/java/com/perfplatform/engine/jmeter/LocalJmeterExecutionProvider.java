@@ -60,6 +60,14 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
 
     public static final String PROVIDER_ID = "local-jmeter";
 
+    /**
+     * The plugin jar every rendered plan depends on.
+     *
+     * <p>Matched by prefix rather than by exact name: the version moves, and pinning it here would
+     * make a plugin upgrade look like a missing plugin.
+     */
+    private static final String CUSTOM_THREAD_GROUPS_JAR = "jmeter-plugins-casutg";
+
     /** Captured runner output is truncated: a failing run can emit megabytes of stack traces. */
     private static final int MAX_CAPTURED_OUTPUT = 64 * 1024;
 
@@ -133,6 +141,84 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
                 set JMETER_HOME), or set platform.orchestration.execution-provider=fake to exercise \
                 the platform without generating load. Looked in: %s"""
                 .formatted(candidates));
+    }
+
+    /**
+     * Refuses to start unless JMeter has the Custom Thread Groups plugin.
+     *
+     * <p>Every plan this platform renders needs it: a closed model uses the Ultimate Thread Group so
+     * concurrency glides through its profile, and an open model uses the Free-Form Arrivals Thread
+     * Group, which has no vanilla equivalent at all. The production runner image installs it; a
+     * developer's own JMeter usually has not.
+     *
+     * <p>Checked at startup, like the launcher itself, and for the same reason. JMeter does not fail
+     * when it meets an element it cannot resolve — it logs and carries on with the rest of the plan,
+     * so a missing plugin would surface as a run that completed successfully having generated no
+     * load at all. That is the single worst failure this platform can have, and it is why this is a
+     * refusal rather than a warning.
+     *
+     * @throws IllegalStateException naming the command that installs it
+     */
+    public static void requireCustomThreadGroups(Path jmeterCommand) {
+        List<Path> searched = new ArrayList<>();
+        for (Path extensions : extensionDirectories(jmeterCommand)) {
+            searched.add(extensions);
+            if (!Files.isDirectory(extensions)) {
+                continue;
+            }
+            try (var entries = Files.list(extensions)) {
+                if (entries.anyMatch(jar ->
+                        jar.getFileName().toString().startsWith(CUSTOM_THREAD_GROUPS_JAR))) {
+                    return;
+                }
+            } catch (IOException e) {
+                // Unreadable rather than absent. Refusing here would stop a perfectly good
+                // deployment over a directory listing, so this defers to the runtime instead.
+                log.warn("Could not check {} for the Custom Thread Groups plugin", extensions, e);
+                return;
+            }
+        }
+
+        throw new IllegalStateException("""
+                JMeter is missing the Custom Thread Groups plugin (jpgc-casutg), which every plan \
+                this platform renders needs: staged load uses its Ultimate Thread Group so \
+                concurrency glides rather than steps, and an arrival-rate model has no vanilla \
+                equivalent at all. Without it JMeter would run the plan, skip the thread groups it \
+                cannot resolve, and report a successful run that generated no load. \
+                Install it with `PluginsManagerCMD.sh install jpgc-casutg`, or run \
+                ./scripts/start-platform.sh, which installs it for you. Looked in: %s"""
+                .formatted(searched));
+    }
+
+    /**
+     * Where a JMeter installation might keep its extensions.
+     *
+     * <p>More than one candidate because the launcher is often not where the installation is. A
+     * package manager typically puts a wrapper in {@code bin/} and the real tree elsewhere —
+     * Homebrew's {@code /opt/homebrew/bin/jmeter} is a symlink into {@code Cellar/…/libexec} — so a
+     * check that only looked beside the command would report a correctly installed plugin as
+     * missing and refuse to start a working deployment.
+     */
+    private static List<Path> extensionDirectories(Path jmeterCommand) {
+        Path resolved = jmeterCommand;
+        try {
+            resolved = jmeterCommand.toRealPath();
+        } catch (IOException e) {
+            // A command that cannot be resolved is still worth checking as written.
+            log.debug("Could not resolve {} to a real path", jmeterCommand, e);
+        }
+
+        List<Path> candidates = new ArrayList<>();
+        for (Path command : List.of(resolved, jmeterCommand)) {
+            Path parent = command.getParent();
+            Path home = parent == null ? null : parent.getParent();
+            if (home == null) {
+                continue;
+            }
+            candidates.add(home.resolve("lib").resolve("ext"));
+            candidates.add(home.resolve("libexec").resolve("lib").resolve("ext"));
+        }
+        return candidates.stream().distinct().toList();
     }
 
     private record LocalRun(Process process, ProvisionRequest request, Path directory,
