@@ -370,7 +370,7 @@ public final class ManageRecordingsUseCase {
                             "capturedExchanges", String.valueOf(session.capturedCount())),
                     now));
         }
-        registry.evictTerminal();
+        registry.evictTerminal(now);
         return expired.size();
     }
 

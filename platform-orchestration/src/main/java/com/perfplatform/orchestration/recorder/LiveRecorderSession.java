@@ -75,6 +75,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
     private long captureSequence;
     private long droppedFrames;
     private long droppedCaptures;
+    private Instant terminatedAt;
 
     public LiveRecorderSession(RecorderSessionId id, TeamId teamId, String application,
             String environment, String targetOrigin, String startUrl, RecorderSessionPolicy policy,
@@ -199,6 +200,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
         closeCode = code;
         closeReason = reason;
         lastActivityAt = now;
+        terminatedAt = now;
         return attached;
     }
 
@@ -223,6 +225,16 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
                     : RecorderSessionState.FAILED;
         }
         return state.canTransitionTo(requested) ? requested : RecorderSessionState.FAILED;
+    }
+
+    /**
+     * When this session ended, if it has.
+     *
+     * <p>Read by the registry to decide when it is safe to forget: a client that was polling one
+     * moment must not be told the session never existed the next.
+     */
+    public synchronized Optional<Instant> terminatedAt() {
+        return Optional.ofNullable(terminatedAt);
     }
 
     public synchronized boolean isIdle(Instant now) {

@@ -46,6 +46,48 @@ class ChromeCommandLineTest {
         assertThat(ChromeCommandLine.hostResolverRules(policy)).isEqualTo("MAP * ~NOTFOUND");
     }
 
+    /**
+     * A dev server that binds only {@code [::1]} refused every connection when the browser was
+     * pinned to {@code 127.0.0.1}. MAP takes one replacement, so a multi-address loopback host is
+     * excluded from remapping instead and Chrome tries both families.
+     */
+    @Test
+    @DisplayName("a loopback host under the relaxed floor is excluded, not pinned to one family")
+    void loopbackIsExcludedRatherThanPinned() {
+        RecorderSessionPolicy policy = RecorderSessionPolicy
+                .forTarget(RecorderOrigin.parse("http://localhost:5174"),
+                        List.of(ip("127.0.0.1"), ip("::1")))
+                .withAllowances(RecorderAddressAllowances.permittingLoopback())
+                .build();
+
+        assertThat(ChromeCommandLine.hostResolverRules(policy))
+                .isEqualTo("EXCLUDE localhost,MAP * ~NOTFOUND");
+    }
+
+    @Test
+    @DisplayName("everything else is still unresolvable, exclusion or not")
+    void exclusionDoesNotOpenTheCatchAll() {
+        RecorderSessionPolicy policy = RecorderSessionPolicy
+                .forTarget(RecorderOrigin.parse("http://localhost:5174"), List.of(ip("127.0.0.1")))
+                .withAllowances(RecorderAddressAllowances.permittingLoopback())
+                .build();
+
+        assertThat(ChromeCommandLine.hostResolverRules(policy)).endsWith("MAP * ~NOTFOUND");
+    }
+
+    @Test
+    @DisplayName("a non-loopback host is still pinned, even under the relaxed floor")
+    void relaxedFloorDoesNotStopPinningRealHosts() {
+        RecorderSessionPolicy policy = RecorderSessionPolicy
+                .forTarget(RecorderOrigin.parse("https://proposal.perf.internal"),
+                        List.of(ip("10.10.20.30")))
+                .withAllowances(RecorderAddressAllowances.permittingLoopback())
+                .build();
+
+        assertThat(ChromeCommandLine.hostResolverRules(policy))
+                .isEqualTo("MAP proposal.perf.internal 10.10.20.30,MAP * ~NOTFOUND");
+    }
+
     @Test
     @DisplayName("the browser is started from an argument list, never a shell string")
     void argumentsAreAList() {

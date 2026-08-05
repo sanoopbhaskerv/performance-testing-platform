@@ -24,13 +24,19 @@ That is all. No extension, no proxy, no certificate, no `sudo`.
 ```
 
 The script enables the recorder for you. It is the only place that does, and it prints the API key
-and the URLs when everything is up.
+and the URLs when everything is up. It starts four things: the demo service (:8081), the control
+plane (:8080), the console (:5173) and the **student app** (:5174).
+
+**Record the student app, not the demo service.** The demo service is API-only, so recording it
+means recording a JSON page. The student app is a real browser client for it — clicking through
+produces exactly the API calls a journey is made of. Point your target's `baseUrl` at
+`http://localhost:5174` in `config/teams/local-dev.yml`.
 
 Then:
 
 1. Open <http://localhost:5173> and paste the key it printed (`local-dev-key-not-a-secret`).
 2. Stay on the **Performance tests** tab. The **Recorder** strip is above *Your tests*.
-3. Choose a target — **demo-service / performance** is the one the script starts for you.
+3. Choose the target whose `baseUrl` is the student app.
 4. Press **Start guarded recording**.
 
 The panel opens with a live browser surface. Click it once to give it focus, then use the page as
@@ -139,6 +145,21 @@ grep -i recorder .local/logs/control-plane.log
 The target resolves somewhere the address floor refuses. If it is loopback, you are missing
 `allow-loopback-target`. If it is link-local or a metadata address, that is the floor doing its job
 and no flag changes it.
+
+### `ERR_CONNECTION_REFUSED`, but the service answers `curl`
+
+Almost always an address-family mismatch. Vite binds `[::1]` only; `curl localhost` will happily use
+IPv6 while a pinned browser uses IPv4.
+
+The recorder handles the loopback case: under the relaxed floor a loopback host is excluded from DNS
+pinning so Chrome tries both families. If you see this against a **non-loopback** host, that is the
+documented single-address limitation — `--host-resolver-rules MAP` takes one replacement, so a host
+resolving to several addresses is pinned to the first. Check which address the service is actually
+listening on:
+
+```bash
+lsof -nP -iTCP:5174 -sTCP:LISTEN
+```
 
 ### The session expires while you are reading this
 

@@ -263,4 +263,44 @@ describe('RecorderPanel', () => {
     const button = await screen.findByRole('button', { name: /turn this into a test/i });
     await waitFor(() => expect(button).toBeEnabled());
   });
+
+  /**
+   * The bug this exists for: on failure the loop rescheduled at 120ms unconditionally, so a session
+   * the server had released produced roughly eight requests a second, forever, each one raising the
+   * error banner again.
+   */
+  it('stops polling once the server has released the session', async () => {
+    const gone = Object.assign(new Error('Request failed with status code 404'), {
+      response: { status: 404 },
+    });
+    const poll = vi.fn().mockRejectedValue(gone);
+    const client = stubClient({ pollRecording: poll as V2Client['pollRecording'] });
+    const { onError } = renderPanel(client);
+
+    await waitFor(() => expect(poll).toHaveBeenCalled());
+    expect(await screen.findByText(/no longer available on the server/)).toBeInTheDocument();
+
+    const callsAfterGiveUp = poll.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(poll.mock.calls.length).toBe(callsAfterGiveUp);
+    // A session that simply ended is not an error worth a banner.
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('gives up after repeated failures rather than retrying forever', async () => {
+    const poll = vi.fn().mockRejectedValue(new Error('network down'));
+    const client = stubClient({ pollRecording: poll as V2Client['pollRecording'] });
+    const { onError } = renderPanel(client);
+
+    await waitFor(() => expect(onError).toHaveBeenCalled(), { timeout: 5000 });
+    expect(await screen.findByText(/Lost contact with the recording session/)).toBeInTheDocument();
+
+    const callsAfterGiveUp = poll.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(poll.mock.calls.length).toBe(callsAfterGiveUp);
+    // Bounded: five attempts, not five hundred.
+    expect(callsAfterGiveUp).toBeLessThanOrEqual(5);
+  });
 });

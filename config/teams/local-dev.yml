@@ -37,7 +37,7 @@ targets:
   # Generating real load against it also needs the local-jmeter provider; the
   # default fake provider sends no traffic anywhere. See the README.
   - name: demo-service
-    baseUrl: "http://localhost:8081"
+    baseUrl: "http://localhost:5174"
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 

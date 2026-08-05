@@ -14,9 +14,10 @@ documents and a commit unless the user explicitly says not to commit.
 ./scripts/start-platform.sh
 ```
 
-One command. It starts the **demo service** (:8081), the **control plane** (:8080) and the
-**console** (:5173), clears stale ports first, waits for each to answer, and prints the API key and
-what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was killed.
+One command. It starts the **demo service** (:8081), the **control plane** (:8080), the
+**console** (:5173) and the **student app** (:5174), clears stale ports first, waits for each to
+answer, and prints the API key and what to click. The student app is a real browser client for the
+demo service and is the thing worth recording — the demo service itself is API-only. Ctrl-C stops all three; `--stop` cleans up after a run that was killed.
 
 - `--build` rebuilds the Java modules first. Without it, existing jars are reused.
 - It installs JMeter's **Custom Thread Groups plugin** (`jpgc-casutg`) if your JMeter lacks it. Every
@@ -51,7 +52,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S10e ran this to completion: **1,291 tests, 0 failures** across all 16 modules. **One skip is
+S10f ran this to completion: **1,300 tests, 0 failures** across all 16 modules. **One skip is
 expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
 and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
 
@@ -73,7 +74,7 @@ note them rather than assuming they are permanent. If a PostgreSQL module fails 
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 171 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 173 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.

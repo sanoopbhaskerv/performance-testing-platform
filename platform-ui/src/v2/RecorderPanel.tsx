@@ -36,6 +36,9 @@ import type {
 /** Frames are polled, not streamed: EventSource cannot send the API key header. */
 const POLL_INTERVAL_MS = 120;
 
+/** Consecutive poll failures before the panel stops trying and says it lost contact. */
+const MAX_CONSECUTIVE_FAILURES = 5;
+
 /** Chrome's modifier bitmask. */
 const MODIFIER_ALT = 1;
 const MODIFIER_CTRL = 2;
@@ -43,6 +46,20 @@ const MODIFIER_META = 4;
 const MODIFIER_SHIFT = 8;
 
 const TERMINAL_STATES = new Set(['CLOSED', 'FAILED', 'CANCELLED', 'EXPIRED']);
+
+/**
+ * Whether the server has forgotten this session.
+ *
+ * A 404 here does not mean a bad request — the session existed when the panel opened. It means the
+ * session ended and was released, so there is nothing to poll for and retrying is pure noise.
+ */
+function isGone(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { response?: { status?: number } }).response?.status === 404
+  );
+}
 
 interface Props {
   client: V2Client;
@@ -110,6 +127,7 @@ export function RecorderPanel({
     }
     let cancelled = false;
     let timer: number | undefined;
+    let failures = 0;
 
     const poll = async () => {
       try {
@@ -117,6 +135,7 @@ export function RecorderPanel({
         if (cancelled) {
           return;
         }
+        failures = 0;
         setStatus(update.status);
         if (update.frame) {
           cursors.current.frame = update.frame.sequence;
@@ -135,12 +154,35 @@ export function RecorderPanel({
           setFailure(update.failureReason);
         }
       } catch (err) {
-        if (!cancelled) {
-          onError(err instanceof Error ? err.message : 'The recorder session stopped responding.');
+        if (cancelled) {
+          return;
+        }
+        failures += 1;
+
+        // A session the server no longer knows about is over, not failing. Retrying cannot bring it
+        // back, so stop immediately and say so — the alternative, seen in practice, is eight
+        // requests a second forever against an endpoint that will keep answering 404.
+        if (isGone(err)) {
+          setStatus('CLOSED');
+          setFailure('This recording has ended and is no longer available on the server.');
+          return;
+        }
+
+        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+          setStatus('FAILED');
+          setFailure('Lost contact with the recording session.');
+          onError(
+            err instanceof Error
+              ? err.message
+              : 'The recorder session stopped responding.',
+          );
+          return;
         }
       }
       if (!cancelled) {
-        timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+        // Backs off while failing, so a control plane that is restarting is given room rather than
+        // hammered. Reset to the fast path on the first success.
+        timer = window.setTimeout(poll, POLL_INTERVAL_MS * 2 ** failures);
       }
     };
 

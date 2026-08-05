@@ -4,8 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10e — a recording now becomes a draft test in the studio, through the same HAR
-importer a DevTools capture uses. Increments 0–2h and S1–S11 are complete.
+**Last updated:** S10f — four defects found by using the recorder against a real target, all fixed.
+Increments 0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -98,11 +98,12 @@ and git-pinned Playwright import, or continue to S12 scale hardening.
 | **S10c — recorder audit, capture sanitizer and safe console entry** | **Complete** | see §3ac |
 | **S10d — guarded CDP bridge and live browser stream** | **Complete** | see §3ag |
 | **S10e — recording becomes a draft test** | **Complete** | see §3ah |
+| **S10f — defects found in real use** | **Complete** | see §3ai |
 | **S11 — web performance under load** | **Complete** | see §3ad |
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,291 tests green, 0 failures at S10e** (one skip, the opt-in live
+**Last full Java verification: 1,300 tests green, 0 failures at S10f** (one skip, the opt-in live
 Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
@@ -2360,6 +2361,67 @@ preserved, no host in the scenarios, and a `DRAFT_CREATED` audit row carrying co
 service returns 500 on `/`, `/api/users` and `/api/courses` — its real endpoint is `/api/students`.
 The pipeline correctly refused all four failed exchanges and said so. Worth knowing when
 demonstrating this.
+
+## 3ai. S10f — four defects found by actually using it
+
+Everything below was found by running the recorder against a real target, not by testing. Recorded
+here because each one passed its unit tests.
+
+### The console hammered a dead session
+
+`RecorderPanel`'s poll loop rescheduled at 120ms unconditionally on failure and called `onError`
+every time. When a session ended and was released, that became roughly **eight 404s a second,
+forever**, each re-raising the error banner. It now backs off exponentially, gives up after five
+consecutive failures, and treats a 404 as "this recording ended" rather than as a retryable error —
+because it is not retryable, and saying so is both truthful and what stops the storm.
+
+### An ended session answered 404 instead of saying it expired
+
+`sweep()` evicted terminal sessions immediately, so a client polling one moment was told the session
+never existed the next. Terminal sessions are now retained for ten minutes, so the last poll returns
+`EXPIRED` or `CANCELLED` **with its reason**. The eviction still happens; it just waits until nobody
+could still be looking.
+
+### A dev server on `[::1]` was unreachable
+
+`--host-resolver-rules` `MAP` takes one replacement, so a host resolving to several addresses could
+only be pinned to one — and `localhost` resolves to both families. Chrome was pinned to
+`127.0.0.1` while Vite listens on `[::1]` only, so every recording of the student app died with
+`ERR_CONNECTION_REFUSED` while `curl` succeeded.
+
+A loopback host under the **relaxed** floor is now `EXCLUDE`d from remapping instead, letting Chrome
+resolve it normally and try both families. That is not a hole: it is emitted only when the allowances
+already permit loopback and every resolved address is loopback, both of which the address floor has
+already accepted. The general single-address limitation is now documented on the method rather than
+left to be rediscovered.
+
+### The demo service reported every 404 as a 500
+
+`@ExceptionHandler(Exception.class)` caught Spring's own `NoResourceFoundException` and
+`HttpRequestMethodNotSupportedException`, so an ordinary unmapped path came back 500. That made the
+platform look broken while it was reporting accurately — and worse, a draft **drops failed
+exchanges**, so recording a healthy service produced nothing. The catch-all now honours any
+exception that implements `ErrorResponse` and is otherwise unchanged.
+
+The demo service is also API-only, so a recording opened on a bare error page. It now serves a small
+landing page at `/` with links, because a recorder needs something to click.
+
+### And the thing that was not a defect
+
+`start-platform.sh` never started `demo-student-ui`, so a target pointing at `:5174` refused the
+connection — correctly. It now starts it alongside the rest. The student app is the better recording
+subject anyway: a real browser client whose clicks produce exactly the API calls a journey is made
+of. Readiness for the demo service also moved from `/api/users`, which has never existed, to
+`/actuator/health`.
+
+### Verification
+
+Full `mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, **1,300 tests, 0 failures** (one skip: the
+opt-in live Chrome test). UI 173 tests.
+
+End to end, which is the only reason any of this was found: recorded the student app at `:5174`,
+saw it render with real data, captured `GET /` and two `GET /api/students`, drafted two journeys
+(`home`, `api-students`) and watched the studio open on **Review journeys** with both loaded.
 
 ## 3ad. S11 — web performance under load
 

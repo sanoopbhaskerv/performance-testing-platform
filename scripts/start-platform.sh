@@ -9,8 +9,9 @@
 #
 # Ctrl-C stops everything it started.
 #
-# Three processes: the demo service to test against (8081), the control plane (8080) and the
-# console (5173). Ports are cleared before anything starts, because a background `java -jar`
+# Four processes: the demo service to test against (8081), the control plane (8080), the console
+# (5173) and the student app (5174) — a real browser client for the demo service, which is what
+# makes the recorder worth trying. Ports are cleared before anything starts, because a `java -jar`
 # survives the shell that launched it — the next start then fails with "Port 8080 was already in
 # use" while curl answers happily from the *stale* jar, and you verify the wrong build.
 
@@ -23,6 +24,9 @@ LOG_DIR="$REPO_ROOT/.local/logs"
 DEMO_PORT=8081
 API_PORT=8080
 UI_PORT=5173
+# The student app: a real browser client for the demo service, and the thing worth recording.
+# The demo service is API-only, so recording it means recording a JSON page.
+STUDENT_UI_PORT=5174
 API_KEY="local-dev-key-not-a-secret"
 
 BUILD=false
@@ -81,6 +85,7 @@ free_port() {
 
 stop_all() {
   free_port "$UI_PORT" "the console"
+  free_port "$STUDENT_UI_PORT" "the student app"
   free_port "$API_PORT" "the control plane"
   free_port "$DEMO_PORT" "the demo service"
 }
@@ -88,7 +93,7 @@ stop_all() {
 if [ "$STOP_ONLY" = true ]; then
   step "Stopping anything left running"
   stop_all
-  ok "Nothing is listening on $DEMO_PORT, $API_PORT or $UI_PORT."
+  ok "Nothing is listening on $DEMO_PORT, $API_PORT, $UI_PORT or $STUDENT_UI_PORT."
   exit 0
 fi
 
@@ -121,6 +126,11 @@ fi
 if [ ! -d platform-ui/node_modules ]; then
   step "Installing console dependencies"
   (cd platform-ui && npm ci)
+fi
+
+if [ ! -d demo-student-ui/node_modules ]; then
+  step "Installing student app dependencies"
+  (cd demo-student-ui && npm ci)
 fi
 
 # ── Which provider ────────────────────────────────────────────────────────
@@ -208,7 +218,7 @@ stop_all
 # ── Demo service ──────────────────────────────────────────────────────────
 step "Starting the demo service on :$DEMO_PORT"
 "$JAVA" -jar "$DEMO_JAR" > "$LOG_DIR/demo-service.log" 2>&1 &
-wait_for "http://localhost:$DEMO_PORT/api/users" "Demo service"
+wait_for "http://localhost:$DEMO_PORT/actuator/health" "Demo service"
 
 # ── Control plane ─────────────────────────────────────────────────────────
 step "Starting the control plane on :$API_PORT (provider: $PROVIDER)"
@@ -232,6 +242,13 @@ step "Starting the console on :$UI_PORT"
 (cd platform-ui && npm run dev -- --port "$UI_PORT" > "$LOG_DIR/console.log" 2>&1) &
 wait_for "http://localhost:$UI_PORT" "Console"
 
+# ── Student app ───────────────────────────────────────────────────────────
+# Started because the recorder needs something worth recording. It proxies /api to the demo
+# service, so clicking through it produces exactly the API calls a journey is made of.
+step "Starting the student app on :$STUDENT_UI_PORT"
+(cd demo-student-ui && npm run dev -- --port "$STUDENT_UI_PORT" > "$LOG_DIR/student-app.log" 2>&1) &
+wait_for "http://localhost:$STUDENT_UI_PORT" "Student app"
+
 # ── Ready ─────────────────────────────────────────────────────────────────
 cat <<BANNER
 
@@ -241,6 +258,7 @@ ${BOLD}Ready.${RESET}
   Team API key   ${BOLD}$API_KEY${RESET}
   Control plane  http://localhost:$API_PORT      ${DIM}(OpenAPI at /swagger-ui.html)${RESET}
   Demo service   http://localhost:$DEMO_PORT      ${DIM}the thing you are load-testing${RESET}
+  Student app    http://localhost:$STUDENT_UI_PORT      ${DIM}a real browser client — record this one${RESET}
 
 ${BOLD}Try this first${RESET}
   1. Open the console, paste the API key, choose ${BOLD}New test${RESET}.

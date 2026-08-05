@@ -464,6 +464,38 @@ class ManageRecordingsUseCaseTest {
                     .hasMessageContaining("CANCELLED");
         }
 
+        /**
+         * The console polls every 120ms. Forgetting a session the instant it expires turned the
+         * next poll into a 404 — which the client could only read as "no such session", and which
+         * it then retried eight times a second indefinitely.
+         */
+        @Test
+        @DisplayName("an expired session stays readable, so the last poll says why it ended")
+        void expiredSessionRemainsReadable() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            clock.advance(Duration.ofMinutes(6));
+            useCase.sweep();
+
+            var update = useCase.live(session.id(), 0, 0, 0, 50, caller(Scope.RECORDINGS_READ));
+
+            assertThat(update.status()).isEqualTo(RecorderSessionState.EXPIRED);
+            assertThat(update.failureCode()).isEqualTo("recorder.session.idle");
+        }
+
+        @Test
+        @DisplayName("an ended session is forgotten once nobody could still be reading it")
+        void endedSessionIsEventuallyForgotten() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            useCase.stop(session.id(), caller(Scope.RECORDINGS_CANCEL));
+
+            clock.advance(Duration.ofMinutes(11));
+            useCase.sweep();
+
+            assertThatThrownBy(() -> useCase.live(session.id(), 0, 0, 0, 50,
+                    caller(Scope.RECORDINGS_READ)))
+                    .isInstanceOf(ManageRecordingsUseCase.UnknownSessionException.class);
+        }
+
         @Test
         @DisplayName("a browser that dies on its own fails the session")
         void browserCrashFailsSession() {

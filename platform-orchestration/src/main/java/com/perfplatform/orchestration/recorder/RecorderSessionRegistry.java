@@ -3,6 +3,7 @@ package com.perfplatform.orchestration.recorder;
 import com.perfplatform.domain.identity.RecorderSessionId;
 import com.perfplatform.domain.recorder.RecorderSessionState;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -31,13 +32,30 @@ public final class RecorderSessionRegistry {
     /** Guards against a leaked session slowly filling the heap with frame buffers. */
     private final int maxConcurrentSessions;
 
+    /**
+     * How long an ended session stays readable.
+     *
+     * <p>Forgetting a session the moment it ends turns a client's next poll into a 404, which reads
+     * as "no such session" when the truth is "it expired two seconds ago". Keeping it briefly lets
+     * the last poll return {@code EXPIRED} or {@code CANCELLED} with a reason, which is both honest
+     * and what stops a client retrying something that will never come back. Its browser is already
+     * closed and its buffers are what remain, so the cost is small and bounded.
+     */
+    private final Duration terminalRetention;
+
     private final Map<RecorderSessionId, LiveRecorderSession> sessions = new ConcurrentHashMap<>();
 
-    public RecorderSessionRegistry(int maxConcurrentSessions) {
+    public RecorderSessionRegistry(int maxConcurrentSessions, Duration terminalRetention) {
         if (maxConcurrentSessions < 1) {
             throw new IllegalArgumentException("At least one recorder session must be permitted");
         }
         this.maxConcurrentSessions = maxConcurrentSessions;
+        this.terminalRetention = terminalRetention == null ? Duration.ofMinutes(10)
+                : terminalRetention;
+    }
+
+    public RecorderSessionRegistry(int maxConcurrentSessions) {
+        this(maxConcurrentSessions, Duration.ofMinutes(10));
     }
 
     public static RecorderSessionRegistry withDefaults() {
@@ -69,15 +87,23 @@ public final class RecorderSessionRegistry {
         return sessions.values().stream().filter(session -> !session.state().isTerminal()).count();
     }
 
-    /** Drops terminal sessions, freeing their frame buffers. */
-    public List<LiveRecorderSession> evictTerminal() {
+    /**
+     * Drops sessions that ended long enough ago that nobody is still reading them.
+     *
+     * @return the sessions forgotten by this sweep
+     */
+    public List<LiveRecorderSession> evictTerminal(Instant now) {
         List<LiveRecorderSession> evicted = new ArrayList<>();
         sessions.values().removeIf(session -> {
-            if (session.state().isTerminal()) {
-                evicted.add(session);
-                return true;
+            if (!session.state().isTerminal()) {
+                return false;
             }
-            return false;
+            Instant endedAt = session.terminatedAt().orElse(Instant.EPOCH);
+            if (Duration.between(endedAt, now).compareTo(terminalRetention) < 0) {
+                return false;
+            }
+            evicted.add(session);
+            return true;
         });
         return evicted;
     }
