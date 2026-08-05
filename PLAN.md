@@ -13,7 +13,10 @@ core features rather than polish.
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
 **Status: S1 through S9 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3y for what each delivered. S10, the recorder, is next; everything after it is still a plan.
+§3n–§3y for what each delivered. The S10 recorder security review is complete in
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md);
+S10 implementation must satisfy that gate before any recorder UI or pod is added. Everything after
+it is still a plan.
 
 ---
 
@@ -459,9 +462,10 @@ Five things fall out of this that no other option gives:
 3. **One session yields both artefacts.** The same recording produces the protocol journey (for
    JMeter) *and* a Playwright script (via codegen). Record once, get both halves of a Type 3 test.
    This is the unification that makes the flagship test type cheap to author.
-4. **It solves the login.** The person signs in **interactively, themselves**, inside the recording
-   browser. No credential is typed into the platform, no IdP is scripted, and the resulting session
-   is captured for reuse (§9). For an SSO-protected application this is worth more than the recorder.
+4. **It solves authoring through login.** The person signs in **interactively, themselves**, inside
+   the recording browser. No credential is typed into the platform and no IdP is scripted. The
+   resulting session is authoring evidence only; material runs still use `run://session` or another
+   approved test-account/session provider (§9).
 5. **It runs where the runners run.** Same network position, so it reaches internal applications a
    laptop may not.
 
@@ -477,8 +481,11 @@ network** unless it is constrained. Non-negotiable:
   `SecretValueDetector` before anything is stored — the same treatment a HAR upload gets.
 - Non-root, all capabilities dropped, egress-restricted `NetworkPolicy`.
 
-This needs a security review before it is built (§12, R2), and it should be reviewed as what it is: a
-user-driven browser in a controlled namespace.
+This needed a security review before it was built (§12, R2). That review is now recorded in
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+The core decision from it: the recorder is an authoring tool, not a runtime credential source. A
+human SSO session captured during recording must not be promoted to material test credentials; real
+runs still use `run://session` or another approved test-account/session provider.
 
 ---
 
@@ -668,9 +675,11 @@ every request 401s in two milliseconds and the run reports its best numbers ever
 response never counts as a success, triggers re-acquisition, and fails the run with a session-expiry
 code if re-acquisition is not possible.
 
-**The recorder is the best acquisition path.** The person signs in interactively during recording;
-the platform captures the resulting session and, for the browser half, the `storageState`. No IdP is
-scripted, no corporate password is typed into the platform, and the same session serves both engines.
+**The recorder is not a material session-acquisition path.** The person may sign in interactively
+during recording so the platform can observe and author the journey through the authenticated area,
+but any captured cookies, tokens or `storageState` are sensitive authoring evidence, not reusable
+runtime credentials. Real runs still acquire sessions through `run://session` or another approved
+test-account/session provider.
 
 ---
 
@@ -967,11 +976,15 @@ what S11's start conditions need, but it is a real change in pod count.
 
 ### S10 — the recorder, and git-pinned Playwright sources
 
-§5. Recording pod, CDP screencast to the console, target-locked navigation, egress-restricted
-`NetworkPolicy`, capped lifetime, sanitization on capture. Produces the protocol journey **and** the
-Playwright script from one session, plus the captured session for §9's pool.
+§5. Recording pod, CDP screencast to the console, target-locked navigation, enforced egress,
+capped lifetime and sanitization on capture. Produces a draft protocol journey **and** a draft
+Playwright script from one session.
 
-Security review before build (§12, R2).
+Security gate is complete and binding:
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+Build order is now recorder security foundation first, capture sanitizer second, CDP bridge/UI
+third, and git-pinned Playwright import fourth. Do not add a clickable recorder entry point before
+target-locking, network egress enforcement and sanitization are implemented and tested.
 
 ### S11 — web performance under load
 
@@ -1003,7 +1016,7 @@ credentials are a §31 pause. Re-run the kind procedure (`ROADMAP.md` §0's outs
 | | | |
 |---|---|---|
 | **R1** | ~~vitest~~ | **Resolved: approved.** Added in S1. |
-| **R2** | **The recording browser is a user-driven browser inside the network.** Target-locking and egress policy are the controls | Security review before S10 is built. |
+| **R2** | **The recording browser is a user-driven browser inside the network.** Target-locking and egress policy are the controls | **Reviewed:** [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md). S10 may proceed only through the documented security-foundation gate. |
 | **R3** | **Traces and screenshots may contain customer data**, and the platform serves them for download | Governance answer needed. Proposal: on-failure only, short retention, sanitized. |
 | **R4** | **Secret manager** beyond mounted `k8s://` and local development references | §31 pause. S5 added the `SecretResolver` port and mounted Kubernetes Secret resolver; Vault/AWS/Azure providers remain explicit decisions. |
 | **R5** | **Git credentials** for Playwright source fetch | **Not needed in release 1** — scripts are uploaded, not cloned (§5). S10 builds the seam. |

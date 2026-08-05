@@ -4,7 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** Studio increment S9. Increments 0–2h and S1–S9 are complete.
+**Last updated:** S10 recorder security review. Increments 0–2h and S1–S9 are complete; S10
+implementation has not started.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -33,10 +34,11 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **V1's removal is authorized** — the §31 pause is cleared — and the user has asked for it **after**
   the studio build phases. S5 removed the credentials/session blocker, but API removal still needs a
   focused audit of identity, target resolution and team sync (`PLAN.md` §0, "On V1").
-- **The recorder is deferred to S10.** Release 1 ships guided capture wizards instead: DevTools HAR
-  for protocol journeys, `npx playwright codegen` for browser journeys. **A HAR cannot produce a
-  Playwright script** — it records traffic, not user actions — so the two halves need separate
-  sources.
+- **The recorder is deferred to S10.** The required security review is complete in
+  [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+  Release 1 ships guided capture wizards instead: DevTools HAR for protocol journeys,
+  `npx playwright codegen` for browser journeys. **A HAR cannot produce a Playwright script** — it
+  records traffic, not user actions — so the two halves need separate sources.
 - **Playwright import is in release 1**, as an uploaded or pasted `.spec.ts` stored immutably by
   content digest. Not a git clone: no credentials, no §31 pause. Git-pinned import is S10.
 - ~~**Live monitoring is deferred to S7**~~ **Built in S7** (§3w). Runners publish rolling snapshots
@@ -45,7 +47,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **S8, load profiles — arrival rate as well as users**.
+`NEXT-SESSION.md` §2 has the immediate task: **S10, starting with the recorder security foundation**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -87,6 +89,7 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 | **S7 — live monitoring** | **Complete** | see §3w |
 | **S8 — load profiles: rate as well as users** | **Complete** | see §3x |
 | **S9 — one run, many workloads** | **Complete** (browser budget moved to S11) | see §3y |
+| **S10 security review** | **Complete** | [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md) |
 | **S10–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
@@ -117,8 +120,10 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S8, load profiles — arrival rate as well as users.** `NEXT-SESSION.md` §2
-has the detail.
+**Immediate next action: S10 recorder security foundation.** Implement the target allowlist model,
+address policy, browser route guard, enforced egress, recorder pod manifest contract and audit
+events from [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+Do not add a clickable recorder entry point before those controls and tests exist.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -128,10 +133,9 @@ has the detail.
    added runtime credential handling, `SecretResolver`, broker-backed `run://session`, mounted
    session partitions and production cleanup.** Real enterprise identity and non-Kubernetes secret
    managers remain later pause-condition decisions.
-3. **A run still has one plan with one engine.** S6 changed
-   `EngineDispatchingPlanCompiler.primaryEngine()` to refuse mixed-engine and hybrid specifications
-   at plan compile time instead of silently taking the first workload. Real coordinated hybrid
-   execution remains **S9/S11**.
+3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9.** A run compiles one plan per
+   workload, shards are scoped by workload, and analysis merges sample sets across engines. Real
+   coordinated hybrid start timing and the browser-session budget remain **S11**.
 
 ---
 
@@ -1905,6 +1909,36 @@ workload.
 
 ---
 
+## 3z. S10 gate — recorder security review
+
+**The required S10 security review is complete, but the recorder is not built.** The review lives in
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md) and
+is now the binding gate for S10 implementation.
+
+The main decision: a server-side recording browser is an interactive network client in the runner
+network, so it is an internal open proxy unless constrained at two layers. S10 must implement both a
+browser-level route guard and an enforced network layer (`NetworkPolicy` where CIDRs are enough, or
+an egress proxy when hostname policy is required). Target locking must come from the registered
+target and explicitly declared asset/login domains; redirects, iframes, popups, workers, fetch,
+WebSockets and EventSource all need the same decision.
+
+The second decision: a human SSO session captured during recording is authoring evidence only. It
+must not be promoted into material run credentials. Real authenticated runs continue to use
+`run://session`, scoped service identities or another approved test-account/session provider.
+
+The required S10 build order is:
+
+1. Recorder security foundation: target allowlists, address policy, route guard, enforced egress,
+   recorder pod manifest contract and audit events.
+2. Capture sanitizer: request/response capture, draft artifact storage, generated Playwright script
+   stripping and non-promotion of human sessions.
+3. CDP bridge and UI.
+4. Git-pinned Playwright import.
+
+Do not add a clickable recorder button until steps 1 and 2 are test-covered.
+
+---
+
 ## 4. Design decisions made in 1B and 1C (do not relitigate)
 
 ### From 1B
@@ -1983,11 +2017,13 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. A recording pod
-with CDP screencast to the console, target-locked navigation, an egress-restricted `NetworkPolicy`, a
-capped lifetime and sanitization on capture — producing the protocol journey *and* the Playwright
-script from one session. **`PLAN.md` §12 R2 requires a security review before this is built**: it is a
-user-driven browser inside the network, and target-locking plus egress policy are the controls.
+**Next: S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The required
+R2 security review is complete:
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+Start with the recorder security foundation: target allowlists, address policy, browser route guard,
+enforced egress, recorder pod manifest contract and audit events. A recording pod with CDP
+screencast to the console must not exist until those controls and tests exist, because a
+user-driven browser inside the network is otherwise an internal open proxy.
 
 If a smaller next step is wanted instead, **S11's prerequisites** are now the shortest path to value:
 the browser-session budget deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves.
