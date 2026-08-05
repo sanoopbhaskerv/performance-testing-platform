@@ -97,7 +97,7 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | Deferred to S10. The required security review is complete in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md). Release 1 ships **guided capture wizards** until S10 implements the reviewed controls. |
+| **Recorder** | S10 has started. The required security review is complete in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md), and S10a added domain-level allowlist, address and route-guard policy. Release 1 ships **guided capture wizards** until S10 implements the rest of the reviewed controls. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. Hybrid under-load testing is still S11. |
@@ -149,12 +149,13 @@ that exposes it. Nothing lands API-only.
 
 **S9: 1,106 Java tests, 158 UI tests, `mvn clean verify` fully green.**
 
-**Next: S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The security
-review required by `PLAN.md` §12 R2 is complete:
+**Next: continue S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The
+security review required by `PLAN.md` §12 R2 is complete:
 [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-Start with the recorder security foundation from that document: target allowlists, address policy,
-route guard, enforced egress, recorder pod manifest contract and audit events. Do not add a clickable
-recorder entry point before those controls and tests exist.
+S10a added the domain-level target allowlist, address policy and route guard. Next, make that
+enforceable outside the browser: recorder pod manifest contract, deny-by-default egress
+policy/proxy rendering and audit events. Do not add a clickable recorder entry point before network
+enforcement and capture sanitization exist.
 
 A smaller alternative, if one is wanted: **S11's prerequisites** — the browser-session budget
 deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves against something.

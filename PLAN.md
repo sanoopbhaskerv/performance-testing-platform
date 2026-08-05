@@ -14,9 +14,10 @@ core features rather than polish.
 
 **Status: S1 through S9 are built.** See §11 for the per-increment state and `HANDOFF.md`
 §3n–§3y for what each delivered. The S10 recorder security review is complete in
-[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md);
-S10 implementation must satisfy that gate before any recorder UI or pod is added. Everything after
-it is still a plan.
+[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
+S10a has started the security foundation with domain-level recorder allowlist, address and route
+guard policy. Recorder UI, CDP bridge, pod creation and egress rendering are still not built.
+Everything after it is still a plan.
 
 ---
 
@@ -985,6 +986,12 @@ Security gate is complete and binding:
 Build order is now recorder security foundation first, capture sanitizer second, CDP bridge/UI
 third, and git-pinned Playwright import fourth. Do not add a clickable recorder entry point before
 target-locking, network egress enforcement and sanitization are implemented and tested.
+
+S10a has implemented the domain-level part of the security foundation: `RecorderSessionPolicy`,
+`RecorderRouteGuard`, `RecorderAddressPolicy`, `CidrBlock` and recorder-specific scopes. It can
+decide whether a browser destination is allowed for a frozen session. The next S10 slice must make
+that enforceable outside the browser by adding the recorder pod manifest contract and egress policy
+or egress-proxy rendering.
 
 ### S11 — web performance under load
 

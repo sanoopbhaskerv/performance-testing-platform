@@ -28,6 +28,15 @@ public final class Scope {
     /** Read run state, events, results and artifacts. */
     public static final String RUNS_READ = "runs:read";
 
+    /** Start a browser recording session for an owned application target. */
+    public static final String RECORDINGS_CREATE = "recordings:create";
+
+    /** Read a recorder session's status, blocked destinations and generated draft artifacts. */
+    public static final String RECORDINGS_READ = "recordings:read";
+
+    /** Stop an active browser recording session. */
+    public static final String RECORDINGS_CANCEL = "recordings:cancel";
+
     /** Approve a version that governance requires approval for. */
     public static final String APPROVALS_GRANT = "approvals:grant";
 

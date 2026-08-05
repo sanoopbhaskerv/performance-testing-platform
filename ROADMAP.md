@@ -29,10 +29,10 @@ than a surprise.
 > protocol load and a browser cohort, with an engine this deployment lacks refused at validation.
 > `HANDOFF.md` §3n–§3y.
 >
-> **Next: S10**, the recorder. The required security review is complete:
+> **S10 has started.** The required security review is complete:
 > [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-> S10 must start with the documented recorder security foundation before any UI entry point or
-> recording pod is added.
+> S10a added the domain-level recorder allowlist, address policy and route guard. Next is the
+> network-enforced half of the foundation: recorder pod manifest and egress policy/proxy rendering.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
