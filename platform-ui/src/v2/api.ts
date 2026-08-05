@@ -737,6 +737,19 @@ export class V2Client {
       .then(() => undefined);
   }
 
+  /**
+   * Turns a recording into draft scenarios.
+   *
+   * Creates nothing, so it is safe to call while the recording is still running. The response is the
+   * same shape `importSource` returns — underneath, the recording is rendered as a HAR and read by
+   * the ordinary HAR importer, so anything that can display an import can display a recording.
+   */
+  recordingDraft(sessionId: string) {
+    return axios
+      .get<ImportResponse>(`/api/v2/recordings/${sessionId}/draft`, { headers: this.headers })
+      .then((r) => r.data);
+  }
+
   stopRecording(sessionId: string) {
     return axios
       .post<RecordingSession>(`/api/v2/recordings/${sessionId}/stop`, {}, { headers: this.headers })

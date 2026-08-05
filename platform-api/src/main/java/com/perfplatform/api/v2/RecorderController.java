@@ -1,5 +1,6 @@
 package com.perfplatform.api.v2;
 
+import com.perfplatform.api.v2.dto.ImportResponse;
 import com.perfplatform.api.v2.dto.RecorderAuditEventResponse;
 import com.perfplatform.api.v2.dto.RecorderCaptureRequest;
 import com.perfplatform.api.v2.dto.RecorderInputRequest;
@@ -9,6 +10,7 @@ import com.perfplatform.api.v2.dto.SanitizedRecorderCaptureResponse;
 import com.perfplatform.api.v2.dto.StartRecordingRequest;
 import com.perfplatform.api.v2.security.CallerContextProvider;
 import com.perfplatform.domain.identity.RecorderSessionId;
+import com.perfplatform.domain.spec.SourceType;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase.StartCommand;
 import io.swagger.v3.oas.annotations.Operation;
@@ -92,6 +94,27 @@ public class RecorderController {
     public void input(@PathVariable String sessionId,
             @Valid @RequestBody RecorderInputRequest request) {
         recordings.input(RecorderSessionId.of(sessionId), request.toDomain(), callers.current());
+    }
+
+    /**
+     * Turns what was recorded into draft scenarios.
+     *
+     * <p>Creates nothing, exactly like {@code /api/v2/imports/*} — it returns a draft plus findings,
+     * so it is safe to call while the recording is still running. Creating the definition stays a
+     * separate, deliberate act, which is what keeps a recording from becoming an executable test
+     * without anyone having reviewed it.
+     *
+     * <p>The response is the same {@code ImportResponse} a HAR import returns, because that is
+     * literally what happens underneath: the recording is rendered as a HAR and read by the ordinary
+     * HAR importer. A consumer that can display an import can display a recording.
+     */
+    @Operation(summary = "Turn a recording into draft scenarios",
+            description = "Creates nothing. Returns the same draft-plus-findings shape as a HAR "
+                    + "import, because the recording is imported by that same code path.")
+    @GetMapping(value = "/{sessionId}/draft", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ImportResponse draft(@PathVariable String sessionId) {
+        return ImportResponse.from(SourceType.HAR.name().toLowerCase(java.util.Locale.ROOT),
+                recordings.draft(RecorderSessionId.of(sessionId), callers.current()));
     }
 
     @Operation(summary = "Stop a recorder session and close its browser")

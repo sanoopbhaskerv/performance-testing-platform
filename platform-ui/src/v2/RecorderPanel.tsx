@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, MonitorPlay, RotateCcw, ShieldAlert, Square, Undo2 } from 'lucide-react';
+import { AlertTriangle, MonitorPlay, RotateCcw, ShieldAlert, Square, Undo2, Wand2 } from 'lucide-react';
 import type {
+  ImportResponse,
   V2Client,
   RecorderBlockedDestination,
   RecorderCapturedExchange,
@@ -49,9 +50,18 @@ interface Props {
   onSessionChange: (session: RecordingSession) => void;
   onClose: () => void;
   onError: (message: string) => void;
+  /** Hands the drafted journeys to the studio. Absent when there is nowhere to take them. */
+  onDraft?: (draft: ImportResponse) => void;
 }
 
-export function RecorderPanel({ client, session, onSessionChange, onClose, onError }: Props) {
+export function RecorderPanel({
+  client,
+  session,
+  onSessionChange,
+  onClose,
+  onError,
+  onDraft,
+}: Props) {
   const [status, setStatus] = useState(session.status);
   const [frame, setFrame] = useState<string | null>(null);
   const [frameSize, setFrameSize] = useState({
@@ -237,6 +247,29 @@ export function RecorderPanel({ client, session, onSessionChange, onClose, onErr
     });
   };
 
+  const [drafting, setDrafting] = useState(false);
+
+  /**
+   * Turns what has been recorded into a draft test.
+   *
+   * Available while the session is still live: someone who has finished the journey they cared about
+   * should not have to stop the browser to find out what the platform made of it. Nothing is
+   * created — the draft opens in the studio, where a person reviews it and decides.
+   */
+  const draft = async () => {
+    if (!onDraft) {
+      return;
+    }
+    setDrafting(true);
+    try {
+      onDraft(await client.recordingDraft(session.id));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'The recording could not be turned into a test.');
+    } finally {
+      setDrafting(false);
+    }
+  };
+
   const stop = async () => {
     try {
       const stopped = await client.stopRecording(session.id);
@@ -304,6 +337,21 @@ export function RecorderPanel({ client, session, onSessionChange, onClose, onErr
           <button className="btn btn-quiet" onClick={() => void stop()} disabled={terminal}>
             <Square size={14} aria-hidden /> Stop
           </button>
+          {onDraft && (
+            <button
+              className="btn"
+              onClick={() => void draft()}
+              disabled={drafting || captures.length === 0}
+              title={
+                captures.length === 0
+                  ? 'Nothing has been captured yet. Interact with the application first.'
+                  : undefined
+              }
+            >
+              <Wand2 size={14} aria-hidden />{' '}
+              {drafting ? 'Building the draft…' : 'Turn this into a test'}
+            </button>
+          )}
           {terminal && (
             <button className="btn btn-quiet" onClick={onClose}>
               Close

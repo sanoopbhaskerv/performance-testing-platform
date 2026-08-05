@@ -14,11 +14,14 @@ import com.perfplatform.domain.recorder.RecorderInputKind;
 import com.perfplatform.domain.recorder.RecorderRequestKind;
 import com.perfplatform.domain.recorder.RecorderSanitizedCapture;
 import com.perfplatform.domain.recorder.RecorderScreencastFrame;
+import com.perfplatform.domain.importer.SourceImporter;
 import com.perfplatform.domain.recorder.RecorderSessionState;
 import com.perfplatform.domain.recorder.RecorderViewport;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import com.perfplatform.domain.validation.ValidationFinding;
+import com.perfplatform.domain.validation.ValidationResult;
 import com.perfplatform.orchestration.recorder.LiveRecorderSession;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
 import org.junit.jupiter.api.BeforeEach;
@@ -287,6 +290,37 @@ class RecorderControllerTest {
         mockMvc.perform(post("/api/v2/recordings/{sessionId}/stop", SESSION))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("a recording is returned as a draft in the same shape a HAR import returns")
+    void draftLooksLikeAnImport() throws Exception {
+        when(recordings.draft(eq(SESSION), any())).thenReturn(SourceImporter.ImportResult.of(
+                List.of(new ScenarioSpec("checkout", 60, null, "POST", "/orders",
+                        Map.of(), Map.of(), null, List.of())),
+                ValidationResult.of(ValidationFinding.warning("import.har.credentials.removed",
+                        "/request/headers", "An Authorization header was removed.",
+                        "Use spec.authentication with a secret reference."))));
+
+        mockMvc.perform(get("/api/v2/recordings/{sessionId}/draft", SESSION))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sourceType").value("har"))
+                .andExpect(jsonPath("$.scenarios[0].name").value("checkout"))
+                .andExpect(jsonPath("$.scenarios[0].weight").value(60))
+                .andExpect(jsonPath("$.findings[0].code").value("import.har.credentials.removed"));
+    }
+
+    @Test
+    @DisplayName("a recording that captured nothing returns findings, not an empty success")
+    void emptyDraftExplainsItself() throws Exception {
+        when(recordings.draft(eq(SESSION), any())).thenReturn(SourceImporter.ImportResult.nothing(
+                ValidationResult.of(ValidationFinding.warning("recorder.draft.empty", "/",
+                        "This recording captured no requests.", "Interact with the application."))));
+
+        mockMvc.perform(get("/api/v2/recordings/{sessionId}/draft", SESSION))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.scenarios").isEmpty())
+                .andExpect(jsonPath("$.findings[0].code").value("recorder.draft.empty"));
     }
 
     private static ManageRecordingsUseCase.RecordingSession session(RecorderSessionState state,

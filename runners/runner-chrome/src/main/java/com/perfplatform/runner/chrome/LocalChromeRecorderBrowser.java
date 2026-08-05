@@ -26,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Drives a local Chrome over the DevTools Protocol as one recording session.
@@ -109,6 +110,15 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
         /** Requests seen but not yet complete, keyed by the DevTools request id. */
         private final Map<String, PendingExchange> exchanges = new ConcurrentHashMap<>();
         private final AtomicBoolean closed = new AtomicBoolean();
+        /**
+         * Which page the requests arriving now belong to.
+         *
+         * <p>A browser recording is a sequence of page visits, and each visit is the closest thing
+         * the session has to a statement of intent — the same signal a HAR's {@code pageref}
+         * carries. Grouping by it is what makes a recording become several journeys rather than one
+         * flat list of two hundred requests.
+         */
+        private final AtomicInteger journey = new AtomicInteger(1);
         private final ExecutorService captures = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "recorder-capture");
             thread.setDaemon(true);
@@ -223,6 +233,7 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
                         () -> completeExchange(event.params().path("requestId").asText()));
                 case "Network.loadingFailed" -> exchanges.remove(
                         event.params().path("requestId").asText());
+                case "Page.frameNavigated" -> onFrameNavigated(event.params());
                 case "Inspector.targetCrashed" -> end("recorder.browser.failed.crashed",
                         "The recording browser crashed.");
                 case "Inspector.detached" -> end("recorder.browser.disconnected",
@@ -258,6 +269,14 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
             listener.onBlocked(url, kind, decision, clock.instant());
         }
 
+        /** A main-frame navigation starts a new candidate journey; an iframe does not. */
+        private void onFrameNavigated(JsonNode params) {
+            JsonNode frame = params.path("frame");
+            if (frame.path("parentId").isMissingNode() || frame.path("parentId").asText("").isEmpty()) {
+                journey.incrementAndGet();
+            }
+        }
+
         private void frame(JsonNode params) {
             String data = params.path("data").asText(null);
             String ackSession = params.path("sessionId").asText(null);
@@ -289,7 +308,10 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
                     request.path("method").asText("GET"),
                     request.path("url").asText(""),
                     headers(request.path("headers")),
-                    request.path("postData").asText(null)));
+                    request.path("postData").asText(null),
+                    // Recorded when the request starts, not when it finishes: a slow call must not
+                    // be filed under whichever page happened to be current by the time it returned.
+                    "page-" + journey.get()));
         }
 
         private void rememberResponse(JsonNode params) {
@@ -300,6 +322,7 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
             JsonNode response = params.path("response");
             exchange.responseHeaders = headers(response.path("headers"));
             exchange.responseContentType = response.path("mimeType").asText(null);
+            exchange.status = response.path("status").asInt(0);
         }
 
         /**
@@ -323,7 +346,7 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
                     exchange.method, exchange.url, exchange.requestHeaders,
                     exchange.requestHeaders.get("content-type"), exchange.requestBody,
                     exchange.responseHeaders, exchange.responseContentType, body,
-                    null), clock.instant());
+                    null, exchange.status, exchange.journeyRef), clock.instant());
         }
 
         private String readBody(String requestId) {
@@ -429,15 +452,18 @@ public final class LocalChromeRecorderBrowser implements RecorderBrowser {
         private final String url;
         private final Map<String, String> requestHeaders;
         private final String requestBody;
+        private final String journeyRef;
         private volatile Map<String, String> responseHeaders = Map.of();
         private volatile String responseContentType;
+        private volatile int status;
 
         private PendingExchange(String method, String url, Map<String, String> requestHeaders,
-                String requestBody) {
+                String requestBody, String journeyRef) {
             this.method = method;
             this.url = url;
             this.requestHeaders = requestHeaders;
             this.requestBody = requestBody;
+            this.journeyRef = journeyRef;
         }
     }
 }

@@ -38,6 +38,8 @@ import RunProgressBar from './RunProgressBar';
 import { objectiveLabel } from './labels';
 import './console.css';
 import { RecorderPanel } from './RecorderPanel';
+import type { Journey } from './studio/draft';
+import { journeysFromImport } from './studio/draft';
 
 /**
  * The V2 self-service console.
@@ -301,6 +303,14 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [sessionCredential, setSessionCredential] = useState('');
   const [recordingTargetKey, setRecordingTargetKey] = useState('');
   const [recordingSession, setRecordingSession] = useState<RecordingSession | null>(null);
+  /**
+   * Journeys carried from a recording into the studio.
+   *
+   * Held here rather than inside the recorder panel because the studio is the console's, not the
+   * panel's — and because clearing it on save is what stops a second visit to the studio reopening
+   * somebody's old recording.
+   */
+  const [recordingSeed, setRecordingSeed] = useState<Journey[] | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -590,12 +600,17 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           <Studio
             client={client}
             team=""
+            seed={recordingSeed ? { testType: 'api-load', journeys: recordingSeed } : null}
             onSaved={(name) => {
               setStudioOpen(false);
+              setRecordingSeed(null);
               setNotice(`Created "${name}". Choose it below to run it.`);
               void refresh();
             }}
-            onCancel={() => setStudioOpen(false)}
+            onCancel={() => {
+              setStudioOpen(false);
+              setRecordingSeed(null);
+            }}
           />
         )}
 
@@ -637,6 +652,23 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
             onSessionChange={setRecordingSession}
             onClose={() => setRecordingSession(null)}
             onError={setError}
+            onDraft={(draft) => {
+              const journeys = journeysFromImport(draft.scenarios, draft.correlationSuggestions);
+              if (journeys.length === 0) {
+                setError(
+                  'This recording produced no journeys. Static assets and failed requests are ' +
+                    'deliberately left out — interact with the application, then try again.',
+                );
+                return;
+              }
+              setRecordingSeed(journeys);
+              setEditorOpen(false);
+              setStudioOpen(true);
+              setNotice(
+                `Turned ${journeys.length} recorded journey${journeys.length === 1 ? '' : 's'} ` +
+                  'into a draft. Review it before saving — nothing has been created yet.',
+              );
+            }}
           />
         )}
 

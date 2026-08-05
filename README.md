@@ -18,6 +18,11 @@ There are two paths through it:
 
 Path A generates **no traffic at all**. Read step 7 before believing any number it produces.
 
+> **In a hurry?** `./scripts/start-platform.sh` does steps 3–5 in one command, and additionally
+> enables the **recorder** so you can record a journey in a real browser and turn it into a test.
+> [`docs/operations/recording-locally.md`](docs/operations/recording-locally.md) is that procedure
+> end to end.
+
 ---
 
 ### Step 1 — Prerequisites

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, Check, Gauge, MonitorSmartphone } from 'lucide-react';
 import type { V2Client } from '../api';
 import { describeError } from '../api';
-import type { StudioDraft, TestType } from './draft';
+import type { Journey, StudioDraft, TestType } from './draft';
 import { newDraft } from './draft';
 import type { StepId } from './steps';
 import { blockerFor, stepsFor } from './steps';
@@ -26,17 +26,29 @@ import './studio.css';
 export default function Studio({
   client,
   team,
+  seed,
   onSaved,
   onCancel,
 }: {
   client: V2Client;
   team: string;
+  /**
+   * Journeys the studio should open with, from a recording.
+   *
+   * When present the studio skips both the start screen and the sources screen and opens on Refine,
+   * because both questions are already answered: the person chose what to record and then recorded
+   * it. Asking them to pick a test type and a source afterwards would be asking them to repeat
+   * themselves.
+   */
+  seed?: { testType: TestType; journeys: Journey[] } | null;
   /** Called with the created definition's name once it exists, so the console can refresh. */
   onSaved: (name: string) => void;
   onCancel: () => void;
 }) {
-  const [draft, setDraft] = useState<StudioDraft | null>(null);
-  const [stepId, setStepId] = useState<StepId>('sources');
+  const [draft, setDraft] = useState<StudioDraft | null>(
+    seed ? { ...newDraft(seed.testType, team), journeys: seed.journeys } : null,
+  );
+  const [stepId, setStepId] = useState<StepId>(seed ? 'refine' : 'sources');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -30,9 +30,11 @@ what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was k
 The start script also enables the **recorder bridge** — `local-browser.enabled`,
 `allow-loopback-target` and a disabled network-enforcement floor. All three are refused under a
 production profile; the loopback allowance is what lets a recording browser reach the demo service on
-this machine, and it relaxes *only* loopback. Press **Start guarded recording** and the session goes
-`LIVE` with a live browser surface. If it stays `PENDING_BROWSER_BRIDGE`, this machine has no Chrome
-or Chromium — the panel says so rather than spinning.
+this machine, and it relaxes *only* loopback. Press **Start guarded recording**, use the page, then
+**Turn this into a test** and the studio opens with the recorded journeys loaded.
+**[`docs/operations/recording-locally.md`](docs/operations/recording-locally.md) is the whole
+procedure**, including what the flags mean and what to do when a session stays
+`PENDING_BROWSER_BRIDGE`.
 
 Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
 **New test** opens the **studio**: choose *Test an API*, bring a source (a cURL command, an OpenAPI
@@ -49,7 +51,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S10d ran this to completion: **1,264 tests, 0 failures** across all 16 modules. **One skip is
+S10e ran this to completion: **1,291 tests, 0 failures** across all 16 modules. **One skip is
 expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
 and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
 
@@ -71,10 +73,12 @@ note them rather than assuming they are permanent. If a PostgreSQL module fails 
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 168 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 171 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
+For recording a journey, `docs/operations/recording-locally.md` is the whole procedure on this
+machine.
 
 ### Traps, all real, all hit at least once
 
@@ -117,7 +121,7 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **Turning a recording into a draft definition is the remaining piece**, along with git-pinned Playwright import. |
+| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. Git-pinned Playwright import is what remains. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |

@@ -4,8 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10d, the guarded CDP bridge — a recorder session now attaches a real browser,
-streams it to the console and accepts brokered input. Increments 0–2h and S1–S11 are complete.
+**Last updated:** S10e — a recording now becomes a draft test in the studio, through the same HAR
+importer a DevTools capture uses. Increments 0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -97,11 +97,12 @@ and git-pinned Playwright import, or continue to S12 scale hardening.
 | **S10b — recorder pod and egress-rendering foundation** | **Complete** | see §3ab |
 | **S10c — recorder audit, capture sanitizer and safe console entry** | **Complete** | see §3ac |
 | **S10d — guarded CDP bridge and live browser stream** | **Complete** | see §3ag |
+| **S10e — recording becomes a draft test** | **Complete** | see §3ah |
 | **S11 — web performance under load** | **Complete** | see §3ad |
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,264 tests green, 0 failures at S10d** (one skip, the opt-in live
+**Last full Java verification: 1,291 tests green, 0 failures at S10e** (one skip, the opt-in live
 Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
@@ -2266,6 +2267,99 @@ End to end against the running platform, which is the check that matters: sessio
 frames arriving, `GET /` and `GET /api/users` captured, `https://example.com` refused with 409 and
 audited as `origin=https://example.com` with no query string, `kind: "Runtime.evaluate"` refused 400,
 `stop` returning `CANCELLED` and leaving no Chrome behind. Confirmed in the console too.
+
+## 3ah. S10e — a recording becomes a draft test
+
+**S10e is complete.** The captures a recording produces now become draft scenarios in the studio.
+That closes the gap S10d left: the bridge worked, but a recording rendered as a list and nothing
+promoted it.
+
+### The whole increment is a format conversion, and that is the point
+
+A recording **is** a capture, and HAR is the format captures come in. So `RecorderHarRenderer` turns
+a session's sanitized exchanges into a HAR 1.2 document and hands it to the ordinary `HarImporter`.
+What that buys, none of it written twice:
+
+- static-asset stripping, third-party host removal, failed-exchange dropping
+- negotiated and session-header removal (including the conditional headers that would make a target
+  answer 304 and report excellent latency for doing nothing)
+- journey grouping, with weights derived from observed frequency
+- correlation suggestions with evidence, feeding the Rules screen S3 built
+
+A second importer reading captures directly would have had to reproduce all of it and would have
+drifted from it the first time either changed. The conversion is a dozen field mappings.
+
+### Two fields had to survive the sanitizer
+
+`RecorderCapture` and `RecorderSanitizedCapture` now carry `status` and `journeyRef`. Neither is
+sensitive and both are load-bearing: one decides whether an exchange is worth replaying, the other
+groups requests into journeys. The Chrome adapter records the status from `Network.responseReceived`
+and increments a journey counter on each **main-frame** `Page.frameNavigated` — an iframe is not a
+new journey. The journey is stamped when the request *starts*, so a slow call is not filed under
+whichever page happened to be current when it returned.
+
+### A status of 0 is not a success
+
+A recorded status of zero means the browser never reported one. Rendering it as 200 would smuggle an
+exchange nobody observed complete into the draft; it stays zero and the importer drops it. Pinned by
+a test in both the renderer and the round trip.
+
+### Journeys are named for what they did
+
+The renderer titles each HAR page with that journey's first URL. The importer already strips scheme
+and host from a title — real captures title pages with URLs — so `page-2` becomes `api-students`.
+Without it every draft arrived as `page-1`, `page-2`, `page-3` for a person to rename by hand.
+
+### Truncation is reported, not hidden
+
+The capture buffer drops oldest-first, and a recording's oldest requests are its sign-in. When it has
+bitten, the draft carries a `recorder.draft.truncated` warning saying how many are missing and that
+the sign-in is the likely casualty. A draft silently missing the journey someone cared about would
+look complete.
+
+### The studio opens on Refine
+
+`Studio` takes an optional `seed`. With one it skips the start screen and the sources screen, because
+both questions are already answered — the person chose what to record and then recorded it. Asking
+them to pick a test type and a source afterwards would be asking them to repeat themselves.
+
+Drafting creates nothing and works on a **live** session: someone who has finished the journey they
+care about should not have to stop the browser to see what the platform made of it.
+
+### Files
+
+- `platform-domain` — `RecorderCapture`, `RecorderSanitizedCapture` (+`status`, +`journeyRef`),
+  `RecorderCaptureSanitizer` passes both through.
+- `platform-orchestration` — **`RecorderHarRenderer`**; `ManageRecordingsUseCase.draft`;
+  `LiveRecorderSession.allCaptures()` and `droppedCaptures()`.
+- `runners/runner-chrome` — main-frame navigation tracking and response status.
+- `platform-api` — `GET /api/v2/recordings/{id}/draft`, returning the same `ImportResponse` a HAR
+  import returns.
+- `platform-core` — the HAR importer selected from the beans Spring already has, and refused loudly
+  if absent.
+- `platform-ui` — `recordingDraft`, a *Turn this into a test* action, `Studio`'s `seed` prop.
+- `docs/operations/recording-locally.md` — the whole local procedure.
+
+### Verification
+
+Full `mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, 16 modules, **1,291 tests, 0 failures**
+(one skip: the opt-in live Chrome test, §3ag). UI 171 tests, build clean, lint at the documented
+baseline.
+
+`RecordingToDraftTest` in the composition root is the test that matters: a real recording through the
+**real** `HarImporter`, asserting ordered journeys, preserved query strings, dropped assets, dropped
+failures, dropped unobserved statuses, no host, no credentials and no `page-N` names. The
+orchestration tests check what is handed *over*; this checks what comes *back*, and it is what would
+fail if renderer and importer ever drifted.
+
+End to end against the running platform: recorded `/api/students`, `/api/students?page=1` and
+`/actuator/health`, drafted to two journeys named `api-students` and `actuator-health` with the query
+preserved, no host in the scenarios, and a `DRAFT_CREATED` audit row carrying counts only.
+
+**A defect the live run found, and it was not ours.** The first attempt drafted nothing: the demo
+service returns 500 on `/`, `/api/users` and `/api/courses` — its real endpoint is `/api/students`.
+The pipeline correctly refused all four failed exchanges and said so. Worth knowing when
+demonstrating this.
 
 ## 3ad. S11 — web performance under load
 

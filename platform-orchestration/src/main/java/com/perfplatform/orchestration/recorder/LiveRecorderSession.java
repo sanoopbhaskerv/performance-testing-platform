@@ -74,6 +74,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
     private long blockedSequence;
     private long captureSequence;
     private long droppedFrames;
+    private long droppedCaptures;
 
     public LiveRecorderSession(RecorderSessionId id, TeamId teamId, String application,
             String environment, String targetOrigin, String startUrl, RecorderSessionPolicy policy,
@@ -304,7 +305,10 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
                 return;
             }
             captures.addLast(new CapturedExchange(++captureSequence, sanitized, capturedAt));
-            trim(captures);
+            while (captures.size() > settings.eventBufferSize()) {
+                captures.removeFirst();
+                droppedCaptures++;
+            }
         }
     }
 
@@ -348,6 +352,22 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
 
     public synchronized long droppedFrames() {
         return droppedFrames;
+    }
+
+    /**
+     * How many captures fell out of the buffer.
+     *
+     * <p>The oldest go first, which is the worst end to lose: a recording's first requests are its
+     * sign-in. A draft built from a truncated recording must say so rather than quietly omitting the
+     * journey the user cared most about.
+     */
+    public synchronized long droppedCaptures() {
+        return droppedCaptures;
+    }
+
+    /** Everything the session still holds, oldest first, for building a draft. */
+    public synchronized List<CapturedExchange> allCaptures() {
+        return List.copyOf(captures);
     }
 
     /** Hands back the blocked destinations that still need an audit row, and forgets them. */

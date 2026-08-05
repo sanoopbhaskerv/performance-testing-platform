@@ -19,8 +19,10 @@ S10a and S10b added the security foundation with domain-level recorder allowlist
 guard policy, plus the recorder pod manifest and egress policy renderer. S10c added durable audit
 events, capture sanitization and a safe pending console entry point. **S10d built the guarded CDP
 bridge**: a session now attaches a real browser behind a `RecorderBrowser` port, streams it to the
-console and accepts a closed vocabulary of ten interactions. Promoting a recording into a draft
-definition, and git-pinned Playwright import, remain; S11 web performance under load is built.
+console and accepts a closed vocabulary of ten interactions. **S10e turned a recording into a draft
+test**: the captures are rendered as a HAR and read by the ordinary HAR importer, so a recording
+arrives in the studio with journeys, weights and correlation suggestions. Git-pinned Playwright
+import remains; S11 web performance under load is built.
 
 ---
 
@@ -134,7 +136,7 @@ Measured against the k6 Studio model. This is why the pivot is a reordering, not
 | **A report a non-expert can read** | ✅ built in S2 — §3o |
 | **Validator / single-iteration dry run** | ✅ built in S4 — live protocol validation before Save |
 | **Arrival-rate load profile** | ❌ S8. Only staged concurrency today |
-| **Recorder** | ✅ built in S10a–S10d — `HANDOFF.md` §3ag. Capture-to-draft still open |
+| **Recorder** | ✅ built in S10a–S10e — `HANDOFF.md` §3ag, §3ah. Records, streams, and becomes a draft test |
 | **Browser engine, Core Web Vitals** | ✅ built in S6 — `HANDOFF.md` §3v |
 
 The table above was the state when this plan was written. Most of the gaps are closed; what

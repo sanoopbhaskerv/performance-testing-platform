@@ -46,6 +46,12 @@ function stubClient(overrides: Partial<V2Client> = {}) {
     pollRecording: vi.fn().mockResolvedValue(emptyUpdate()),
     sendRecorderInput: vi.fn().mockResolvedValue(undefined),
     stopRecording: vi.fn().mockResolvedValue({ ...LIVE_SESSION, status: 'CANCELLED' }),
+    recordingDraft: vi.fn().mockResolvedValue({
+      sourceType: 'har',
+      scenarios: [],
+      findings: [],
+      correlationSuggestions: [],
+    }),
     ...overrides,
   } as unknown as V2Client;
 }
@@ -54,6 +60,7 @@ function renderPanel(client: V2Client, session = LIVE_SESSION) {
   const onError = vi.fn();
   const onClose = vi.fn();
   const onSessionChange = vi.fn();
+  const onDraft = vi.fn();
   render(
     <RecorderPanel
       client={client}
@@ -61,10 +68,21 @@ function renderPanel(client: V2Client, session = LIVE_SESSION) {
       onSessionChange={onSessionChange}
       onClose={onClose}
       onError={onError}
+      onDraft={onDraft}
     />,
   );
-  return { onError, onClose, onSessionChange };
+  return { onError, onClose, onSessionChange, onDraft };
 }
+
+const CAPTURE = {
+  sequence: 1,
+  method: 'GET',
+  url: 'https://app.internal/api/orders',
+  requestContentType: null,
+  responseContentType: 'application/json',
+  findingCount: 0,
+  capturedAt: '2026-08-06T10:00:00Z',
+};
 
 describe('RecorderPanel', () => {
   it('renders the streamed frame', async () => {
@@ -197,5 +215,52 @@ describe('RecorderPanel', () => {
     await userEvent.keyboard('a');
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('cannot be turned into a test before anything has been captured', async () => {
+    const client = stubClient();
+    renderPanel(client);
+
+    const button = await screen.findByRole('button', { name: /turn this into a test/i });
+    expect(button).toBeDisabled();
+    expect(client.recordingDraft).not.toHaveBeenCalled();
+  });
+
+  it('hands the drafted journeys up once something has been captured', async () => {
+    const client = stubClient({
+      pollRecording: vi.fn().mockResolvedValue(
+        emptyUpdate({ captures: [CAPTURE] }),
+      ) as V2Client['pollRecording'],
+      recordingDraft: vi.fn().mockResolvedValue({
+        sourceType: 'har',
+        scenarios: [{ name: 'orders', weight: 100, steps: [] }],
+        findings: [],
+        correlationSuggestions: [],
+      }) as unknown as V2Client['recordingDraft'],
+    });
+    const { onDraft } = renderPanel(client);
+
+    const button = await screen.findByRole('button', { name: /turn this into a test/i });
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.click(button);
+
+    await waitFor(() => expect(client.recordingDraft).toHaveBeenCalledWith(LIVE_SESSION.id));
+    await waitFor(() =>
+      expect(onDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ scenarios: [expect.objectContaining({ name: 'orders' })] }),
+      ),
+    );
+  });
+
+  it('a recording can still be drafted after it has stopped', async () => {
+    const client = stubClient({
+      pollRecording: vi.fn().mockResolvedValue(
+        emptyUpdate({ status: 'CANCELLED', captures: [CAPTURE] }),
+      ) as V2Client['pollRecording'],
+    });
+    renderPanel(client);
+
+    const button = await screen.findByRole('button', { name: /turn this into a test/i });
+    await waitFor(() => expect(button).toBeEnabled());
   });
 });

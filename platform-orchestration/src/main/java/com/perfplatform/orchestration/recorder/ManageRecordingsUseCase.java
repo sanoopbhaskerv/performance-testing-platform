@@ -2,6 +2,7 @@ package com.perfplatform.orchestration.recorder;
 
 import com.perfplatform.domain.identity.RecorderSessionId;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.importer.SourceImporter;
 import com.perfplatform.domain.port.HostAddressResolver;
 import com.perfplatform.domain.port.RecorderAuditLog;
 import com.perfplatform.domain.port.RecorderBrowser;
@@ -25,6 +26,8 @@ import com.perfplatform.domain.recorder.RecorderSessionPolicy;
 import com.perfplatform.domain.recorder.RecorderSessionState;
 import com.perfplatform.domain.recorder.RecorderViewport;
 import com.perfplatform.domain.security.CallerContext;
+import com.perfplatform.domain.validation.ValidationFinding;
+import com.perfplatform.domain.validation.ValidationResult;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.domain.target.RegisteredTarget;
 
@@ -56,11 +59,13 @@ public final class ManageRecordingsUseCase {
     private final HostAddressResolver hosts;
     private final RecorderSessionRegistry registry;
     private final RecorderBridgeSettings settings;
+    private final SourceImporter harImporter;
     private final Clock clock;
 
     public ManageRecordingsUseCase(TeamDirectory teams, TargetRegistry targets,
             RecorderAuditLog audit, RecorderBrowser browser, HostAddressResolver hosts,
-            RecorderSessionRegistry registry, RecorderBridgeSettings settings, Clock clock) {
+            RecorderSessionRegistry registry, RecorderBridgeSettings settings,
+            SourceImporter harImporter, Clock clock) {
 
         this.teams = Objects.requireNonNull(teams, "teams");
         this.targets = Objects.requireNonNull(targets, "targets");
@@ -69,6 +74,7 @@ public final class ManageRecordingsUseCase {
         this.hosts = Objects.requireNonNull(hosts, "hosts");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.harImporter = Objects.requireNonNull(harImporter, "harImporter");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -366,6 +372,62 @@ public final class ManageRecordingsUseCase {
         }
         registry.evictTerminal();
         return expired.size();
+    }
+
+    // ------------------------------------------------------------------- draft
+
+    /**
+     * Turns what was recorded into draft scenarios.
+     *
+     * <p>Creates nothing. Like {@code /api/v2/imports/*}, this returns a draft plus findings, so it
+     * is safe to call while a recording is still running and pressing it twice costs nothing.
+     * Creating the definition stays a separate, deliberate act — which is also what keeps a
+     * recording from becoming an executable test without anyone having looked at it
+     * (recorder security review §5, CLAUDE.md §23).
+     *
+     * <p>The recording is rendered as a HAR and handed to the ordinary HAR importer, so it gets the
+     * same asset stripping, third-party removal, journey grouping, frequency-derived weights and
+     * evidence-backed correlation suggestions as a capture exported from DevTools. See
+     * {@link RecorderHarRenderer} for why the intermediate format earns its place.
+     */
+    public SourceImporter.ImportResult draft(RecorderSessionId sessionId, CallerContext caller) {
+        LiveRecorderSession session = requireLive(sessionId);
+        caller.requireAct(Scope.RECORDINGS_READ, session.teamId());
+
+        List<LiveRecorderSession.CapturedExchange> captures = session.allCaptures();
+        if (captures.isEmpty()) {
+            return SourceImporter.ImportResult.nothing(ValidationResult.of(ValidationFinding.warning(
+                    "recorder.draft.empty", "/",
+                    "This recording captured no requests, so there is nothing to turn into a test.",
+                    "Interact with the application in the recorder, then try again. Static assets "
+                            + "are deliberately not captured.")));
+        }
+
+        SourceImporter.ImportResult imported =
+                harImporter.importFrom(RecorderHarRenderer.render(captures));
+
+        ValidationResult findings = imported.findings();
+        long dropped = session.droppedCaptures();
+        if (dropped > 0) {
+            // The buffer drops oldest-first, and the oldest requests in a recording are the sign-in.
+            // A draft missing them would look complete and be missing the journey that mattered.
+            findings = findings.merge(ValidationResult.of(ValidationFinding.warning(
+                    "recorder.draft.truncated", "/",
+                    "This recording is longer than the platform retains, so its earliest "
+                            + dropped + " request(s) are not in this draft.",
+                    "Record shorter journeys, one at a time. The earliest requests are usually "
+                            + "the sign-in, so check whether it is missing.")));
+        }
+
+        audit.append(RecorderAuditEvent.of(sessionId, session.teamId(),
+                RecorderAuditEventType.DRAFT_CREATED, caller.subject(),
+                Map.of("scenarios", String.valueOf(imported.scenarios().size()),
+                        "capturedExchanges", String.valueOf(captures.size()),
+                        "findings", String.valueOf(findings.findings().size())),
+                clock.instant()));
+
+        return SourceImporter.ImportResult.of(imported.scenarios(), findings,
+                imported.correlationSuggestions());
     }
 
     // ------------------------------------------------------------------ reading

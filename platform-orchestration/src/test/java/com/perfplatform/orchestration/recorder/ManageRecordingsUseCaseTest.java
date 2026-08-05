@@ -3,6 +3,7 @@ package com.perfplatform.orchestration.recorder;
 import com.perfplatform.domain.identity.ApplicationId;
 import com.perfplatform.domain.identity.RecorderSessionId;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.importer.SourceImporter;
 import com.perfplatform.domain.port.HostAddressResolver;
 import com.perfplatform.domain.port.RecorderAuditLog;
 import com.perfplatform.domain.port.TargetRegistry;
@@ -20,7 +21,11 @@ import com.perfplatform.domain.recorder.RecorderSessionState;
 import com.perfplatform.domain.recorder.RecorderViewport;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
+import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
+import com.perfplatform.domain.spec.SourceType;
 import com.perfplatform.domain.spec.TargetClass;
+import com.perfplatform.domain.validation.ValidationFinding;
+import com.perfplatform.domain.validation.ValidationResult;
 import com.perfplatform.domain.target.RegisteredTarget;
 import com.perfplatform.domain.target.TargetAddress;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +60,7 @@ class ManageRecordingsUseCaseTest {
 
     private FakeRecorderBrowser browser;
     private RecorderSessionRegistry registry;
+    private RecordingImporter importer;
     private ManageRecordingsUseCase useCase;
 
     @BeforeEach
@@ -66,9 +72,10 @@ class ManageRecordingsUseCaseTest {
     private ManageRecordingsUseCase build(FakeRecorderBrowser bridge,
             RecorderBridgeSettings settings, InetAddress resolved) {
         registry = RecorderSessionRegistry.withDefaults();
+        importer = new RecordingImporter();
         return new ManageRecordingsUseCase(new InMemoryDirectory(team, application),
                 new InMemoryTargets(team, application), audit, bridge,
-                host -> List.of(resolved), registry, settings, clock);
+                host -> List.of(resolved), registry, settings, importer, clock);
     }
 
     // ------------------------------------------------------------------ starting
@@ -498,6 +505,134 @@ class ManageRecordingsUseCaseTest {
         assertThat(event.detail().toString())
                 .doesNotContain("lower-env-token")
                 .doesNotContain("lower-env-password");
+    }
+
+    // -------------------------------------------------------------------- draft
+
+    @Nested
+    class Draft {
+
+        @Test
+        @DisplayName("a recording is handed to the HAR importer, not re-parsed by a second one")
+        void recordingBecomesHar() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            capture(session.id(), "GET", "http://proposal.perf.internal/orders", 200, "page-1");
+
+            var result = useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+
+            assertThat(importer.lastDocument).contains("\"pageref\":\"page-1\"");
+            assertThat(importer.lastDocument).contains("http://proposal.perf.internal/orders");
+            assertThat(result.scenarios()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("drafting audits that a draft was created, with counts and no URLs")
+        void draftIsAudited() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            capture(session.id(), "POST", "http://proposal.perf.internal/login?token=secret", 200,
+                    "page-1");
+
+            useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+
+            RecorderAuditEvent created = audit.events(session.id(), 0, 100).stream()
+                    .filter(event -> event.type() == RecorderAuditEventType.DRAFT_CREATED)
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(created.detail()).containsEntry("capturedExchanges", "1");
+            assertThat(created.detail().toString()).doesNotContain("secret");
+        }
+
+        @Test
+        @DisplayName("a recording that captured nothing says so rather than producing an empty test")
+        void emptyRecordingExplainsItself() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+
+            var result = useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+
+            assertThat(result.isEmpty()).isTrue();
+            assertThat(result.findings().findings())
+                    .extracting(ValidationFinding::code)
+                    .containsExactly("recorder.draft.empty");
+        }
+
+        /**
+         * The buffer drops oldest-first, and a recording's oldest requests are its sign-in. A draft
+         * silently missing them would look complete.
+         */
+        @Test
+        @DisplayName("a truncated recording warns that its earliest requests are missing")
+        void truncationIsReported() {
+            useCase = build(new FakeRecorderBrowser(), smallBuffer(), ip("10.10.20.30"));
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            for (int i = 0; i < 5; i++) {
+                capture(session.id(), "GET", "http://proposal.perf.internal/" + i, 200, "page-1");
+            }
+
+            var result = useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+
+            assertThat(result.findings().findings())
+                    .extracting(ValidationFinding::code)
+                    .contains("recorder.draft.truncated");
+        }
+
+        @Test
+        @DisplayName("drafting requires recordings:read for the session's team")
+        void draftRequiresScope() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+
+            assertThatThrownBy(() -> useCase.draft(session.id(),
+                    new CallerContext("mallory@example.com", Set.of(TeamId.generate()),
+                            Set.of(Scope.RECORDINGS_READ), false)))
+                    .isInstanceOf(CallerContext.AuthorizationException.class);
+        }
+
+        @Test
+        @DisplayName("drafting creates no definition — it is safe to call while still recording")
+        void draftCreatesNothing() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            capture(session.id(), "GET", "http://proposal.perf.internal/a", 200, "page-1");
+
+            useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+            useCase.draft(session.id(), caller(Scope.RECORDINGS_READ));
+
+            assertThat(registry.find(session.id()).orElseThrow().state())
+                    .isEqualTo(RecorderSessionState.LIVE);
+        }
+    }
+
+    private void capture(RecorderSessionId sessionId, String method, String url, int status,
+            String journeyRef) {
+        registry.find(sessionId).orElseThrow().onCapture(new RecorderCapture(method, url,
+                Map.of("accept", "application/json"), null, null, Map.of(), "application/json",
+                "{}", null, status, journeyRef), NOW);
+    }
+
+    private static RecorderBridgeSettings smallBuffer() {
+        RecorderBridgeSettings defaults = RecorderBridgeSettings.defaults();
+        return new RecorderBridgeSettings(defaults.defaultViewport(), defaults.idleTimeout(),
+                defaults.deadline(), defaults.frameBufferSize(), 2, defaults.allowances());
+    }
+
+    /** Records the document it was handed and answers with one scenario per entry. */
+    private static final class RecordingImporter implements SourceImporter {
+        private String lastDocument;
+
+        @Override
+        public SourceType sourceType() {
+            return SourceType.HAR;
+        }
+
+        @Override
+        public ImportResult importFrom(String document) {
+            lastDocument = document;
+            int entries = document.split("\"pageref\"", -1).length - 1;
+            return ImportResult.of(
+                    java.util.stream.IntStream.range(0, Math.min(1, entries))
+                            .mapToObj(index -> new ScenarioSpec("recorded-" + index, 100, null,
+                                    "GET", "/", Map.of(), Map.of(), null, List.of()))
+                            .toList(),
+                    ValidationResult.valid());
+        }
     }
 
     // ------------------------------------------------------------------ fixtures

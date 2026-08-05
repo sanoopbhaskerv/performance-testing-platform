@@ -9,6 +9,7 @@ import com.perfplatform.domain.admission.CapacityLimits;
 import com.perfplatform.domain.admission.ConcurrencyAdmissionPolicy;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.identity.TeamId;
+import com.perfplatform.domain.importer.SourceImporter;
 import com.perfplatform.domain.plan.ExecutionPlanCompiler;
 import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.DatasetCatalog;
@@ -43,6 +44,7 @@ import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
 import com.perfplatform.domain.recorder.RecorderAddressAllowances;
+import com.perfplatform.domain.spec.SourceType;
 import com.perfplatform.domain.recorder.RecorderViewport;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
 import com.perfplatform.orchestration.recorder.RecorderBridgeSettings;
@@ -814,9 +816,20 @@ public class OrchestrationConfiguration {
     public ManageRecordingsUseCase manageRecordingsUseCase(TeamDirectory teams,
             TargetRegistry targets, RecorderAuditLog audit, RecorderBrowser browser,
             HostAddressResolver hosts, RecorderSessionRegistry registry,
-            RecorderBridgeSettings bridgeSettings, Clock clock) {
+            RecorderBridgeSettings bridgeSettings, List<SourceImporter> importers, Clock clock) {
+
+        // A recording is imported as a HAR, so it gets the same asset stripping, journey grouping,
+        // frequency weights and correlation suggestions as a capture exported from DevTools rather
+        // than a second implementation of all of it. Selected from the importers Spring already has.
+        SourceImporter har = importers.stream()
+                .filter(importer -> importer.sourceType() == SourceType.HAR)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "The recorder needs the HAR importer to turn a recording into a draft, and "
+                                + "no importer for source type HAR is registered."));
+
         return new ManageRecordingsUseCase(teams, targets, audit, browser, hosts, registry,
-                bridgeSettings, clock);
+                bridgeSettings, har, clock);
     }
 
     @Bean

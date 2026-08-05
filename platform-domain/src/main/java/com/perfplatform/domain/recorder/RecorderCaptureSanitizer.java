@@ -50,7 +50,9 @@ public final class RecorderCaptureSanitizer {
                 responseHeaders,
                 capture.responseContentType(),
                 responseBody,
-                findings);
+                findings,
+                capture.status(),
+                capture.journeyRef());
     }
 
     private static Map<String, String> sanitizeHeaders(Map<String, String> headers, String path,
