@@ -76,6 +76,7 @@ public class OrchestrationProperties {
     private final Datasets datasets = new Datasets();
     private final SecretResolverProperties secretResolver = new SecretResolverProperties();
     private final SessionAcquisition sessionAcquisition = new SessionAcquisition();
+    private final Recorder recorder = new Recorder();
 
     /**
      * Cleanup of runner-owned ephemeral Kubernetes objects.
@@ -199,6 +200,35 @@ public class OrchestrationProperties {
 
         public void setClientCredentialSecretRef(String clientCredentialSecretRef) {
             this.clientCredentialSecretRef = clientCredentialSecretRef;
+        }
+    }
+
+    /**
+     * Interactive browser recording.
+     *
+     * <p>The recorder places a user-driven browser inside the runner network. Browser route
+     * interception is useful feedback but is not enough by itself, so network enforcement defaults
+     * on and production profiles refuse to disable it. Local administrators can turn it off to test
+     * the rest of the recorder control flow on a development cluster that has no NetworkPolicy
+     * controller.
+     */
+    public static class Recorder {
+        private final NetworkEnforcement networkEnforcement = new NetworkEnforcement();
+
+        public NetworkEnforcement getNetworkEnforcement() {
+            return networkEnforcement;
+        }
+
+        public static class NetworkEnforcement {
+            private boolean enabled = true;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
         }
     }
 
@@ -440,6 +470,10 @@ public class OrchestrationProperties {
 
     public SecretResolverProperties getSecretResolver() {
         return secretResolver;
+    }
+
+    public Recorder getRecorder() {
+        return recorder;
     }
 
     /**

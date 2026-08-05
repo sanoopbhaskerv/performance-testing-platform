@@ -106,6 +106,12 @@ platform:
       # /var/run/perfplatform/secrets/broker-client/token.
       mount-root: ${SECRET_RESOLVER_MOUNT_ROOT:/var/run/perfplatform/secrets}
 
+    recorder:
+      network-enforcement:
+        # Local-only bypass for development clusters without NetworkPolicy enforcement. Production
+        # profiles refuse false before any recorder endpoint can start.
+        enabled: ${RECORDER_NETWORK_ENFORCEMENT_ENABLED:true}
+
     # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
     # actively working on to a peer mid-provision.
     lease-duration: 2m

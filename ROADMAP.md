@@ -31,8 +31,9 @@ than a surprise.
 >
 > **S10 has started.** The required security review is complete:
 > [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-> S10a added the domain-level recorder allowlist, address policy and route guard. Next is the
-> network-enforced half of the foundation: recorder pod manifest and egress policy/proxy rendering.
+> S10a added the domain-level recorder allowlist, address policy and route guard. S10b added the
+> recorder pod manifest, per-session egress policy renderer and local-only network-enforcement
+> bypass. Next is recorder audit events and capture sanitization.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is

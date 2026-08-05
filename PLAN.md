@@ -15,9 +15,10 @@ core features rather than polish.
 **Status: S1 through S9 are built.** See §11 for the per-increment state and `HANDOFF.md`
 §3n–§3y for what each delivered. The S10 recorder security review is complete in
 [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-S10a has started the security foundation with domain-level recorder allowlist, address and route
-guard policy. Recorder UI, CDP bridge, pod creation and egress rendering are still not built.
-Everything after it is still a plan.
+S10a and S10b have started the security foundation with domain-level recorder allowlist, address and
+route guard policy, plus the recorder pod manifest and egress policy renderer. Recorder UI, CDP
+bridge, capture sanitization and captured-content persistence are still not built. Everything after
+it is still a plan.
 
 ---
 
@@ -749,7 +750,7 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
 | **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | next |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — security foundation S10a/S10b built |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
@@ -987,11 +988,16 @@ Build order is now recorder security foundation first, capture sanitizer second,
 third, and git-pinned Playwright import fourth. Do not add a clickable recorder entry point before
 target-locking, network egress enforcement and sanitization are implemented and tested.
 
-S10a has implemented the domain-level part of the security foundation: `RecorderSessionPolicy`,
+S10a implemented the domain-level part of the security foundation: `RecorderSessionPolicy`,
 `RecorderRouteGuard`, `RecorderAddressPolicy`, `CidrBlock` and recorder-specific scopes. It can
-decide whether a browser destination is allowed for a frozen session. The next S10 slice must make
-that enforceable outside the browser by adding the recorder pod manifest contract and egress policy
-or egress-proxy rendering.
+decide whether a browser destination is allowed for a frozen session.
+
+S10b implemented the Kubernetes half of that foundation: a recorder-specific Job contract, a
+per-session `NetworkPolicy` renderer based on the frozen destination IPs, Helm RBAC for generated
+policies and a local-only administrator bypass
+(`platform.orchestration.recorder.network-enforcement.enabled=false`) that production profiles
+refuse. The next S10 slice is recorder audit events and capture sanitization; no clickable recorder
+entry point should exist before the sanitizer is test-covered.
 
 ### S11 — web performance under load
 

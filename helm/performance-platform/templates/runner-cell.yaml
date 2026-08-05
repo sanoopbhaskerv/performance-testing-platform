@@ -75,6 +75,11 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "update", "delete"]
+  # Per-session recorder egress policies. A recording browser is user-driven,
+  # so it gets a generated allowlist rather than open namespace egress.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get", "list", "watch", "delete"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

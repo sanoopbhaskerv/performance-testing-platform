@@ -4,8 +4,9 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10a recorder route-policy foundation. Increments 0–2h and S1–S9 are complete;
-S10 implementation has started, but no recorder UI, pod, CDP bridge or egress rendering exists.
+**Last updated:** S10b recorder pod and egress-rendering foundation. Increments 0–2h and S1–S9 are
+complete; S10 implementation has started, but no recorder UI, CDP bridge, capture sanitizer or
+captured-content persistence exists.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -47,8 +48,8 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **continue S10 with recorder pod manifest and enforced
-egress rendering**.
+`NEXT-SESSION.md` §2 has the immediate task: **continue S10 with recorder audit events and capture
+sanitization**.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -92,13 +93,14 @@ egress rendering**.
 | **S9 — one run, many workloads** | **Complete** (browser budget moved to S11) | see §3y |
 | **S10 security review** | **Complete** | [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md) |
 | **S10a — recorder route-policy foundation** | **Complete** | see §3aa |
+| **S10b — recorder pod and egress-rendering foundation** | **Complete** | see §3ab |
 | **S10–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**1,106 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
+**1,115 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
 Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3 Rules,
-941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9).
+941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at S10b).
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -122,12 +124,11 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S10 recorder network enforcement.** S10a added the domain target allowlist,
-address policy and browser route guard. Next implement the recorder pod manifest contract and
-deny-by-default egress policy/proxy rendering from
-[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-Do not add a clickable recorder entry point before network enforcement and capture sanitization
-exist.
+**Immediate next action: S10 recorder audit events and capture sanitizer.** S10a added the domain
+target allowlist, address policy and browser route guard. S10b added the recorder pod manifest and
+per-session egress policy renderer, with a local-only administrative bypass for clusters without a
+NetworkPolicy controller. Next add the audit model for blocked recorder destinations and the capture
+sanitizer. Do not add a clickable recorder entry point before sanitization exists.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -1980,8 +1981,8 @@ named hosts. This keeps "just browse to this internal IP" from becoming the esca
 target ownership.
 
 **Hostname policy and network policy are deliberately separated.** The domain guard decides by
-origin and frozen resolved address. The next slice must render matching network enforcement; browser
-code alone is not enough.
+origin and frozen resolved address. S10b renders matching network enforcement; browser code alone is
+not enough.
 
 ### Tests added
 
@@ -2014,10 +2015,95 @@ Result: **BUILD SUCCESS** across all 15 modules.
 
 ### Still not done
 
-- Recorder pod manifest contract.
-- Deny-by-default egress `NetworkPolicy` or egress-proxy rendering.
 - Audit event model for blocked destinations.
 - Capture sanitization.
+- CDP bridge and UI.
+- Git-pinned Playwright importer.
+
+---
+
+## 3ab. S10b — recorder pod and egress-rendering foundation
+
+**S10b is complete as a Kubernetes manifest and startup-safety slice.** It still does not expose a
+recorder API, CDP bridge, UI button or capture pipeline. It gives the next S10 slice a tested
+recorder pod contract and an enforced egress object to create when a session starts.
+
+### What changed
+
+- Added `RecorderSessionId`.
+- Added `RecorderCellSettings`, `RecorderSessionRequest` and `RecorderSessionManifests` in
+  `runner-kubernetes`.
+- The recorder Job contract is separate from load runners:
+  - `backoffLimit: 0`, `restartPolicy: Never`, `activeDeadlineSeconds` and finished-Job TTL.
+  - Dedicated recorder service account.
+  - `automountServiceAccountToken: false`.
+  - Non-root pod/container, runtime-default seccomp, read-only root filesystem, no privilege
+    escalation and all capabilities dropped.
+  - Size-limited `emptyDir` workspace.
+  - Identifiers and an allowlist digest in metadata/env; no credential material.
+- When network enforcement is enabled, the renderer emits a per-session Kubernetes `NetworkPolicy`
+  selecting only that recorder Pod and allowing egress only to the policy's frozen destination IPs
+  and ports.
+- Added `platform.orchestration.recorder.network-enforcement.enabled`, default `true`.
+- Local administrators may set it `false` for development clusters without a NetworkPolicy
+  controller. Production, `prod` and `shared-runner` profiles refuse to start when it is false.
+- Helm passes the setting into the control plane and grants the control plane `networkpolicies`
+  create/get/list/watch/delete in the runner namespace.
+
+### Decisions
+
+**The local bypass is explicit and noisy.** Disabling network enforcement is not hidden behind test
+code. It is the deployment property
+`platform.orchestration.recorder.network-enforcement.enabled=false`, and startup logs that the
+recorder has only browser-layer route guards.
+
+**Production still fails closed.** The user approved a local testing escape hatch, not a production
+policy relaxation. Any production-like profile with enforcement disabled fails before a recorder
+endpoint can be exposed.
+
+**NetworkPolicy is CIDR/IP based.** Kubernetes cannot enforce hostnames, so S10a's frozen
+`RecorderSessionPolicy` remains the authority. The renderer consumes resolved addresses only; it
+does not perform DNS resolution or expand redirects. The eventual recorder runtime must either use
+the same frozen host-to-address mapping when launching the browser or add an explicit, reviewed DNS
+egress exception.
+
+### Tests added
+
+- `RecorderSessionManifestsTest` — recorder Job confinement, no retries, deadlines, resource
+  bounds, no service-account token, no obvious credential material, per-session egress policy from
+  frozen IPs and disabled local mode with no policy.
+- `ProductionSafetyGuardTest` — recorder network enforcement is enabled by default, can be disabled
+  locally and is refused under production.
+
+### Verification
+
+```bash
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -pl platform-core -Dtest=ProductionSafetyGuardTest test
+```
+
+Result: **28 tests, 0 failures, 0 skipped**.
+
+```bash
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -pl platform-domain,runners/runner-kubernetes,platform-core test
+```
+
+Result: the new recorder manifest tests passed, but the sandboxed run stopped on existing Fabric8
+mock-server tests because the sandbox denied local socket binding. Full reactor verification was
+rerun outside the sandbox.
+
+```bash
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -f pom.xml clean verify
+```
+
+Result: **BUILD SUCCESS** across all 15 modules, **1,115 tests, 0 failures, 0 skipped**.
+
+### Still not done
+
+- Audit event model for blocked destinations and recorder lifecycle events.
+- Capture sanitization and draft artifact storage.
 - CDP bridge and UI.
 - Git-pinned Playwright importer.
 
@@ -2104,11 +2190,11 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 **Next: continue S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The
 required R2 security review is complete:
 [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-S10a added target allowlists, address policy and the browser route guard. The next slice is the
-network-enforced half of that foundation: recorder pod manifest contract, deny-by-default egress
-policy/proxy rendering and audit events. A recording pod with CDP screencast to the console must not
-exist until those controls and capture sanitization exist, because a user-driven browser inside the
-network is otherwise an internal open proxy.
+S10a added target allowlists, address policy and the browser route guard. S10b added the recorder
+pod manifest and per-session egress policy renderer. The next slice is recorder audit events and
+capture sanitization. A recording pod with CDP screencast to the console must not exist until
+sanitization is tested, because a user-driven browser inside the network is otherwise an internal
+open proxy and evidence leak.
 
 If a smaller next step is wanted instead, **S11's prerequisites** are now the shortest path to value:
 the browser-session budget deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves.

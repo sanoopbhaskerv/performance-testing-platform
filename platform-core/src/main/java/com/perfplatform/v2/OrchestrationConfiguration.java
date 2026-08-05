@@ -121,6 +121,24 @@ public class OrchestrationConfiguration {
                 properties.getValidationGrace());
     }
 
+    @Bean
+    public RecorderSecuritySettings recorderSecuritySettings() {
+        boolean enabled = properties.getRecorder().getNetworkEnforcement().isEnabled();
+        if (!enabled && environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
+            throw new IllegalStateException("Recorder network enforcement must not be disabled "
+                    + "under a production profile. A recording browser is a user-driven network "
+                    + "client inside the runner network; set "
+                    + "platform.orchestration.recorder.network-enforcement.enabled=true or "
+                    + "move this test to a non-production profile.");
+        }
+        if (!enabled) {
+            log.warn("Recorder network enforcement is DISABLED. This is local testing only: "
+                    + "browser route guards may still block known destinations, but Kubernetes "
+                    + "will not enforce recorder egress.");
+        }
+        return new RecorderSecuritySettings(enabled);
+    }
+
     /**
      * Resolves configured team ceilings to identifiers at startup.
      *

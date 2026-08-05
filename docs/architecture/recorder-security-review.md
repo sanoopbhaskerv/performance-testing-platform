@@ -86,6 +86,11 @@ pod is created:
   CIDRs.
 - An egress gateway/proxy that enforces the same allowlist by hostname and resolved IP.
 
+For local development only, an administrator may disable the network-enforced half to test recorder
+control flow on a cluster without a working NetworkPolicy controller. The control plane must make
+that mode explicit, noisy and unavailable under production-like profiles; browser route guards alone
+are not sufficient for a shared or production runner network.
+
 Plain Kubernetes `NetworkPolicy` cannot express hostnames. If target and asset controls are
 hostname-based, the implementation must resolve them to IPs before session start, reject prohibited
 ranges, freeze the result for the session, and revalidate DNS on reconnect. If that is not acceptable

@@ -305,6 +305,41 @@ class ProductionSafetyGuardTest {
     }
 
     @Nested
+    @DisplayName("recorder network enforcement")
+    class RecorderNetworkEnforcement {
+
+        @Test
+        @DisplayName("is enabled by default")
+        void enabledByDefault() {
+            assertThat(configurationFor("local").recorderSecuritySettings()
+                    .networkEnforcementEnabled()).isTrue();
+        }
+
+        @Test
+        @DisplayName("can be disabled by a local administrator")
+        void canBeDisabledLocally() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getNetworkEnforcement().setEnabled(false);
+
+            assertThat(configurationFor(properties, "local").recorderSecuritySettings()
+                    .networkEnforcementEnabled()).isFalse();
+        }
+
+        @Test
+        @DisplayName("cannot be disabled under a production profile")
+        void cannotBeDisabledInProduction() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getNetworkEnforcement().setEnabled(false);
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .recorderSecuritySettings())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Recorder network enforcement must not be disabled")
+                    .hasMessageContaining("recorder.network-enforcement.enabled=true");
+        }
+    }
+
+    @Nested
     @DisplayName("the development caller-identity provider")
     class DevelopmentIdentity {
 

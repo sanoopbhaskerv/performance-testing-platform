@@ -120,6 +120,8 @@ spec:
               value: {{ .Values.sessionAcquisition.clientCredentialSecretRef | quote }}
             - name: PLATFORM_ORCHESTRATION_SECRETRESOLVER_MOUNTROOT
               value: {{ .Values.secretResolver.mountRoot | quote }}
+            - name: PLATFORM_ORCHESTRATION_RECORDER_NETWORKENFORCEMENT_ENABLED
+              value: {{ .Values.recorder.networkEnforcement.enabled | quote }}
 
             - name: JMETER_HOME
               value: {{ .Values.jmeter.home | quote }}

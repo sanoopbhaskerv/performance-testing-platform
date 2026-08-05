@@ -87,6 +87,23 @@ runnerCell:
   # image pull, startup and artifact upload.
   deadlineGrace: 5m
 
+# ─────────────────────────────────────────────────────────
+#  Recorder security.
+#
+#  The interactive recorder puts a user-driven browser inside the runner
+#  network. Browser-level route guards are not enough on their own; recorder
+#  sessions must also get per-session egress enforcement from Kubernetes
+#  NetworkPolicy or an equivalent provider.
+#
+#  Keep this true for any shared or production-like deployment. A local
+#  administrator may set it false only to test recorder flows on a development
+#  cluster without a NetworkPolicy controller; production profiles refuse that
+#  setting at startup.
+# ─────────────────────────────────────────────────────────
+recorder:
+  networkEnforcement:
+    enabled: true
+
 lifecycleCleanup:
   enabled: true
   # Sweeps runner-owned ephemeral Secrets that survived because the control
