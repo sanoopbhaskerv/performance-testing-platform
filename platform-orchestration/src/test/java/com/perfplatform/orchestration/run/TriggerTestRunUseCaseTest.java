@@ -9,6 +9,7 @@ import com.perfplatform.domain.run.RunState;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.WorkloadType;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase.TriggerCommand;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase.TriggerResult;
 import com.perfplatform.orchestration.support.InMemoryTestRunRepository;
@@ -297,6 +298,20 @@ class TriggerTestRunUseCaseTest {
 
             assertThat(runs.allRuns()).isEmpty();
         }
+
+        @Test
+        @DisplayName("browser sessions are capped separately from protocol run slots")
+        void browserSessionBudgetIsEnforced() {
+            useCase = new TriggerTestRunUseCase(runs, versions, runtimeCredentials, 20, clock);
+            DefinitionVersion browserHeavy = versions.add(team, browserSpecification(21), true);
+
+            assertThatThrownBy(() -> useCase.trigger(
+                    new TriggerCommand(browserHeavy.id(), "too-many-browsers"), caller))
+                    .isInstanceOf(TriggerTestRunUseCase.BrowserSessionBudgetExceededException.class)
+                    .hasMessageContaining("21 browser sessions");
+
+            assertThat(runs.allRuns()).isEmpty();
+        }
     }
 
     private static PerformanceTestSpecification specificationWithRunCredential() {
@@ -331,5 +346,25 @@ class TriggerTestRunUseCaseTest {
                                 "session", "bearer", "Authorization", "run://session")),
                         body.datasets(), List.of(credentialed), body.objectives(),
                         body.observability(), body.governance()));
+    }
+
+    private static PerformanceTestSpecification browserSpecification(int browserUsers) {
+        PerformanceTestSpecification base = OrchestrationFixtures.apiSpecification();
+        var body = base.spec();
+        var browser = new PerformanceTestSpecification.WorkloadSpec(
+                "browser-experience",
+                WorkloadType.BROWSER,
+                "playwright",
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                browserUsers,
+                1);
+        return new PerformanceTestSpecification(base.apiVersion(), base.kind(), base.metadata(),
+                new PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(), body.authentication(), body.datasets(),
+                        List.of(browser), body.objectives(), body.observability(), body.governance()));
     }
 }

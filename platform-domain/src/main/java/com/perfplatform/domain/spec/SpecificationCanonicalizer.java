@@ -215,6 +215,7 @@ public final class SpecificationCanonicalizer {
                     LoadStage stage = model.stages().get(s);
                     // Stage order is preserved: stages run in sequence, so reordering them is a
                     // different test and must produce a different digest.
+                    field(out, prefix + ".model.stages[" + s + "].name", stage.name());
                     field(out, prefix + ".model.stages[" + s + "].duration", duration(stage.duration()));
                     field(out, prefix + ".model.stages[" + s + "].targetUsers",
                             String.valueOf(stage.targetUsers()));

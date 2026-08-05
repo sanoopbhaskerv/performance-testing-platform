@@ -13,6 +13,7 @@ import com.perfplatform.domain.plan.ExecutionPlanCompiler;
 import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetStore;
+import com.perfplatform.domain.port.RecorderAuditLog;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.ProgressCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
@@ -39,6 +40,7 @@ import com.perfplatform.engine.playwright.PlaywrightEngineProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
+import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
 import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ExternalSessionBrokerSessionAcquisitionProvider;
@@ -704,10 +706,17 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
+    public ManageRecordingsUseCase manageRecordingsUseCase(TeamDirectory teams,
+            TargetRegistry targets, RecorderAuditLog audit, Clock clock) {
+        return new ManageRecordingsUseCase(teams, targets, audit, clock);
+    }
+
+    @Bean
     public TriggerTestRunUseCase triggerTestRunUseCase(TestRunRepository runs,
             DefinitionVersionCatalog versions, RuntimeCredentialStore runtimeCredentials,
             Clock clock) {
-        return new TriggerTestRunUseCase(runs, versions, runtimeCredentials, clock);
+        return new TriggerTestRunUseCase(runs, versions, runtimeCredentials,
+                properties.getCapacity().getMaxBrowserSessionsPerRun(), clock);
     }
 
     @Bean

@@ -50,7 +50,10 @@ public class DevelopmentCallerContextProvider implements CallerContextProvider {
             Scope.DEFINITIONS_WRITE,
             Scope.RUNS_EXECUTE,
             Scope.RUNS_CANCEL,
-            Scope.RUNS_READ);
+            Scope.RUNS_READ,
+            Scope.RECORDINGS_CREATE,
+            Scope.RECORDINGS_READ,
+            Scope.RECORDINGS_CANCEL);
 
     private final TeamConfigLoader teamConfigs;
     private final TeamDirectory teams;

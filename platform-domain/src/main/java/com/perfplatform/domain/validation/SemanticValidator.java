@@ -1288,6 +1288,14 @@ public final class SemanticValidator {
             if (isBlank(startWhen.workload())) {
                 findings.add(ValidationFinding.error("spec.workload.startWhen.workload.missing",
                         path + "/workload", "startWhen requires a workload name.", null));
+            }
+            if (isBlank(startWhen.stage())) {
+                findings.add(ValidationFinding.error("spec.workload.startWhen.stage.missing",
+                        path + "/stage", "startWhen requires a stage name.", null));
+                continue;
+            }
+            if (isBlank(startWhen.workload())) {
+                continue;
             } else if (!workloadNames.contains(startWhen.workload())) {
                 findings.add(ValidationFinding.error("spec.workload.startWhen.unresolved",
                         path + "/workload",
@@ -1298,8 +1306,29 @@ public final class SemanticValidator {
                         path + "/workload",
                         "A workload cannot wait for itself.",
                         "Reference the workload whose steady state should trigger this one."));
+            } else if (!stageExists(workloads, startWhen.workload(), startWhen.stage())) {
+                findings.add(ValidationFinding.error("spec.workload.startWhen.stage.unresolved",
+                        path + "/stage",
+                        "startWhen references stage '" + startWhen.stage() + "' on workload '"
+                                + startWhen.workload() + "', but that stage is not declared.",
+                        "Name the protocol load stage to wait for, for example "
+                                + "name: steady-state."));
             }
         }
+    }
+
+    private static boolean stageExists(List<WorkloadSpec> workloads, String workloadName,
+            String stageName) {
+        if (isBlank(stageName)) {
+            return false;
+        }
+        return workloads.stream()
+                .filter(candidate -> workloadName.equals(candidate.name()))
+                .map(WorkloadSpec::model)
+                .filter(java.util.Objects::nonNull)
+                .flatMap(model -> model.stages().stream())
+                .map(PerformanceTestSpecification.LoadStage::name)
+                .anyMatch(stageName::equals);
     }
 
     private static void validateObjectives(PerformanceTestSpecification spec,

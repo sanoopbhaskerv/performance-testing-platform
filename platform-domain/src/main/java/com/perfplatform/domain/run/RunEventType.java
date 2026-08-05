@@ -36,6 +36,12 @@ public enum RunEventType {
     /** A runner shard was created and its external handle persisted. */
     SHARD_PROVISIONED,
 
+    /** A workload was intentionally left pending until its start condition is satisfied. */
+    WORKLOAD_DEFERRED,
+
+    /** A delayed workload's start condition was satisfied and provisioning began. */
+    WORKLOAD_START_ELIGIBLE,
+
     /** A shard reported a terminal outcome. */
     SHARD_FINISHED,
 

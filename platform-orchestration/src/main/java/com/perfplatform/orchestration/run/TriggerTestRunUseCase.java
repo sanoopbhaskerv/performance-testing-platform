@@ -54,13 +54,23 @@ public final class TriggerTestRunUseCase {
     private final TestRunRepository runs;
     private final DefinitionVersionCatalog versions;
     private final RuntimeCredentialStore runtimeCredentials;
+    private final int maxBrowserSessionsPerRun;
     private final Clock clock;
 
     public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
             RuntimeCredentialStore runtimeCredentials, Clock clock) {
+        this(runs, versions, runtimeCredentials, 20, clock);
+    }
+
+    public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
+            RuntimeCredentialStore runtimeCredentials, int maxBrowserSessionsPerRun, Clock clock) {
         this.runs = Objects.requireNonNull(runs, "runs");
         this.versions = Objects.requireNonNull(versions, "versions");
         this.runtimeCredentials = Objects.requireNonNull(runtimeCredentials, "runtimeCredentials");
+        if (maxBrowserSessionsPerRun < 1) {
+            throw new IllegalArgumentException("maxBrowserSessionsPerRun must be at least 1");
+        }
+        this.maxBrowserSessionsPerRun = maxBrowserSessionsPerRun;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -118,6 +128,27 @@ public final class TriggerTestRunUseCase {
         }
     }
 
+    /** Raised when a definition asks for more concurrent browser sessions than policy permits. */
+    public static class BrowserSessionBudgetExceededException extends RuntimeException {
+        private final transient int requested;
+        private final transient int limit;
+
+        public BrowserSessionBudgetExceededException(int requested, int limit) {
+            super("This run asks for " + requested + " browser sessions, but this deployment allows "
+                    + "at most " + limit + " per run.");
+            this.requested = requested;
+            this.limit = limit;
+        }
+
+        public int requested() {
+            return requested;
+        }
+
+        public int limit() {
+            return limit;
+        }
+    }
+
     public TriggerResult trigger(TriggerCommand command, CallerContext caller) {
         DefinitionVersion version = versions.find(command.definitionVersionId())
                 .orElseThrow(() -> new UnknownDefinitionVersionException(command.definitionVersionId()));
@@ -129,6 +160,7 @@ public final class TriggerTestRunUseCase {
         if (!version.executable()) {
             throw new VersionNotExecutableException(version.id());
         }
+        enforceBrowserBudget(version.specification());
 
         List<RuntimeCredential> material = resolveRuntimeCredentials(
                 version.specification(), command.credentials());
@@ -139,6 +171,13 @@ public final class TriggerTestRunUseCase {
         return runs.findByIdempotencyKey(version.teamId(), command.idempotencyKey())
                 .map(existing -> replay(existing, command, fingerprint, material, caller, now))
                 .orElseGet(() -> create(command, version, fingerprint, material, caller, now));
+    }
+
+    private void enforceBrowserBudget(PerformanceTestSpecification specification) {
+        int requested = specification.peakBrowserSessions();
+        if (requested > maxBrowserSessionsPerRun) {
+            throw new BrowserSessionBudgetExceededException(requested, maxBrowserSessionsPerRun);
+        }
     }
 
     private TriggerResult replay(TestRun existing, TriggerCommand command, String fingerprint,

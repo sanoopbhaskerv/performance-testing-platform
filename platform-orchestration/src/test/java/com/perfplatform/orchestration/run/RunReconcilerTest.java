@@ -6,6 +6,7 @@ import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.identity.TestDefinitionVersionId;
 import com.perfplatform.domain.identity.TestRunId;
 import com.perfplatform.domain.port.DefinitionVersionCatalog.DefinitionVersion;
+import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
 import com.perfplatform.domain.run.RunFailureCode;
 import com.perfplatform.domain.run.RunState;
@@ -36,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -88,7 +90,9 @@ class RunReconcilerTest {
             new OrchestrationFixtures.InMemoryDatasets();
     private final OrchestrationFixtures.InMemoryProgress progress =
             new OrchestrationFixtures.InMemoryProgress();
-    private final EngineRegistry engines = new EngineRegistry(List.of(new StubEngineProvider()));
+    private final EngineRegistry engines = new EngineRegistry(List.of(
+            new StubEngineProvider(),
+            new OrchestrationFixtures.StubBrowserEngineProvider()));
 
     private FakeExecutionProvider provider;
 
@@ -666,6 +670,60 @@ class RunReconcilerTest {
     }
 
     @Nested
+    @DisplayName("hybrid workload coordination")
+    class HybridCoordination {
+
+        @Test
+        @DisplayName("browser shards stay pending until protocol load reaches the named stage with samples")
+        void browserStartsAfterProtocolStageAndSamples() {
+            provider = new FakeExecutionProvider(clock, Duration.ZERO, Duration.ofMinutes(30),
+                    artifacts, artifacts);
+            declaredProvider = OrchestrationFixtures.declaringRealLoad(provider);
+            version = versions.add(team, hybridSpecification(), true);
+            TestRun run = trigger.trigger(new TriggerTestRunUseCase.TriggerCommand(
+                    version.id(), "hybrid"), OrchestrationFixtures.caller(team)).run();
+            RunReconciler reconciler = reconciler("reconciler-1");
+
+            reconciler.reconcile();
+
+            List<RunnerShard> initial = shards.findByRun(run.id());
+            assertThat(initial).hasSize(2);
+            assertThat(initial)
+                    .filteredOn(shard -> shard.workloadName().equals("api-background-load"))
+                    .singleElement()
+                    .satisfies(shard -> assertThat(shard.handle()).isPresent());
+            assertThat(initial)
+                    .filteredOn(shard -> shard.workloadName().equals("browser-experience"))
+                    .singleElement()
+                    .satisfies(shard -> {
+                        assertThat(shard.state()).isEqualTo(ShardState.PENDING);
+                        assertThat(shard.handle()).isEmpty();
+                    });
+
+            reconciler.reconcile();
+            assertThat(shards.findByRun(run.id()))
+                    .filteredOn(shard -> shard.workloadName().equals("browser-experience"))
+                    .singleElement()
+                    .satisfies(shard -> assertThat(shard.handle()).isEmpty());
+
+            progress.record(progressPoint(run.id(), clock.instant(), 120));
+            clock.advance(Duration.ofMinutes(5));
+
+            reconciler.reconcile();
+
+            RunnerShard browser = shards.findByRun(run.id()).stream()
+                    .filter(shard -> shard.workloadName().equals("browser-experience"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(browser.handle()).isPresent();
+            assertThat(runs.events(run.id(), 0, 100))
+                    .extracting(RunEvent::type)
+                    .contains(RunEventType.WORKLOAD_DEFERRED,
+                            RunEventType.WORKLOAD_START_ELIGIBLE);
+        }
+    }
+
+    @Nested
     @DisplayName("admission")
     class Admission {
 
@@ -925,6 +983,62 @@ class RunReconcilerTest {
             assertThat(reload(broken).state()).isEqualTo(RunState.FAILED);
             assertThat(reload(healthy).state()).isEqualTo(RunState.RUNNING);
         }
+    }
+
+    /** Puts a run back into PROVISIONING as a pass that crashed mid-provision would have left it. */
+    private static com.perfplatform.domain.spec.PerformanceTestSpecification hybridSpecification() {
+        var base = OrchestrationFixtures.apiSpecification();
+        var body = base.spec();
+        var protocol = new com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec(
+                "api-background-load",
+                com.perfplatform.domain.spec.WorkloadType.PROTOCOL,
+                "jmeter",
+                null,
+                new com.perfplatform.domain.spec.PerformanceTestSpecification.LoadModel(
+                        com.perfplatform.domain.spec.LoadModelType.STAGES,
+                        List.of(
+                                new com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage(
+                                        "ramp-up", Duration.ofMinutes(5), 100, null),
+                                new com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage(
+                                        "steady-state", Duration.ofMinutes(10), 200, null),
+                                new com.perfplatform.domain.spec.PerformanceTestSpecification.LoadStage(
+                                        "ramp-down", Duration.ofMinutes(1), 0, null))),
+                body.workloads().get(0).scenarios(),
+                null,
+                null,
+                null);
+        var browser = new com.perfplatform.domain.spec.PerformanceTestSpecification.WorkloadSpec(
+                "browser-experience",
+                com.perfplatform.domain.spec.WorkloadType.BROWSER,
+                "playwright",
+                null,
+                null,
+                null,
+                List.of(),
+                new com.perfplatform.domain.spec.PerformanceTestSpecification.StartCondition(
+                        "api-background-load", "steady-state"),
+                5,
+                1);
+        return new com.perfplatform.domain.spec.PerformanceTestSpecification(
+                base.apiVersion(), base.kind(), base.metadata(),
+                new com.perfplatform.domain.spec.PerformanceTestSpecification.TestSpec(
+                        body.environment(), body.sources(), body.authentication(), body.datasets(),
+                        List.of(protocol, browser), body.objectives(), body.observability(),
+                        body.governance()));
+    }
+
+    private static com.perfplatform.domain.progress.LiveProgress progressPoint(TestRunId runId,
+            Instant at, long samples) {
+        long[] latencies = new long[(int) samples];
+        java.util.Arrays.fill(latencies, 120L);
+        var metrics = new com.perfplatform.domain.progress.ProgressMetrics(
+                com.perfplatform.domain.results.OperationMetrics.ALL,
+                samples, 0, 0, 10, 900, 120, 20_000,
+                com.perfplatform.domain.progress.LatencyHistogram.of(latencies));
+        return new com.perfplatform.domain.progress.LiveProgress(
+                runId, "jmeter", at, at, 1, 60, 100, metrics, Map.of(),
+                List.of(new com.perfplatform.domain.progress.LiveProgress.ShardReport(
+                        0, at, samples, 0, 100)));
     }
 
     /** Puts a run back into PROVISIONING as a pass that crashed mid-provision would have left it. */

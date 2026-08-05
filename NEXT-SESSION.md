@@ -42,12 +42,14 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S9 ran this to completion: **1,106 tests, 0 failures, 0 skipped** across all 15 modules. S7 was the
-first fully green `mvn clean verify` on the branch and it has stayed green since. Docker must be running: Testcontainers uses PostgreSQL
-and MinIO. The environment limits earlier sessions recorded (Mockito inline self-attach, sockets
-refusing to bind) did **not** recur; if they reappear, note them rather than assuming they are
-permanent. If a PostgreSQL module fails wholesale with `An error occurred while setting up the SSL
-connection`, that is a known flaky start — retry once. **If any integration test reports `Skipped`,
+S11 ran this to completion: **1,148 tests, 0 failures, 0 skipped** across all 15 modules. S7 was
+the first fully green `mvn clean verify` on the branch and it has stayed green through S11.
+Docker must be running:
+Testcontainers uses PostgreSQL and MinIO. The environment limits earlier sessions recorded (Mockito
+inline self-attach, sockets refusing to bind) did **not** recur in the S10b full run; if they reappear,
+note them rather than assuming they are permanent. If a PostgreSQL module fails wholesale with
+`An error occurred while setting up the SSL connection`, that is a known flaky start — retry once.
+**If any integration test reports `Skipped`,
 that is a false green: investigate, do not accept it.**
 
 ```bash
@@ -97,10 +99,11 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | S10 has started. The required security review is complete in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md). S10a added domain-level allowlist, address and route-guard policy; S10b added the recorder pod manifest, egress policy renderer and local-only network-enforcement bypass. Release 1 ships **guided capture wizards** until S10 implements the rest of the reviewed controls. |
+| **Recorder** | S10 has started. The required security review is complete in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md). S10a added domain-level allowlist, address and route-guard policy; S10b added the recorder pod manifest, egress policy renderer and local-only network-enforcement bypass; **S10c added durable audit events, capture sanitization and a safe pending console entry point**. The CDP bridge/live browser stream and sanitized draft persistence remain. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
-| **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. Hybrid under-load testing is still S11. |
+| **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |
+| **Web performance under load** | **Built in S11**: named stages, `startWhen` validation, delayed browser shards and browser-session budget enforcement. |
 | **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. S5 removed the credentials/session blocker, but removal still needs a focused audit because development identity remains local-only and V1 endpoints must stay operational until that increment is explicitly picked up. |
 
 ### What is built
@@ -147,18 +150,19 @@ that exposes it. Nothing lands API-only.
   refused **at validation**, closing a defect that once dropped later workloads silently. The
   browser-session budget moved to S11, where the thing it governs first becomes possible.
 
-**S10b: 1,115 Java tests, 158 UI tests, `mvn clean verify` fully green.**
+- **S10c** (§3ac) — recorder audit events and capture sanitization. Recorder sessions are durable
+  audit subjects; captures drop credential headers, token-looking values, browser storage state and
+  unsafe bodies before anything is rendered or drafted. The console has a target-bound
+  `Start guarded recording` entry point that returns `PENDING_BROWSER_BRIDGE`; it does not expose
+  CDP yet.
 
-**Next: continue S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The
-security review required by `PLAN.md` §12 R2 is complete:
-[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-S10a added the domain-level target allowlist, address policy and route guard. S10b added the
-recorder pod manifest, per-session egress `NetworkPolicy` renderer and local-only network
-enforcement bypass. Next, add recorder audit events and capture sanitization. Do not add a clickable
-recorder entry point before sanitization exists.
+- **S11** (§3ad) — web performance under load. Protocol workloads start first; delayed browser
+  shards stay durable `PENDING` rows until the depended workload is `RUNNING`, the named stage
+  boundary has elapsed and live progress has samples. Browser sessions are capped separately from
+  protocol virtual users, defaulting to 20 per run.
 
-A smaller alternative, if one is wanted: **S11's prerequisites** — the browser-session budget
-deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves against something.
+**Next:** finish the remaining recorder runtime bridge and sanitized draft persistence, then
+git-pinned Playwright import; or proceed to S12 scale hardening.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
@@ -172,10 +176,8 @@ Found by reading the code, and each is recorded in `PLAN.md` §2:
 2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ **S5 added runtime
    credential references, `SecretResolver`, and broker-backed `run://session`.** Corporate identity
    and non-Kubernetes secret managers remain later pause-condition decisions.
-3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9.** A run compiles one plan per
-   workload, shards are scoped by workload, and analysis merges sample sets across engines. What
-   remains for a hybrid is *coordination* — `startWhen` resolving, and the browser-session budget —
-   which is **S11**.
+3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9**, and S11 added the hybrid
+   coordination that starts browser shards under protocol load.
 
 ### The caveat to carry forward
 

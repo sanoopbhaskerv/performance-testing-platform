@@ -116,9 +116,9 @@ public final class SpecificationFixtures {
                 "jmeter",
                 "proposal-api",
                 new LoadModel(LoadModelType.STAGES, List.of(
-                        new LoadStage(Duration.ofMinutes(5), 200),
-                        new LoadStage(Duration.ofMinutes(20), 600),
-                        new LoadStage(Duration.ofMinutes(5), 0))),
+                        new LoadStage("ramp-up", Duration.ofMinutes(5), 200, null),
+                        new LoadStage("steady-state", Duration.ofMinutes(20), 600, null),
+                        new LoadStage("ramp-down", Duration.ofMinutes(5), 0, null))),
                 List.of(
                         new ScenarioSpec("search-client", 60, "searchClient"),
                         new ScenarioSpec("open-proposal", 30, "getProposal"),

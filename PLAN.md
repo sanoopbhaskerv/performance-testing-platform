@@ -12,13 +12,14 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S9 are built.** See §11 for the per-increment state and `HANDOFF.md`
-§3n–§3y for what each delivered. The S10 recorder security review is complete in
+**Status: S1 through S11 are built.** See §11 for the per-increment state and `HANDOFF.md`
+§3n–§3ad for what each delivered. The S10 recorder security review is complete in
 [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-S10a and S10b have started the security foundation with domain-level recorder allowlist, address and
-route guard policy, plus the recorder pod manifest and egress policy renderer. Recorder UI, CDP
-bridge, capture sanitization and captured-content persistence are still not built. Everything after
-it is still a plan.
+S10a and S10b added the security foundation with domain-level recorder allowlist, address and route
+guard policy, plus the recorder pod manifest and egress policy renderer. S10c added durable audit
+events, capture sanitization and a safe pending console entry point. The guarded CDP bridge,
+sanitized captured-content persistence and git-pinned import remain; S11 web performance under load
+is built.
 
 ---
 
@@ -148,10 +149,10 @@ Found by reading the code, not the docs:
 2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ S5 added runtime
    credential handling, `SecretResolver`, broker-backed `run://session`, mounted session partitions
    and production cleanup.
-3. **A run still has one plan with one engine.**
+3. ~~**A run still has one plan with one engine.**~~
    [`EngineDispatchingPlanCompiler.primaryEngine()`](platform-orchestration/src/main/java/com/perfplatform/orchestration/plan/EngineDispatchingPlanCompiler.java:62)
-   now rejects mixed-engine and hybrid specifications at plan compile time instead of silently
-   taking the first workload. Real coordinated hybrid execution remains S9/S11.
+   first made this failure explicit; S9 replaced it with one plan per workload, and S11 added
+   delayed browser start coordination for hybrid runs.
 
 ---
 
@@ -750,8 +751,8 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
 | **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — security foundation S10a/S10b built |
-| **S11** | Web performance under load | Test type 3 ★ | Medium | — | |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — S10a/S10b/S10c built; runtime bridge, sanitized draft persistence and git import remain |
+| **S11** | Web performance under load | Test type 3 ★ | Medium | — | **done** — `HANDOFF.md` §3ad |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
 **Usable milestones:**
@@ -844,8 +845,8 @@ grep as `RunnerJobManifestTest` already does.
 
 Built in S6 for browser-only workloads: Playwright is registered behind the engine SPI, uploaded or
 pasted scripts are represented by immutable artifact digests, browser profiles are canonicalized,
-Core Web Vitals evaluate through the normal objective model, and mixed-engine specs are rejected
-explicitly until S9/S11.
+Core Web Vitals evaluate through the normal objective model, and the later S9/S11 work made
+mixed-engine hybrid specifications executable.
 
 `PlaywrightEngineProvider` behind the existing SPI. Pinned `mcr.microsoft.com/playwright` runner
 image, non-root, all capabilities dropped, joining the `runnerImages` allowlist —
@@ -963,11 +964,9 @@ run whose active users climbed 1→9 where the old rendering jumped 5→10.
 `HANDOFF.md` §3y. Delivered as described, in Flyway `V9` rather than `V7` (taken by registered
 targets), with one item moved:
 
-**The browser-session budget is now S11's.** Admission evaluates before compilation, so it does not
-know a run's browser demand; a real budget needs that demand stored on the run at trigger time, which
-is a schema and trigger change of its own. Nothing can yet co-schedule a browser cohort with a
-protocol workload, so a browser-only run still consumes an ordinary run slot — coarse, but real. It
-belongs with the increment where the thing it governs first becomes possible.
+**The browser-session budget moved to S11 and is now built.** S9 deliberately left it out because a
+real browser budget needed the run's browser demand at trigger time; S11 added that trigger-time
+enforcement when hybrid coordination made the budget meaningful.
 
 *Acceptance — met:* a workload naming an engine this deployment does not have is refused by the new
 engine-capability validation layer, while somebody is still editing the document.
@@ -996,15 +995,26 @@ S10b implemented the Kubernetes half of that foundation: a recorder-specific Job
 per-session `NetworkPolicy` renderer based on the frozen destination IPs, Helm RBAC for generated
 policies and a local-only administrator bypass
 (`platform.orchestration.recorder.network-enforcement.enabled=false`) that production profiles
-refuse. The next S10 slice is recorder audit events and capture sanitization; no clickable recorder
-entry point should exist before the sanitizer is test-covered.
+refuse.
 
-### S11 — web performance under load
+S10c implemented durable recorder audit events, a capture sanitizer and a safe console entry point.
+The entry point is deliberately pending: it creates a target-bound audited session and returns
+`PENDING_BROWSER_BRIDGE` rather than exposing CDP before the guarded runtime bridge exists. The
+sanitizer removes credential headers, token-shaped header values, URL userinfo, browser storage
+state and suspicious bodies before captured material can be rendered or converted. Lower-environment
+credentials are still stripped from captures because the issue is propagation into versioned
+authoring material, API responses and audit surfaces, not only production blast radius.
 
-`LoadStage` gains a `name` so `startWhen: { workload, stage }` resolves — today
-`hybrid.yaml`'s `stage: steady-state` refers to nothing. **Also carries S9's deferred
-browser-session budget**, since this is the increment where a browser cohort first shares a run with
-a protocol workload and the two budgets stop being interchangeable.
+Remaining S10 work: CDP bridge/live browser stream, sanitized draft persistence and git-pinned
+Playwright import.
+
+### S11 — web performance under load — **built**
+
+Built in S11. `LoadStage` now has an optional `name`, so
+`startWhen: { workload, stage }` resolves and `hybrid.yaml`'s `stage: steady-state` names a real
+stage. S11 also carries S9's deferred browser-session budget, since this is the increment where a
+browser cohort first shares a run with a protocol workload and the two budgets stop being
+interchangeable.
 
 The browser cohort starts when **all three** hold: protocol shards `RUNNING`, wall-clock past the
 stage boundary computed from the shard's `startedAt`, **and** a minimum sample count observed. Time

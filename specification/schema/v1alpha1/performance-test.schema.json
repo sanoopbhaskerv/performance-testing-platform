@@ -533,6 +533,11 @@
             ],
             "additionalProperties": false,
             "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
+                "description": "Optional stage name used by browser workloads that start during a protocol load boundary."
+              },
               "duration": {
                 "$ref": "#/$defs/duration"
               },

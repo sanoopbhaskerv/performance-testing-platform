@@ -90,12 +90,6 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
                         "Use a smaller browser cohort. Browser sessions are budgeted separately "
                                 + "from protocol virtual users."));
             }
-            if (workload.startWhen() != null) {
-                findings.add(ValidationFinding.error("engine.playwright.hybridDeferred",
-                        path + "/startWhen",
-                        "Coordinated browser start conditions are deferred to the hybrid execution phase.",
-                        "For S6, run a browser-only Playwright workload. Hybrid orchestration arrives in S9."));
-            }
         }
 
         return ValidationResult.of(findings);
@@ -200,6 +194,10 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
                 .field("device", profile.deviceOrDefault())
                 .field("network", profile.networkOrDefault())
                 .field("cpuThrottle", profile.cpuThrottleOrDefault())
+                .field("startWhenWorkload", workload.startWhen() == null
+                        ? "" : workload.startWhen().workload())
+                .field("startWhenStage", workload.startWhen() == null
+                        ? "" : workload.startWhen().stage())
                 .endObject();
     }
 

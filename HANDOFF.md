@@ -4,9 +4,10 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10b recorder pod and egress-rendering foundation. Increments 0–2h and S1–S9 are
-complete; S10 implementation has started, but no recorder UI, CDP bridge, capture sanitizer or
-captured-content persistence exists.
+**Last updated:** S10c recorder audit/sanitizer/clickable safe entry and S11 web performance under
+load. Increments 0–2h and S1–S11 are complete. The recorder has a governed pending entry point,
+durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
+S10 slice.
 
 **The foundation is complete** (CLAUDE.md §32), with one partial: team authorization is enforced
 against a *development* identity provider until Increment 4. **The dataset loose thread is closed** —
@@ -48,8 +49,8 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task: **continue S10 with recorder audit events and capture
-sanitization**.
+`NEXT-SESSION.md` §2 has the immediate task after this commit: finish the recorder runtime bridge
+and git-pinned Playwright import, or continue to S12 scale hardening.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -94,13 +95,16 @@ sanitization**.
 | **S10 security review** | **Complete** | [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md) |
 | **S10a — recorder route-policy foundation** | **Complete** | see §3aa |
 | **S10b — recorder pod and egress-rendering foundation** | **Complete** | see §3ab |
-| **S10–S12 — release 2** | **Planned, not started** | [`PLAN.md`](PLAN.md) §11 |
+| **S10c — recorder audit, capture sanitizer and safe console entry** | **Complete** | see §3ac |
+| **S11 — web performance under load** | **Complete** | see §3ad |
+| **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**1,115 Java tests green, 0 failures, 0 skipped** — a full `mvn clean verify` across all 15 modules,
-Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D, 591 after the demo path, 684 at 2b,
-721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at S3 engine, 936 after S3 Rules,
-941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at S10b).
+**Last full Java verification: 1,148 tests green, 0 failures, 0 skipped at S11** — a full
+`mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
+591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
+S3 engine, 936 after S3 Rules, 941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at
+S10b, 1,148 at S10c/S11).
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -124,11 +128,10 @@ manual entry (a scenario's own `method`/`path`, delivered in §3c) — **and all
 importers are reachable from the console** (§3k). Datasets can be **declared, bound and partitioned**
 (§3l), and **uploaded, stored, verified and delivered** (§3m).
 
-**Immediate next action: S10 recorder audit events and capture sanitizer.** S10a added the domain
-target allowlist, address policy and browser route guard. S10b added the recorder pod manifest and
-per-session egress policy renderer, with a local-only administrative bypass for clusters without a
-NetworkPolicy controller. Next add the audit model for blocked recorder destinations and the capture
-sanitizer. Do not add a clickable recorder entry point before sanitization exists.
+**Immediate next action:** the remaining recorder runtime bridge and git-pinned Playwright import,
+or S12 scale hardening. S10c deliberately added only a safe clickable entry point: it creates an
+audited, target-bound session and returns `PENDING_BROWSER_BRIDGE`; it does not expose CDP or a
+live browser stream yet.
 
 **Three structural facts the studio work has to deal with**, each found by reading the code:
 
@@ -139,8 +142,8 @@ sanitizer. Do not add a clickable recorder entry point before sanitization exist
    session partitions and production cleanup.** Real enterprise identity and non-Kubernetes secret
    managers remain later pause-condition decisions.
 3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9.** A run compiles one plan per
-   workload, shards are scoped by workload, and analysis merges sample sets across engines. Real
-   coordinated hybrid start timing and the browser-session budget remain **S11**.
+   workload, shards are scoped by workload, and analysis merges sample sets across engines. **S11
+   added coordinated hybrid start timing and the browser-session budget.**
 
 ---
 
@@ -1586,8 +1589,8 @@ hybrid execution is now rejected explicitly until the S9/S11 multi-plan work.
 
 - ~~Live progress snapshots from runners are S7.~~ Built — §3w.
 - ~~Arrival-rate sizing is S8.~~ Built — §3x.
-- Multi-plan hybrid orchestration is S9/S11.
-- Git-pinned Playwright import and the recorder remain S10.
+- ~~Multi-plan hybrid orchestration is S9/S11.~~ Built — §3y and §3ad.
+- Git-pinned Playwright import and the recorder runtime bridge remain S10.
 
 ---
 
@@ -1901,24 +1904,21 @@ workload.
 
 ### Deliberately not done
 
-- **The browser-session budget.** `PLAN.md` listed it under S9 and it is **not** built. A run's
-  browser demand is not known to admission, which evaluates before compilation, so a real budget
-  needs the demand stored on the run at trigger time — a schema and trigger change of its own. Since
-  no run can yet co-schedule a browser cohort with a protocol workload (S11), a browser-only run
-  still consumes an ordinary run slot, which is a coarse but real limit. **Moved to S11**, where the
-  thing it governs first becomes possible.
+- ~~**The browser-session budget.**~~ Built in S11 at trigger time, with a default ceiling of 20
+  browser sessions per run.
 - **A hybrid report.** The report still describes the first plan's execution profile. Nothing
-  regresses for a single-workload run; describing several is S11's work, when a hybrid can actually
-  be executed.
-- **Coordinated start.** `startWhen` still resolves to nothing — S11.
+  regresses for a single-workload run; describing several workloads in one coherent report remains
+  later report work.
+- ~~**Coordinated start.**~~ Built in S11: `startWhen` resolves named stages and provisions delayed
+  browser shards only after protocol load is running and producing samples.
 
 ---
 
 ## 3z. S10 gate — recorder security review
 
-**The required S10 security review is complete, but the recorder is not built.** The review lives in
-[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md) and
-is now the binding gate for S10 implementation.
+**The required S10 security review is complete, but the live recorder runtime is not built.** The
+review lives in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md)
+and is now the binding gate for S10 implementation.
 
 The main decision: a server-side recording browser is an interactive network client in the runner
 network, so it is an internal open proxy unless constrained at two layers. S10 must implement both a
@@ -2102,10 +2102,80 @@ Result: **BUILD SUCCESS** across all 15 modules, **1,115 tests, 0 failures, 0 sk
 
 ### Still not done
 
-- Audit event model for blocked destinations and recorder lifecycle events.
-- Capture sanitization and draft artifact storage.
-- CDP bridge and UI.
+- CDP bridge and live recorder browser stream.
+- Draft artifact persistence from sanitized captures.
 - Git-pinned Playwright importer.
+
+## 3ac. S10c — recorder audit, capture sanitizer and safe console entry
+
+**S10c is complete as the recorder audit/sanitization and safe-entry slice.** It still does not
+create a CDP bridge or stream a live browser. That is deliberate: the console button now creates a
+governed session that is target-bound and auditable, but reports `PENDING_BROWSER_BRIDGE` until the
+guarded runtime bridge is built.
+
+Implemented:
+
+- Added `RecorderAuditEvent`, `RecorderAuditEventType` and `RecorderAuditLog`.
+- Added durable `recorder_audit_events` migrations for PostgreSQL and H2; PostgreSQL rows are
+  append-only with update/delete triggers.
+- Added `RecorderCaptureSanitizer`, which removes credential headers, token-shaped header values,
+  credentials embedded in URLs, browser storage state, and whole bodies when field names indicate
+  credentials or personal data.
+- Added `/api/v2/recordings`, `/api/v2/recordings/{sessionId}/sanitize` and
+  `/api/v2/recordings/{sessionId}/events`.
+- Added `recordings:create/read/cancel` to the development caller provider only. Production still
+  refuses that provider.
+- Added a console recorder strip that starts from registered targets only and displays the pending
+  session status.
+
+Decision recorded: **lower-environment credentials are still removed from captures**. They may be
+acceptable in local secret stores, but they do not belong in versioned authoring material, API
+responses, logs, audit details or generated draft specs. The sanitizer therefore removes them before
+anything can be rendered or converted.
+
+Tests added:
+
+- `RecorderCaptureSanitizerTest`
+- `RecorderAuditEventTest`
+- `ManageRecordingsUseCaseTest`
+- `RecorderControllerTest`
+
+Verification:
+
+- `mvn -B -f pom.xml -DskipTests package` — passed across all 15 modules.
+- `mvn -B -pl platform-domain,platform-orchestration -am test -DskipITs` — passed, including the
+  recorder sanitizer/audit/use-case tests and the hybrid reconciler/budget tests.
+- `yarn --cwd platform-ui test` — passed, 158 tests.
+- `yarn --cwd platform-ui build` — passed.
+- Full `mvn -B -f pom.xml clean verify` — **BUILD SUCCESS** across all 15 modules, **1,148 tests, 0
+  failures, 0 skipped**, Testcontainers included.
+
+## 3ad. S11 — web performance under load
+
+**S11 is complete.** Hybrid web performance now coordinates a browser workload under an active
+protocol workload instead of provisioning every workload immediately.
+
+Implemented:
+
+- `LoadStage` has an optional `name`, parsed from YAML/JSON, included in canonical digests and
+  published in the schema.
+- The hybrid example names `ramp-up`, `steady-state` and `ramp-down`; `startWhen.stage` is validated
+  against those names.
+- Playwright no longer rejects `startWhen`; it carries start-condition metadata into its compiled
+  plan.
+- `RunReconciler` creates delayed browser shards as durable `PENDING` rows and provisions them only
+  when the depended workload's shards are `RUNNING`, the named stage boundary has elapsed, and live
+  progress shows samples.
+- `WORKLOAD_DEFERRED` and `WORKLOAD_START_ELIGIBLE` run events make hybrid timing auditable.
+- Trigger-time browser-session budget enforcement rejects over-budget browser cohorts before queueing;
+  default ceiling is `platform.orchestration.capacity.max-browser-sessions-per-run=20`.
+
+Tests added:
+
+- Hybrid coordination coverage in `RunReconcilerTest`.
+- Browser-session budget coverage in `TriggerTestRunUseCaseTest`.
+
+Verification: same S10c/S11 verification set above.
 
 ---
 
@@ -2187,17 +2257,8 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
 
 ## 6. Next
 
-**Next: continue S10, the recorder and git-pinned Playwright sources.** `PLAN.md` §5 and §11. The
-required R2 security review is complete:
-[`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
-S10a added target allowlists, address policy and the browser route guard. S10b added the recorder
-pod manifest and per-session egress policy renderer. The next slice is recorder audit events and
-capture sanitization. A recording pod with CDP screencast to the console must not exist until
-sanitization is tested, because a user-driven browser inside the network is otherwise an internal
-open proxy and evidence leak.
-
-If a smaller next step is wanted instead, **S11's prerequisites** are now the shortest path to value:
-the browser-session budget deferred from S9, and `LoadStage` gaining a name so `startWhen` resolves.
+**Next:** finish the guarded recorder runtime bridge and sanitized draft persistence, then the
+git-pinned Playwright importer. S11's hybrid coordination and browser budget are now built.
 
 Before trusting authenticated production Kubernetes runs, execute the new broker smoke:
 `docs/operations/kind-session-broker-smoke.md`. The procedure is documented and the Helm/static

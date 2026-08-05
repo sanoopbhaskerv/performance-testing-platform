@@ -599,6 +599,10 @@ public final class RunWorkloadService {
         return merged;
     }
 
+    public Optional<LiveProgress> latestProgress(TestRun run) {
+        return progress.latest(run.id());
+    }
+
     /**
      * The labels this run's results will be reported under, as {@code workload/scenario}.
      *

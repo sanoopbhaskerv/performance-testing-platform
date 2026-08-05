@@ -139,6 +139,25 @@ export interface Target {
   createdAt: string;
 }
 
+export interface RecordingSession {
+  id: string;
+  teamId: string;
+  application: string;
+  environment: string;
+  target: string;
+  status: 'PENDING_BROWSER_BRIDGE' | string;
+  browserUrl: string | null;
+  events: RecorderAuditEvent[];
+}
+
+export interface RecorderAuditEvent {
+  sequence: number;
+  type: string;
+  actor: string;
+  detail: Record<string, string>;
+  occurredAt: string;
+}
+
 /**
  * A run's report.
  *
@@ -567,6 +586,16 @@ export class V2Client {
   listTargets() {
     return axios
       .get<Target[]>('/api/v2/targets', { headers: this.headers })
+      .then((r) => r.data);
+  }
+
+  startRecording(teamId: string, application: string, environment: string) {
+    return axios
+      .post<RecordingSession>(
+        '/api/v2/recordings',
+        { teamId, application, environment },
+        { headers: this.headers },
+      )
       .then((r) => r.data);
   }
 

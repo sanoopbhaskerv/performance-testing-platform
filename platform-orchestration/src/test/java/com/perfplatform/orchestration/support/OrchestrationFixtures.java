@@ -516,6 +516,49 @@ public final class OrchestrationFixtures {
         }
     }
 
+    /** Minimal browser engine for hybrid orchestration tests. */
+    public static final class StubBrowserEngineProvider implements ExecutionEngineProvider {
+
+        public static final String ENGINE_ID = "playwright";
+
+        @Override
+        public String engineId() {
+            return ENGINE_ID;
+        }
+
+        @Override
+        public EngineCapabilities capabilities() {
+            return new EngineCapabilities(ENGINE_ID, Set.of(WorkloadKind.BROWSER),
+                    Set.of("playwright"), Set.of(), 20, false, false, "stub/browser:1.0.0");
+        }
+
+        @Override
+        public com.perfplatform.domain.validation.ValidationResult validate(
+                PerformanceTestSpecification specification) {
+            return com.perfplatform.domain.validation.ValidationResult.valid();
+        }
+
+        @Override
+        public EnginePlan compile(PerformanceTestSpecification specification, String workloadName) {
+            return new EnginePlan(
+                    "{\"engine\":\"playwright\",\"stub\":true,\"workload\":\"" + workloadName + "\"}",
+                    1, specification.peakBrowserSessions(), 300);
+        }
+
+        @Override
+        public RenderedWorkload render(PerformanceTestSpecification specification,
+                ExecutionPlan plan, ShardAssignment assignment, TargetAddress target) {
+            return new RenderedWorkload("shard-%d-browser.stub".formatted(assignment.shardIndex()),
+                    "text/plain", "browser=" + assignment.shardIndex()
+                            + " target=" + target.baseUrl());
+        }
+
+        @Override
+        public SampleSet parse(RunnerOutput output) {
+            return SampleSet.empty();
+        }
+    }
+
     /**
      * A provider that behaves exactly like its delegate but declares that it generates real load.
      *

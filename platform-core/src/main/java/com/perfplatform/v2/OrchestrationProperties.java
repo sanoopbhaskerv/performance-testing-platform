@@ -486,6 +486,7 @@ public class OrchestrationProperties {
     public static class Capacity {
         private int globalMaxRuns = 10;
         private int defaultTeamMaxRuns = 1;
+        private int maxBrowserSessionsPerRun = 20;
 
         /** Per-team ceilings by team name, for teams policy has granted more than the default. */
         private Map<String, Integer> teamOverrides = new LinkedHashMap<>();
@@ -504,6 +505,14 @@ public class OrchestrationProperties {
 
         public void setDefaultTeamMaxRuns(int defaultTeamMaxRuns) {
             this.defaultTeamMaxRuns = defaultTeamMaxRuns;
+        }
+
+        public int getMaxBrowserSessionsPerRun() {
+            return maxBrowserSessionsPerRun;
+        }
+
+        public void setMaxBrowserSessionsPerRun(int maxBrowserSessionsPerRun) {
+            this.maxBrowserSessionsPerRun = maxBrowserSessionsPerRun;
         }
 
         public Map<String, Integer> getTeamOverrides() {

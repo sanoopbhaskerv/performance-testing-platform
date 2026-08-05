@@ -19,6 +19,7 @@ import com.perfplatform.domain.port.RunnerShardRepository;
 import com.perfplatform.domain.port.RuntimeCredentialStore;
 import com.perfplatform.domain.port.TestRunRepository;
 import com.perfplatform.domain.port.TestRunRepository.ClaimRequest;
+import com.perfplatform.domain.progress.LiveProgress;
 import com.perfplatform.domain.results.ObjectiveOutcome;
 import com.perfplatform.domain.run.RunEvent;
 import com.perfplatform.domain.run.RunEventType;
@@ -28,6 +29,7 @@ import com.perfplatform.domain.run.RunnerShard;
 import com.perfplatform.domain.run.ShardState;
 import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.spec.WorkloadType;
 import com.perfplatform.orchestration.OrchestrationSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -258,75 +260,35 @@ public final class RunReconciler {
         int provisionedShards = 0;
 
         // Every workload, every shard. A hybrid run provisions a protocol generator and a browser
-        // cohort in the same pass; before S9 a run had one plan and a second workload was either
-        // refused or — earlier still — silently dropped, so the run executed half the test and
-        // reported success.
+        // cohort as separate durable shards; delayed browser shards stay PENDING until their
+        // start condition is true.
         for (ExecutionPlan plan : runPlans) {
+            boolean hadShardsForPlan = existing.stream()
+                    .anyMatch(shard -> plan.workloadName().equals(shard.workloadName()));
             List<RunnerShard> planned = shardsFor(withPlan, plan, existing);
             provisionedShards += planned.size();
 
+            if (isDeferred(version.specification(), plan)) {
+                if (!hadShardsForPlan) {
+                    runs.appendEvent(RunEvent.of(withPlan.id(), RunEventType.WORKLOAD_DEFERRED,
+                            RunEvent.SYSTEM_ACTOR,
+                            RunEvent.detail("workload", plan.workloadName()), now));
+                }
+                continue;
+            }
+
             for (RunnerShard shard : planned) {
-                // A shard that already carries a handle was provisioned by an earlier pass that died
-                // before recording the run's transition. Provisioning it again would start a second
-                // load generator for the same shard.
-                if (shard.handle().isPresent()) {
-                    continue;
-                }
-
-                // Rendered, sliced and stored before the runner is asked to start, so both what
-                // executed and what it sent are recoverable whatever happens to the runner
-                // afterwards.
-                RunWorkloadService.PreparedShard prepared;
-                try {
-                    prepared = workloads.prepareShard(withPlan, plan, version, shard, material,
-                            deadlineFor(plan), now);
-                } catch (RunWorkloadService.TargetUnresolvableException
-                        | RunWorkloadService.DatasetUnavailableException
-                        | RunWorkloadService.SessionUnavailableException e) {
-                    // None is transient. A target that is not registered does not become registered
-                    // by retrying, and a dataset that does not have the declared columns will not
-                    // grow them — and a run that sat in PROVISIONING forever would hold a capacity
-                    // slot while telling the consumer nothing. The message is the actionable part.
-                    fail(withPlan, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+                if (!provisionShard(withPlan, plan, version, material, shard, now, report)) {
                     return;
                 }
-
-                ExecutionProvider.ProvisioningResult result = provider.provision(
-                        provisionRequest(withPlan, plan, shard, prepared,
-                                RunWorkloadService.operationLabels(version.specification()),
-                                material));
-
-                if (!result.isAccepted()) {
-                    String reason = result.failureReason().orElse("The runner could not be created");
-                    shards.save(shard.finished(ShardState.FAILED, null,
-                            RunFailureCode.PROVISIONING_FAILED, now));
-                    // The whole run fails, including workloads whose runners started. A run half of
-                    // whose load never began measures a test nobody described, and reporting its
-                    // numbers would state a result for a smaller test than the one that was asked
-                    // for. Shards already running are torn down by the cancellation path.
-                    fail(withPlan, RunFailureCode.PROVISIONING_FAILED, reason, now, report);
-                    return;
-                }
-
-                shards.save(shard.provisioned(result.handle().orElseThrow(), now));
-
-                // The provider is named in the history, so the evidence of what executed a run is
-                // part of the run's own record rather than only of the log of whichever replica ran
-                // the pass.
-                Map<String, String> provisioned = new LinkedHashMap<>();
-                provisioned.put("workload", plan.workloadName());
-                provisioned.put("shardIndex", String.valueOf(shard.shardIndex()));
-                provisioned.put("provider", provider.providerId());
-                runs.appendEvent(RunEvent.of(withPlan.id(), RunEventType.SHARD_PROVISIONED,
-                        RunEvent.SYSTEM_ACTOR, provisioned, now));
             }
         }
 
         runs.apply(withPlan.transitionTo(RunState.RUNNING, RunEvent.SYSTEM_ACTOR,
                 withPlan.synthetic()
-                        ? "All shards provisioned. The provider generates no load, so this run "
+                        ? "Initial shards provisioned. The provider generates no load, so this run "
                                 + "will measure nothing."
-                        : "All shards provisioned", now));
+                        : "Initial shards provisioned", now));
 
         log.info("Run started runId={} teamId={} workloads={} shards={} provider={} synthetic={}",
                 withPlan.id(), withPlan.teamId(), runPlans.size(), provisionedShards,
@@ -450,6 +412,51 @@ public final class RunReconciler {
                 .toList();
     }
 
+    private boolean provisionShard(TestRun run, ExecutionPlan plan, DefinitionVersion version,
+            List<RuntimeCredential> material, RunnerShard shard, Instant now,
+            ReconciliationReport.Builder report) {
+
+        // A shard that already carries a handle was provisioned by an earlier pass that died before
+        // recording the run's transition. Provisioning it again would start a second load generator.
+        if (shard.handle().isPresent()) {
+            return true;
+        }
+
+        RunWorkloadService.PreparedShard prepared;
+        try {
+            prepared = workloads.prepareShard(run, plan, version, shard, material,
+                    deadlineFor(plan), now);
+        } catch (RunWorkloadService.TargetUnresolvableException
+                | RunWorkloadService.DatasetUnavailableException
+                | RunWorkloadService.SessionUnavailableException e) {
+            fail(run, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+            return false;
+        }
+
+        ExecutionProvider.ProvisioningResult result = provider.provision(
+                provisionRequest(run, plan, shard, prepared,
+                        RunWorkloadService.operationLabels(version.specification()),
+                        material));
+
+        if (!result.isAccepted()) {
+            String reason = result.failureReason().orElse("The runner could not be created");
+            shards.save(shard.finished(ShardState.FAILED, null,
+                    RunFailureCode.PROVISIONING_FAILED, now));
+            fail(run, RunFailureCode.PROVISIONING_FAILED, reason, now, report);
+            return false;
+        }
+
+        shards.save(shard.provisioned(result.handle().orElseThrow(), now));
+
+        Map<String, String> provisioned = new LinkedHashMap<>();
+        provisioned.put("workload", plan.workloadName());
+        provisioned.put("shardIndex", String.valueOf(shard.shardIndex()));
+        provisioned.put("provider", provider.providerId());
+        runs.appendEvent(RunEvent.of(run.id(), RunEventType.SHARD_PROVISIONED,
+                RunEvent.SYSTEM_ACTOR, provisioned, now));
+        return true;
+    }
+
     private ProvisionRequest provisionRequest(TestRun run, ExecutionPlan plan, RunnerShard shard,
             RunWorkloadService.PreparedShard prepared, List<String> operationLabels,
             List<RuntimeCredential> material) {
@@ -504,6 +511,11 @@ public final class RunReconciler {
                     now, report);
             return;
         }
+
+        if (!startEligibleDelayedWorkloads(run, current, now, report)) {
+            return;
+        }
+        current = shards.findByRun(run.id());
 
         Optional<RunFailureCode> shardFailure = Optional.empty();
         boolean allTerminal = true;
@@ -570,6 +582,116 @@ public final class RunReconciler {
                     ? declareLost(shard, now)
                     : shard;
         };
+    }
+
+    private boolean startEligibleDelayedWorkloads(TestRun run, List<RunnerShard> current,
+            Instant now, ReconciliationReport.Builder report) {
+
+        Optional<DefinitionVersion> found = versions.find(run.definitionVersionId());
+        List<ExecutionPlan> runPlans = plans.findByRun(run.id());
+        if (found.isEmpty() || runPlans.isEmpty()) {
+            fail(run, RunFailureCode.PROVISIONING_FAILED,
+                    "The definition version or execution plans this run references are no longer "
+                            + "readable, so delayed workloads cannot be started", now, report);
+            return false;
+        }
+
+        DefinitionVersion version = found.get();
+        List<RuntimeCredential> material = runtimeCredentials.find(run.id());
+        LiveProgress latest = workloads.latestProgress(run).orElse(null);
+
+        for (ExecutionPlan plan : runPlans) {
+            if (!isDeferred(version.specification(), plan)) {
+                continue;
+            }
+            List<RunnerShard> pending = current.stream()
+                    .filter(shard -> plan.workloadName().equals(shard.workloadName()))
+                    .filter(shard -> shard.handle().isEmpty())
+                    .filter(shard -> shard.state() == ShardState.PENDING)
+                    .toList();
+            if (pending.isEmpty()) {
+                continue;
+            }
+            if (!startConditionSatisfied(version.specification(), plan, current, latest, now)) {
+                continue;
+            }
+
+            runs.appendEvent(RunEvent.of(run.id(), RunEventType.WORKLOAD_START_ELIGIBLE,
+                    RunEvent.SYSTEM_ACTOR,
+                    RunEvent.detail("workload", plan.workloadName()), now));
+
+            for (RunnerShard shard : pending) {
+                if (!provisionShard(run, plan, version, material, shard, now, report)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isDeferred(PerformanceTestSpecification specification, ExecutionPlan plan) {
+        return workload(specification, plan.workloadName())
+                .filter(workload -> workload.type() == WorkloadType.BROWSER)
+                .map(PerformanceTestSpecification.WorkloadSpec::startWhen)
+                .isPresent();
+    }
+
+    private boolean startConditionSatisfied(PerformanceTestSpecification specification,
+            ExecutionPlan plan, List<RunnerShard> current, LiveProgress latest, Instant now) {
+
+        PerformanceTestSpecification.WorkloadSpec workload = workload(specification, plan.workloadName())
+                .orElse(null);
+        if (workload == null || workload.startWhen() == null) {
+            return false;
+        }
+        var condition = workload.startWhen();
+        List<RunnerShard> dependency = current.stream()
+                .filter(shard -> condition.workload().equals(shard.workloadName()))
+                .toList();
+        if (dependency.isEmpty() || dependency.stream().anyMatch(shard -> shard.state() != ShardState.RUNNING)) {
+            return false;
+        }
+        Optional<Duration> offset = stageOffset(specification, condition.workload(), condition.stage());
+        if (offset.isEmpty()) {
+            return false;
+        }
+        boolean pastBoundary = dependency.stream()
+                .map(RunnerShard::startedAt)
+                .filter(Optional::isPresent)
+                .map(Optional::orElseThrow)
+                .allMatch(started -> !started.plus(offset.get()).isAfter(now));
+        if (!pastBoundary) {
+            return false;
+        }
+        return latest != null && latest.overall().sampleCount() > 0;
+    }
+
+    private Optional<PerformanceTestSpecification.WorkloadSpec> workload(
+            PerformanceTestSpecification specification, String workloadName) {
+        if (specification.spec() == null) {
+            return Optional.empty();
+        }
+        return specification.spec().workloads().stream()
+                .filter(candidate -> workloadName.equals(candidate.name()))
+                .findFirst();
+    }
+
+    private Optional<Duration> stageOffset(PerformanceTestSpecification specification,
+            String workloadName, String stageName) {
+        Optional<PerformanceTestSpecification.WorkloadSpec> found = workload(specification, workloadName);
+        if (found.isEmpty() || found.get().model() == null) {
+            return Optional.empty();
+        }
+        Duration offset = Duration.ZERO;
+        for (PerformanceTestSpecification.LoadStage stage : found.get().model().stages()) {
+            if (stageName.equals(stage.name())) {
+                return Optional.of(offset);
+            }
+            if (stage.duration() != null) {
+                offset = offset.plus(stage.duration());
+            }
+        }
+        return Optional.empty();
     }
 
     private RunnerShard declareLost(RunnerShard shard, Instant now) {

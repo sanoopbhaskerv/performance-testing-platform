@@ -14,6 +14,7 @@ import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
+import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
 import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -202,6 +203,17 @@ public class V2ProblemHandler {
                 request, e);
     }
 
+    @ExceptionHandler(TriggerTestRunUseCase.BrowserSessionBudgetExceededException.class)
+    public ProblemDetail handleBrowserSessionBudgetExceeded(
+            TriggerTestRunUseCase.BrowserSessionBudgetExceededException e,
+            HttpServletRequest request) {
+        ProblemDetail problem = problem(HttpStatus.UNPROCESSABLE_ENTITY,
+                "run.browserSessions.exceeded", e.getMessage(), request, e);
+        problem.setProperty("requested", e.requested());
+        problem.setProperty("limit", e.limit());
+        return problem;
+    }
+
     /**
      * A run identifier that names nothing the caller may see.
      *
@@ -295,6 +307,27 @@ public class V2ProblemHandler {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "target.refused",
                 "The target address is not allowed by platform target policy.",
                 request, e);
+    }
+
+    @ExceptionHandler(ManageRecordingsUseCase.UnknownTeamException.class)
+    public ProblemDetail handleUnknownRecorderTeam(ManageRecordingsUseCase.UnknownTeamException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "recording.team.unknown",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(ManageRecordingsUseCase.UnknownTargetException.class)
+    public ProblemDetail handleUnknownRecorderTarget(ManageRecordingsUseCase.UnknownTargetException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "recording.target.unknown",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(ManageRecordingsUseCase.UnknownSessionException.class)
+    public ProblemDetail handleUnknownRecorderSession(
+            ManageRecordingsUseCase.UnknownSessionException e, HttpServletRequest request) {
+        return problem(HttpStatus.NOT_FOUND, "recording.session.notFound",
+                e.getMessage(), request, e);
     }
 
     /**

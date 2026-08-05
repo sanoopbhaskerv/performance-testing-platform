@@ -371,7 +371,7 @@ public final class SpecificationParser {
     private LoadStage loadStage(JsonNode node, String path, List<ValidationFinding> findings,
             boolean arrivalRate) {
 
-        rejectUnknownFields(node, path, Set.of("duration", "targetUsers", "targetRate"), findings);
+        rejectUnknownFields(node, path, Set.of("name", "duration", "targetUsers", "targetRate"), findings);
 
         Duration duration = duration(node, "duration", path + "/duration", findings);
 
@@ -396,7 +396,8 @@ public final class SpecificationParser {
         // Both are carried through as authored, including the one this model does not read. The
         // semantic validator refuses a stage that sets the wrong field, and it can only do that if
         // the parser has not already dropped it.
-        return new LoadStage(duration, targetUsers == null ? 0 : targetUsers, targetRate);
+        return new LoadStage(text(node, "name", path + "/name", findings),
+                duration, targetUsers == null ? 0 : targetUsers, targetRate);
     }
 
     private ScenarioSpec scenario(JsonNode node, String path, List<ValidationFinding> findings) {

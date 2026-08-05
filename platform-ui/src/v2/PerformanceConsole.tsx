@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ServerCog,
   Square,
+  Video,
   XCircle,
 } from 'lucide-react';
 import type {
@@ -22,6 +23,8 @@ import type {
   RunProgress,
   RunReport as Report,
   RunStatus,
+  RecordingSession,
+  Target,
   TestDefinition,
   TestRun,
   VersionSummary,
@@ -259,12 +262,17 @@ function VerdictIcon({ verdict }: { verdict: ObjectiveOutcome['verdict'] }) {
   return <HelpCircle size={16} className="tone-neutral" />;
 }
 
+function targetKey(target: Target) {
+  return `${target.teamId}:${target.application}:${target.environment}`;
+}
+
 export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const client = useMemo(() => new V2Client(apiKey), [apiKey]);
 
   const [definitions, setDefinitions] = useState<TestDefinition[]>([]);
   const [versions, setVersions] = useState<Record<string, VersionSummary[]>>({});
   const [runs, setRuns] = useState<TestRun[]>([]);
+  const [targets, setTargets] = useState<Target[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [objectives, setObjectives] = useState<ObjectiveOutcome[]>([]);
@@ -290,6 +298,8 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const [validation, setValidation] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [sessionCredential, setSessionCredential] = useState('');
+  const [recordingTargetKey, setRecordingTargetKey] = useState('');
+  const [recordingSession, setRecordingSession] = useState<RecordingSession | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -300,12 +310,18 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
   const refresh = useCallback(async () => {
     if (!apiKey) return;
     try {
-      const [definitionList, runList] = await Promise.all([
+      const [definitionList, runList, targetList] = await Promise.all([
         client.listDefinitions(),
         client.listRuns(25),
+        client.listTargets(),
       ]);
       setDefinitions(definitionList);
       setRuns(runList);
+      setTargets(targetList);
+      setRecordingTargetKey((current) => {
+        if (current && targetList.some((target) => targetKey(target) === current)) return current;
+        return targetList[0] ? targetKey(targetList[0]) : '';
+      });
       setError(null);
 
       const versionEntries = await Promise.all(
@@ -461,6 +477,29 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
     }
   };
 
+  const startRecording = async () => {
+    const target = targets.find((candidate) => targetKey(candidate) === recordingTargetKey);
+    if (!target) {
+      setError('Choose a registered target before starting a recording.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await client.startRecording(
+        target.teamId,
+        target.application,
+        target.environment,
+      );
+      setRecordingSession(session);
+      setNotice(`Recorder session ${session.id.slice(0, 8)} is waiting for the browser bridge.`);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!apiKey) {
     return (
       <div className="v2-empty">
@@ -554,6 +593,44 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
             onCancel={() => setStudioOpen(false)}
           />
         )}
+
+        <div className="recorder-entry">
+          <div>
+            <h3>Recorder</h3>
+            <p className="muted">
+              Starts only against a registered target. The browser bridge remains disabled until
+              the next guarded-runtime slice.
+            </p>
+          </div>
+          <div className="recorder-controls">
+            <select
+              value={recordingTargetKey}
+              onChange={(event) => setRecordingTargetKey(event.target.value)}
+              disabled={targets.length === 0 || busy}
+              aria-label="Recording target"
+            >
+              {targets.length === 0 ? (
+                <option value="">No registered targets</option>
+              ) : (
+                targets.map((target) => (
+                  <option key={targetKey(target)} value={targetKey(target)}>
+                    {target.application} / {target.environment}
+                  </option>
+                ))
+              )}
+            </select>
+            <button className="btn btn-quiet" onClick={startRecording} disabled={busy || !recordingTargetKey}>
+              <Video size={14} /> Start guarded recording
+            </button>
+          </div>
+          {recordingSession && (
+            <div className="recorder-status" role="status">
+              <strong>{recordingSession.status}</strong>
+              <span>{recordingSession.target}</span>
+              <code>{recordingSession.id.slice(0, 8)}</code>
+            </div>
+          )}
+        </div>
 
         {editorOpen && (
           <div className="editor">

@@ -355,14 +355,23 @@ public record PerformanceTestSpecification(
      * whichever quantity is being ramped. The validator refuses a stage that sets the field its
      * model does not read, so a document cannot quietly mean something other than it says.
      *
+     * @param name        optional stage name. Browser workloads can wait for this boundary.
      * @param targetUsers concurrent users, for a closed model
      * @param targetRate  requests per second, for an open model. Null in a closed model
      */
-    public record LoadStage(Duration duration, int targetUsers, Integer targetRate) {
+    public record LoadStage(String name, Duration duration, int targetUsers, Integer targetRate) {
+
+        public LoadStage {
+            name = name == null || name.isBlank() ? null : name.trim();
+        }
+
+        public LoadStage(Duration duration, int targetUsers, Integer targetRate) {
+            this(null, duration, targetUsers, targetRate);
+        }
 
         /** The shape that predates the open model. */
         public LoadStage(Duration duration, int targetUsers) {
-            this(duration, targetUsers, null);
+            this(null, duration, targetUsers, null);
         }
 
         /** What this stage asks for, in whichever unit its model reads. Zero means ramp-down. */

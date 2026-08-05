@@ -43,11 +43,14 @@ spec:
       model:
         type: stages
         stages:
-          - duration: 5m
+          - name: ramp-up
+            duration: 5m
             targetUsers: 200
-          - duration: 20m
+          - name: steady-state
+            duration: 20m
             targetUsers: 600
-          - duration: 5m
+          - name: ramp-down
+            duration: 5m
             targetUsers: 0
       scenarios:
         - name: search-client

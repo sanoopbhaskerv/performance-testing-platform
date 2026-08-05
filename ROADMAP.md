@@ -17,7 +17,7 @@ than a surprise.
 > **Read `PLAN.md` first.** This file remains the inventory of what exists and what does not;
 > `PLAN.md` is the decision about what happens next.
 >
-> **Built so far: S1 through S9** — the studio, a report a non-expert can read, run progress,
+> **Built so far: S1 through S11** — the studio, a report a non-expert can read, run progress,
 > multi-step journeys with correlation, HAR-imported ordered journeys, the Rules screen, the live
 > Validator, target/credential/session foundations, broker-backed `run://session`, mounted session
 > delivery and lifecycle cleanup, a kind-level broker smoke and failed-acquisition runbook,
@@ -33,7 +33,9 @@ than a surprise.
 > [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
 > S10a added the domain-level recorder allowlist, address policy and route guard. S10b added the
 > recorder pod manifest, per-session egress policy renderer and local-only network-enforcement
-> bypass. Next is recorder audit events and capture sanitization.
+> bypass. S10c added durable recorder audit events, capture sanitization and a safe pending console
+> entry point. The remaining recorder work is the guarded CDP bridge, sanitized draft persistence and
+> git-pinned Playwright import. S11 added coordinated web performance under load.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -46,7 +48,9 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
-slice, S7's live monitoring, S8's load models and S9's per-workload plans are built. Everything below is still an accurate inventory of what exists and what
+slice, S7's live monitoring, S8's load models, S9's per-workload plans, S10c's recorder
+audit/sanitizer entry point and S11's hybrid coordination are built. Everything below is still an
+accurate inventory of what exists and what
 does not.
 
 **V1's removal is authorized** and deferred until after the studio build phases. S5 removed the
@@ -105,8 +109,8 @@ restricted runner image; normalise browser results into the same model as protoc
 coordinate a small browser cohort during JMeter steady state. Default browser concurrency 5, policy
 maximum 20 — **not** 1,000, and never equated with protocol virtual users.
 
-The engine SPI is now exercised by JMeter and Playwright for browser-only runs. Coordinated hybrid
-execution still waits for the S9/S11 multi-plan work.
+The engine SPI is now exercised by JMeter and Playwright for browser-only runs, and S11 coordinates
+delayed browser cohorts under active protocol load.
 
 ---
 
@@ -170,8 +174,9 @@ Each is real, none blocks anything.
   `sessions.csv`, Helm RBAC and docs. `HANDOFF.md` §3t.
 - ~~**A run had one plan and one engine.**~~ **Done in S9** — one plan per workload, shards scoped
   by workload, analysis merging sample sets across engines, and a new engine-capability validation
-  layer that refuses a workload naming an engine this deployment does not have. Coordination of a
-  hybrid — `startWhen`, and the browser-session budget deferred from S9 — is S11. `HANDOFF.md` §3y.
+  layer that refuses a workload naming an engine this deployment does not have. **S11 added**
+  `startWhen` coordination and trigger-time browser-session budget enforcement. `HANDOFF.md` §3y
+  and §3ad.
 - ~~**A run in flight showed a state and nothing else.**~~ **Done in S7** — throughput, latency,
   errors, per-journey breakdown, each generator's own last snapshot, live objectives and rule-based
   observations, at 11–14 s freshness. `HANDOFF.md` §3w, `docs/operations/live-monitoring.md`.
