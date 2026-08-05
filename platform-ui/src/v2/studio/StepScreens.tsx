@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle2, Clock3, Loader2, Play, Save } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Download,
+  Loader2,
+  Play,
+  Save,
+} from 'lucide-react';
 import type { ValidationFinding, ValidatorResult, V2Client } from '../api';
 import { describeError } from '../api';
 import type { ObjectiveDraft, ObjectiveMetric, StudioDraft } from './draft';
 import { includedJourneys, toResourceName } from './draft';
+import { downloadSpecification } from './download';
 import {
   approximateDuration,
   toSpecification,
@@ -594,7 +604,12 @@ export function ValidateStep({ client, draft, onChange }: StepProps & { client: 
 
   const document = useMemo(() => {
     try {
-      return { text: toSpecification(draft), problem: null as string | null };
+      const validationDraft: StudioDraft = {
+        ...draft,
+        name: draft.name.trim() || 'validation-draft',
+        application: draft.application.trim() || 'demo-service',
+      };
+      return { text: toSpecification(validationDraft), problem: null as string | null };
     } catch (err) {
       return {
         text: null,
@@ -648,15 +663,38 @@ export function ValidateStep({ client, draft, onChange }: StepProps & { client: 
         </p>
       )}
 
-      <button
-        type="button"
-        className="btn"
-        disabled={running || !document.text}
-        onClick={runValidator}
-      >
-        {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-        {running ? 'Validating...' : 'Run Validator'}
-      </button>
+      <div className="studio-button-row">
+        <button
+          type="button"
+          className="btn"
+          disabled={running || !document.text}
+          onClick={runValidator}
+        >
+          {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+          {running ? 'Validating...' : 'Run Validator'}
+        </button>
+
+        {/*
+          The same document the studio would save, as a file. Offered here rather than only at Save
+          because this is the step where somebody decides whether the test is right — and the answer
+          is often "let me read it properly" or "let me put this in Git".
+        */}
+        <button
+          type="button"
+          className="btn btn-quiet"
+          disabled={!document.text}
+          onClick={() => document.text && downloadSpecification(document.text, draft.name)}
+        >
+          <Download size={14} /> Download YAML
+        </button>
+      </div>
+
+      {document.text && (
+        <details className="advanced">
+          <summary>Show the test definition this produces</summary>
+          <pre className="validation">{document.text}</pre>
+        </details>
+      )}
     </>
   );
 }

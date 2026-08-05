@@ -41,6 +41,11 @@ targets:
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 
+  - name: student-app
+    baseUrl: "http://localhost:8081"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
 # V1 needs this block to consider the team runnable. V2 takes its load model from
 # the PerformanceTest specification instead, so these values are only used by the
 # legacy surface.

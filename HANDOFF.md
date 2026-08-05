@@ -2179,6 +2179,53 @@ Verification: same S10c/S11 verification set above.
 
 ---
 
+## 3ae. Downloading the generated specification
+
+The Validate step offers **Download YAML** beside *Run Validator*, and shows the same collapsed
+read-only preview the Review step has. The studio is one of three ways to author one document
+(CLAUDE.md §32); this is what lets someone who described a test by clicking take the result to Git or
+to a colleague who works in YAML.
+
+What downloads is `toSpecification(draft)` — the same text the studio would POST, not a second
+rendering. A file that differed from what was saved would be worse than no file, because the
+difference would be invisible.
+
+- `platform-ui/src/v2/studio/download.ts` — `specificationFileName` and `downloadSpecification`.
+  `window.document`, not a bare `document`: the step components bind a local `document` to the
+  generated specification, and the global would be shadowed at the call site.
+- Falls back to `performance-test.yaml`, because Validate is reachable before Review asks for a name
+  and a bare `.yaml` is a hidden file.
+
+Tests: `download.test.ts` (3). Verified in the browser — the click produced an anchor with
+`download="performance-test.yaml"` and a blob URL, no console errors.
+
+**Known limitation, and it is not this button's:** on a `web-experience` draft the download is still a
+`type: protocol` / `engine: jmeter` document, because `toSpecification` hard-codes those. See §3af.
+
+## 3af. The studio cannot author a browser test — open gap
+
+**`toSpecification` always emits `type: protocol` and `engine: jmeter`, whatever `draft.testType`
+says.** The *Test web performance* path changes step labels and the Load step's wording
+(`StepScreens.tsx` — `const browser = draft.testType === 'web-experience'`), and nothing else. A test
+described through it saves as a JMeter protocol test.
+
+The backend is not the blocker — S6 built browser execution, `browser-only.yaml` parses, Core Web
+Vitals evaluate. Three things are missing above it:
+
+1. `toSpecification` has no `type: browser` branch: no `browserUsers`, `iterationsPerUser`,
+   `browserProfile`, no `sourceRef` to a Playwright source.
+2. `ObjectiveMetric` in `draft.ts` is only the three HTTP metrics. No `web.lcp`, `web.cls`,
+   `browser.journey.duration`.
+3. **No ingestion path for a Playwright script.** `SourceType.PLAYWRIGHT` exists and `SourceSpec`
+   carries `uri` + `digest`, but `/api/v2/imports` handles only curl, openapi, har and postman, and
+   there is no artifact-upload endpoint. `artifact://playwright-sources/...` in the example refers to
+   something no API can currently create — so the YAML path cannot author a browser test either.
+
+Until (3) is closed, browser testing is reachable only by placing an artifact in the store out of
+band. This is the S6-UI slice that S6 deferred, and it should be sized as an increment of its own.
+
+---
+
 ## 4. Design decisions made in 1B and 1C (do not relitigate)
 
 ### From 1B

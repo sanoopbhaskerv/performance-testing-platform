@@ -385,3 +385,14 @@
 .v2 .studio-choice input[type='radio'] {
   margin-top: 0.2rem;
 }
+
+/*
+ * Two actions that belong to the same decision, side by side: run the check, or take the document
+ * away and read it. Wraps rather than overflows, because the studio is usable at a narrow width.
+ */
+.v2 .studio-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-3);
+}
