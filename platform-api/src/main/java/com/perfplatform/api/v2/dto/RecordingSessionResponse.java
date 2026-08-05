@@ -4,7 +4,13 @@ import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase.Recording
 
 import java.util.List;
 
-/** A governed recorder session. */
+/**
+ * A governed recorder session.
+ *
+ * @param bridge        what this deployment runs the browser with, so a session that stays in
+ *                      {@code PENDING_BROWSER_BRIDGE} explains itself instead of appearing stuck
+ * @param viewportWidth the surface a client must scale its pointer coordinates to
+ */
 public record RecordingSessionResponse(
         String id,
         String teamId,
@@ -13,6 +19,13 @@ public record RecordingSessionResponse(
         String target,
         String status,
         String browserUrl,
+        int viewportWidth,
+        int viewportHeight,
+        String bridge,
+        String failureCode,
+        String failureReason,
+        long capturedCount,
+        long blockedCount,
         List<RecorderAuditEventResponse> events) {
 
     public static RecordingSessionResponse from(RecordingSession session) {
@@ -22,8 +35,15 @@ public record RecordingSessionResponse(
                 session.application(),
                 session.environment(),
                 session.target(),
-                session.status(),
+                session.status().name(),
                 session.browserUrl(),
+                session.viewport().width(),
+                session.viewport().height(),
+                session.bridge(),
+                session.failureCode(),
+                session.failureReason(),
+                session.capturedCount(),
+                session.blockedCount(),
                 session.events().stream()
                         .map(RecorderAuditEventResponse::from)
                         .toList());

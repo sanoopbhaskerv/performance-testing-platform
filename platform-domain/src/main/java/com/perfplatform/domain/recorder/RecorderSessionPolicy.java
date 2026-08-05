@@ -21,12 +21,14 @@ import java.util.Optional;
 public record RecorderSessionPolicy(
         RecorderOrigin registeredTargetOrigin,
         Map<RecorderOrigin, AllowedOrigin> allowedOrigins,
-        List<CidrBlock> prohibitedRanges) {
+        List<CidrBlock> prohibitedRanges,
+        RecorderAddressAllowances allowances) {
 
     public RecorderSessionPolicy {
         Objects.requireNonNull(registeredTargetOrigin, "registeredTargetOrigin");
         allowedOrigins = allowedOrigins == null ? Map.of() : Map.copyOf(allowedOrigins);
         prohibitedRanges = prohibitedRanges == null ? List.of() : List.copyOf(prohibitedRanges);
+        allowances = allowances == null ? RecorderAddressAllowances.strict() : allowances;
         if (!allowedOrigins.containsKey(registeredTargetOrigin)) {
             throw new IllegalArgumentException("Registered target origin must be allowed");
         }
@@ -69,10 +71,22 @@ public record RecorderSessionPolicy(
         private final RecorderOrigin registeredTargetOrigin;
         private final Map<RecorderOrigin, AllowedOrigin> allowed = new LinkedHashMap<>();
         private final List<CidrBlock> prohibitedRanges = new ArrayList<>();
+        private RecorderAddressAllowances allowances = RecorderAddressAllowances.strict();
 
         private Builder(RecorderOrigin targetOrigin, List<InetAddress> resolvedAddresses) {
             this.registeredTargetOrigin = Objects.requireNonNull(targetOrigin, "targetOrigin");
             allow(targetOrigin, OriginPurpose.TARGET, resolvedAddresses);
+        }
+
+        /**
+         * Relaxes the address floor for this session.
+         *
+         * <p>Only ever reached from local-development configuration; see
+         * {@link RecorderAddressAllowances}.
+         */
+        public Builder withAllowances(RecorderAddressAllowances allowances) {
+            this.allowances = allowances == null ? RecorderAddressAllowances.strict() : allowances;
+            return this;
         }
 
         public Builder allowAssetOrigin(String origin, List<InetAddress> resolvedAddresses) {
@@ -91,12 +105,14 @@ public record RecorderSessionPolicy(
         public RecorderSessionPolicy build() {
             allowed.values().forEach(entry -> {
                 RecorderDecision decision = RecorderAddressPolicy.check(
-                        entry.origin().host(), entry.resolvedAddresses(), prohibitedRanges);
+                        entry.origin().host(), entry.resolvedAddresses(), prohibitedRanges,
+                        allowances);
                 if (!decision.allowed()) {
                     throw new IllegalArgumentException(decision.reason());
                 }
             });
-            return new RecorderSessionPolicy(registeredTargetOrigin, allowed, prohibitedRanges);
+            return new RecorderSessionPolicy(registeredTargetOrigin, allowed, prohibitedRanges,
+                    allowances);
         }
 
         private Builder allow(RecorderOrigin origin, OriginPurpose purpose,

@@ -37,6 +37,7 @@ import LiveMonitor from './LiveMonitor';
 import RunProgressBar from './RunProgressBar';
 import { objectiveLabel } from './labels';
 import './console.css';
+import { RecorderPanel } from './RecorderPanel';
 
 /**
  * The V2 self-service console.
@@ -492,7 +493,11 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
         target.environment,
       );
       setRecordingSession(session);
-      setNotice(`Recorder session ${session.id.slice(0, 8)} is waiting for the browser bridge.`);
+      setNotice(
+        session.status === 'LIVE'
+          ? `Recording ${session.application}. Click the surface below, then interact with the page.`
+          : `Recorder session ${session.id.slice(0, 8)} is ${session.status.replace(/_/g, ' ').toLowerCase()}.`,
+      );
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -598,8 +603,8 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           <div>
             <h3>Recorder</h3>
             <p className="muted">
-              Starts only against a registered target. The browser bridge remains disabled until
-              the next guarded-runtime slice.
+              Starts only against a registered target, on a browser the platform controls. Every
+              destination outside that target's allowlist is refused and shown to you.
             </p>
           </div>
           <div className="recorder-controls">
@@ -623,14 +628,17 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
               <Video size={14} /> Start guarded recording
             </button>
           </div>
-          {recordingSession && (
-            <div className="recorder-status" role="status">
-              <strong>{recordingSession.status}</strong>
-              <span>{recordingSession.target}</span>
-              <code>{recordingSession.id.slice(0, 8)}</code>
-            </div>
-          )}
         </div>
+
+        {recordingSession && (
+          <RecorderPanel
+            client={client}
+            session={recordingSession}
+            onSessionChange={setRecordingSession}
+            onClose={() => setRecordingSession(null)}
+            onError={setError}
+          />
+        )}
 
         {editorOpen && (
           <div className="editor">

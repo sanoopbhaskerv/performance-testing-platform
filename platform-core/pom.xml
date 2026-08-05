@@ -59,6 +59,15 @@
       <groupId>com.perfplatform</groupId>
       <artifactId>runner-kubernetes</artifactId>
     </dependency>
+
+    <!--
+      The local recorder bridge. Enabled only by configuration a production profile refuses; the
+      composition root falls back to UnavailableRecorderBrowser otherwise.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>runner-chrome</artifactId>
+    </dependency>
     <!--
       Importers. Only the composition root knows the implementations; the API reaches every one of
       them through the SourceImporter port, so adding an importer is adding a bean.

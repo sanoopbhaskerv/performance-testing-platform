@@ -214,9 +214,87 @@ public class OrchestrationProperties {
      */
     public static class Recorder {
         private final NetworkEnforcement networkEnforcement = new NetworkEnforcement();
+        private final LocalBrowser localBrowser = new LocalBrowser();
+
+        private Duration idleTimeout = Duration.ofMinutes(5);
+        private Duration deadline = Duration.ofMinutes(30);
+        private Duration sweepInterval = Duration.ofSeconds(30);
+        private int viewportWidth = 1_280;
+        private int viewportHeight = 800;
+        private int frameBufferSize = 8;
+        private int eventBufferSize = 500;
+        private int maxConcurrentSessions = 5;
 
         public NetworkEnforcement getNetworkEnforcement() {
             return networkEnforcement;
+        }
+
+        public LocalBrowser getLocalBrowser() {
+            return localBrowser;
+        }
+
+        public Duration getIdleTimeout() {
+            return idleTimeout;
+        }
+
+        public void setIdleTimeout(Duration idleTimeout) {
+            this.idleTimeout = idleTimeout;
+        }
+
+        public Duration getDeadline() {
+            return deadline;
+        }
+
+        public void setDeadline(Duration deadline) {
+            this.deadline = deadline;
+        }
+
+        public Duration getSweepInterval() {
+            return sweepInterval;
+        }
+
+        public void setSweepInterval(Duration sweepInterval) {
+            this.sweepInterval = sweepInterval;
+        }
+
+        public int getViewportWidth() {
+            return viewportWidth;
+        }
+
+        public void setViewportWidth(int viewportWidth) {
+            this.viewportWidth = viewportWidth;
+        }
+
+        public int getViewportHeight() {
+            return viewportHeight;
+        }
+
+        public void setViewportHeight(int viewportHeight) {
+            this.viewportHeight = viewportHeight;
+        }
+
+        public int getFrameBufferSize() {
+            return frameBufferSize;
+        }
+
+        public void setFrameBufferSize(int frameBufferSize) {
+            this.frameBufferSize = frameBufferSize;
+        }
+
+        public int getEventBufferSize() {
+            return eventBufferSize;
+        }
+
+        public void setEventBufferSize(int eventBufferSize) {
+            this.eventBufferSize = eventBufferSize;
+        }
+
+        public int getMaxConcurrentSessions() {
+            return maxConcurrentSessions;
+        }
+
+        public void setMaxConcurrentSessions(int maxConcurrentSessions) {
+            this.maxConcurrentSessions = maxConcurrentSessions;
         }
 
         public static class NetworkEnforcement {
@@ -228,6 +306,78 @@ public class OrchestrationProperties {
 
             public void setEnabled(boolean enabled) {
                 this.enabled = enabled;
+            }
+        }
+
+        /**
+         * A Chrome child process as this deployment's recorder bridge.
+         *
+         * <p>Off by default and refused outright under a production profile, for the same reason
+         * {@code LocalJmeterExecutionProvider} is (CLAUDE.md §15): the control plane is not where
+         * user-driven browsers belong. It exists so the recorder can be developed and demonstrated
+         * on a laptop before a recorder cell exists.
+         */
+        public static class LocalBrowser {
+            private boolean enabled;
+            private String binary;
+            private boolean headless = true;
+            private boolean allowLoopbackTarget;
+            private int frameQuality = 60;
+            private int maxCaptureBytes = 256 * 1024;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getBinary() {
+                return binary;
+            }
+
+            public void setBinary(String binary) {
+                this.binary = binary;
+            }
+
+            public boolean isHeadless() {
+                return headless;
+            }
+
+            public void setHeadless(boolean headless) {
+                this.headless = headless;
+            }
+
+            /**
+             * Permits a target that resolves to loopback.
+             *
+             * <p>Needed to record against a demo service on the same machine, and refused under a
+             * production profile. It relaxes only the loopback rule; metadata, link-local, wildcard,
+             * multicast and prohibited ranges stay denied.
+             */
+            public boolean isAllowLoopbackTarget() {
+                return allowLoopbackTarget;
+            }
+
+            public void setAllowLoopbackTarget(boolean allowLoopbackTarget) {
+                this.allowLoopbackTarget = allowLoopbackTarget;
+            }
+
+            public int getFrameQuality() {
+                return frameQuality;
+            }
+
+            public void setFrameQuality(int frameQuality) {
+                this.frameQuality = frameQuality;
+            }
+
+            public int getMaxCaptureBytes() {
+                return maxCaptureBytes;
+            }
+
+            public void setMaxCaptureBytes(int maxCaptureBytes) {
+                this.maxCaptureBytes = maxCaptureBytes;
             }
         }
     }

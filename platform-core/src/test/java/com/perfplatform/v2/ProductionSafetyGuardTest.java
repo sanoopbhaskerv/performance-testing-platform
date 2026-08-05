@@ -5,6 +5,7 @@ import com.perfplatform.domain.identity.TeamId;
 import com.perfplatform.domain.port.SecretResolver;
 import com.perfplatform.domain.port.TargetRegistry;
 import com.perfplatform.domain.port.TeamDirectory;
+import com.perfplatform.domain.recorder.RecorderAddressPolicy;
 import com.perfplatform.domain.spec.TargetClass;
 import com.perfplatform.domain.target.RegisteredTarget;
 import com.perfplatform.domain.target.TargetAddress;
@@ -15,7 +16,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.net.InetAddress;
 import java.time.Clock;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -336,6 +339,99 @@ class ProductionSafetyGuardTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Recorder network enforcement must not be disabled")
                     .hasMessageContaining("recorder.network-enforcement.enabled=true");
+        }
+    }
+
+    @Nested
+    @DisplayName("the local recorder browser")
+    class LocalRecorderBrowser {
+
+        @Test
+        @DisplayName("is off by default, and says so rather than appearing to be starting")
+        void offByDefault() {
+            var browser = configurationFor("local").recorderBrowser(Clock.systemUTC());
+
+            assertThat(browser.isAvailable()).isFalse();
+            assertThat(browser.describe()).contains("not enabled");
+        }
+
+        @Test
+        @DisplayName("can be enabled for local development")
+        void canBeEnabledLocally() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getLocalBrowser().setEnabled(true);
+
+            assertThatCode(() -> configurationFor(properties, "local")
+                    .recorderBrowser(Clock.systemUTC()))
+                    .doesNotThrowAnyException();
+        }
+
+        /**
+         * CLAUDE.md §4: the control plane must not be where material browser work happens. A Chrome
+         * child process in the API container is precisely that.
+         */
+        @Test
+        @DisplayName("cannot be enabled under a production profile")
+        void refusedInProduction() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getLocalBrowser().setEnabled(true);
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .recorderBrowser(Clock.systemUTC()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("local recorder browser must not be enabled")
+                    .hasMessageContaining("recorder.local-browser.enabled=false");
+        }
+
+        @Test
+        @DisplayName("cannot be enabled under the shared-runner profile either")
+        void refusedInSharedRunner() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getLocalBrowser().setEnabled(true);
+
+            assertThatThrownBy(() -> configurationFor(properties, "shared-runner")
+                    .recorderBrowser(Clock.systemUTC()))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("the recorder loopback-target allowance")
+    class RecorderLoopbackAllowance {
+
+        @Test
+        @DisplayName("is denied by default, so a recording browser cannot address this machine")
+        void strictByDefault() {
+            assertThat(configurationFor("local").recorderBridgeSettings().allowances().isRelaxed())
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("can be granted locally, and relaxes only the loopback rule")
+        void canBeGrantedLocally() throws Exception {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getLocalBrowser().setAllowLoopbackTarget(true);
+
+            var allowances = configurationFor(properties, "local")
+                    .recorderBridgeSettings().allowances();
+
+            assertThat(allowances.loopbackPermitted()).isTrue();
+            assertThat(RecorderAddressPolicy.check("metadata.example",
+                    List.of(InetAddress.getByName("169.254.169.254")), List.of(), allowances)
+                    .allowed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("cannot be granted under a production profile")
+        void refusedInProduction() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getRecorder().getLocalBrowser().setAllowLoopbackTarget(true);
+
+            assertThatThrownBy(() -> configurationFor(properties, "production")
+                    .recorderBridgeSettings())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("loopback-target allowance must not be")
+                    .hasMessageContaining("allow-loopback-target=false");
         }
     }
 

@@ -92,6 +92,7 @@
     <module>engines/engine-jmeter</module>
     <module>engines/engine-playwright</module>
     <module>runners/runner-kubernetes</module>
+    <module>runners/runner-chrome</module>
     <module>platform-importers/importer-curl</module>
     <module>platform-importers/importer-openapi</module>
     <module>platform-importers/importer-har</module>
@@ -152,6 +153,11 @@
       <dependency>
         <groupId>com.perfplatform</groupId>
         <artifactId>runner-kubernetes</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>runner-chrome</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

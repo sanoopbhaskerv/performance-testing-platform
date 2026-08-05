@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>runner-chrome</artifactId>
+  <packaging>jar</packaging>
+  <name>Runner — Chrome recorder bridge</name>
+  <description>
+    The local development adapter behind RecorderBrowser: a Chrome child process driven over the
+    DevTools Protocol.
+
+    This is the direct analogue of LocalJmeterExecutionProvider (CLAUDE.md §15). It uses
+    ProcessBuilder, so it is permitted only under a local/development profile; the shared-runner
+    profile puts the browser in a recorder Pod behind the same port. Commands are passed as an
+    argument list and never as a shell string.
+
+    The user never reaches this module's protocol surface. It accepts the fixed RecorderInputKind
+    vocabulary and translates it; there is no path from an API request to an arbitrary DevTools
+    command. See docs/architecture/recorder-security-review.md §4.4.
+
+    No new dependency: the WebSocket client is java.net.http from the JDK, and Jackson is already
+    used elsewhere in the reactor.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

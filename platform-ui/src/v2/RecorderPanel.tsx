@@ -1,0 +1,391 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, MonitorPlay, RotateCcw, ShieldAlert, Square, Undo2 } from 'lucide-react';
+import type {
+  V2Client,
+  RecorderBlockedDestination,
+  RecorderCapturedExchange,
+  RecorderInput,
+  RecordingSession,
+} from './api';
+
+/**
+ * The live recording browser.
+ *
+ * The browser runs on the server. What arrives here is a stream of JPEG frames and what leaves is a
+ * fixed set of interactions — move, click, wheel, key, text, navigate, reload, back. That asymmetry
+ * is the security model, not an implementation detail: there is no way to express a DevTools
+ * command from this component, so no request originating here can ask the browser to read a file,
+ * evaluate script or attach to another page.
+ *
+ * ## Three things this screen must not get wrong
+ *
+ * **Pointer coordinates are in the browser's space, not the image's.** The frame is scaled to fit
+ * whatever width the panel has; sending the click position in rendered pixels would land it
+ * somewhere else on the page. Every pointer event is converted back through the frame's own
+ * dimensions.
+ *
+ * **A refused destination is shown, not swallowed.** A recorder that silently drops requests looks
+ * broken and teaches nobody anything. Blocks appear with their reason, so widening the allowlist is
+ * a deliberate act by an operator rather than a mystery to debug.
+ *
+ * **A session with no bridge says so.** `PENDING_BROWSER_BRIDGE` is a real state — the deployment
+ * has no browser configured — and this renders the reason rather than a spinner that never resolves.
+ */
+
+/** Frames are polled, not streamed: EventSource cannot send the API key header. */
+const POLL_INTERVAL_MS = 120;
+
+/** Chrome's modifier bitmask. */
+const MODIFIER_ALT = 1;
+const MODIFIER_CTRL = 2;
+const MODIFIER_META = 4;
+const MODIFIER_SHIFT = 8;
+
+const TERMINAL_STATES = new Set(['CLOSED', 'FAILED', 'CANCELLED', 'EXPIRED']);
+
+interface Props {
+  client: V2Client;
+  session: RecordingSession;
+  onSessionChange: (session: RecordingSession) => void;
+  onClose: () => void;
+  onError: (message: string) => void;
+}
+
+export function RecorderPanel({ client, session, onSessionChange, onClose, onError }: Props) {
+  const [status, setStatus] = useState(session.status);
+  const [frame, setFrame] = useState<string | null>(null);
+  const [frameSize, setFrameSize] = useState({
+    width: session.viewportWidth,
+    height: session.viewportHeight,
+  });
+  const [blocked, setBlocked] = useState<RecorderBlockedDestination[]>([]);
+  const [captures, setCaptures] = useState<RecorderCapturedExchange[]>([]);
+  const [failure, setFailure] = useState<string | null>(session.failureReason);
+
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const cursors = useRef({ frame: 0, blocked: 0, capture: 0 });
+  const pointerDown = useRef(false);
+
+  const live = status === 'LIVE';
+  const terminal = TERMINAL_STATES.has(status);
+  /**
+   * A session that came back pending has no browser and never will.
+   *
+   * `start` attaches the bridge before it answers, so pending is a settled outcome rather than a
+   * step on the way to LIVE. Polling it would be a request every 120ms for frames that cannot exist.
+   */
+  const unbridged =
+    session.status === 'PENDING_BROWSER_BRIDGE' && status === 'PENDING_BROWSER_BRIDGE';
+
+  const send = useCallback(
+    async (input: RecorderInput) => {
+      if (!live) {
+        return;
+      }
+      try {
+        await client.sendRecorderInput(session.id, input);
+      } catch {
+        // Input is high-frequency and individually unimportant: a dropped mouse move is invisible,
+        // and surfacing every refusal would bury the screen in transient errors. The session's own
+        // state, polled below, is what tells the user if something is actually wrong.
+      }
+    },
+    [client, session.id, live],
+  );
+
+  // ── Polling ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (terminal || unbridged) {
+      return undefined;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        const update = await client.pollRecording(session.id, cursors.current);
+        if (cancelled) {
+          return;
+        }
+        setStatus(update.status);
+        if (update.frame) {
+          cursors.current.frame = update.frame.sequence;
+          setFrame(update.frame.imageBase64);
+          setFrameSize({ width: update.frame.width, height: update.frame.height });
+        }
+        if (update.blocked.length > 0) {
+          cursors.current.blocked = update.blocked[update.blocked.length - 1].sequence;
+          setBlocked((current) => [...update.blocked, ...current].slice(0, 25));
+        }
+        if (update.captures.length > 0) {
+          cursors.current.capture = update.captures[update.captures.length - 1].sequence;
+          setCaptures((current) => [...update.captures, ...current].slice(0, 50));
+        }
+        if (update.failureReason) {
+          setFailure(update.failureReason);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          onError(err instanceof Error ? err.message : 'The recorder session stopped responding.');
+        }
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [client, session.id, terminal, unbridged, onError]);
+
+  // ── Coordinates ──────────────────────────────────────────────────────
+
+  /**
+   * Converts a pointer position on the rendered image back into browser coordinates.
+   *
+   * The frame is displayed at whatever size fits the panel, so the ratio between the two is what
+   * makes a click land where the user aimed it.
+   */
+  const toBrowserPoint = (event: React.PointerEvent<HTMLDivElement>) => {
+    const surface = surfaceRef.current;
+    if (!surface) {
+      return null;
+    }
+    const bounds = surface.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return null;
+    }
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * frameSize.width,
+      y: ((event.clientY - bounds.top) / bounds.height) * frameSize.height,
+    };
+  };
+
+  const modifiersOf = (event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) =>
+    (event.altKey ? MODIFIER_ALT : 0) +
+    (event.ctrlKey ? MODIFIER_CTRL : 0) +
+    (event.metaKey ? MODIFIER_META : 0) +
+    (event.shiftKey ? MODIFIER_SHIFT : 0);
+
+  const buttonOf = (button: number): RecorderInput['button'] =>
+    button === 2 ? 'right' : button === 1 ? 'middle' : 'left';
+
+  // ── Handlers ─────────────────────────────────────────────────────────
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const point = toBrowserPoint(event);
+    if (point) {
+      void send({ kind: 'mouse-moved', ...point, modifiers: modifiersOf(event) });
+    }
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const point = toBrowserPoint(event);
+    if (!point) {
+      return;
+    }
+    pointerDown.current = true;
+    surfaceRef.current?.focus();
+    void send({
+      kind: 'mouse-pressed',
+      ...point,
+      button: buttonOf(event.button),
+      clickCount: event.detail || 1,
+      modifiers: modifiersOf(event),
+    });
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const point = toBrowserPoint(event);
+    if (!point || !pointerDown.current) {
+      return;
+    }
+    pointerDown.current = false;
+    void send({
+      kind: 'mouse-released',
+      ...point,
+      button: buttonOf(event.button),
+      clickCount: event.detail || 1,
+      modifiers: modifiersOf(event),
+    });
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Tab would move focus out of the surface and Enter/Space would activate the element behind it,
+    // so the recorded page would never see either.
+    event.preventDefault();
+    void send({
+      kind: 'key-down',
+      key: event.key,
+      code: event.code,
+      modifiers: modifiersOf(event),
+    });
+  };
+
+  const handleKeyUp = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    void send({
+      kind: 'key-up',
+      key: event.key,
+      code: event.code,
+      modifiers: modifiersOf(event),
+    });
+  };
+
+  const stop = async () => {
+    try {
+      const stopped = await client.stopRecording(session.id);
+      setStatus(stopped.status);
+      onSessionChange(stopped);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'The recording session could not be stopped.');
+    }
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────
+
+  if (unbridged) {
+    return (
+      <div className="recorder-panel" role="region" aria-label="Recording session">
+        <div className="recorder-pending">
+          <AlertTriangle size={16} aria-hidden />
+          <div>
+            <strong>No recording browser is available on this deployment.</strong>
+            <p className="muted">
+              The session was created and audited, but nothing will stream until a browser bridge is
+              configured. This deployment reports its bridge as <code>{session.bridge}</code>.
+            </p>
+          </div>
+        </div>
+        <button className="btn btn-quiet" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="recorder-panel" role="region" aria-label="Recording session">
+      <header className="recorder-panel-header">
+        <div>
+          <h3>
+            <MonitorPlay size={15} aria-hidden /> Recording {session.application} /{' '}
+            {session.environment}
+          </h3>
+          <p className="muted">
+            {session.target} · <code>{session.id.slice(0, 8)}</code> · {session.bridge}
+          </p>
+        </div>
+        <div className="recorder-panel-actions">
+          <span className={`recorder-state recorder-state-${status.toLowerCase()}`} role="status">
+            {status}
+          </span>
+          <button
+            className="btn btn-quiet"
+            onClick={() => void send({ kind: 'navigate-back' })}
+            disabled={!live}
+            title="Back"
+          >
+            <Undo2 size={14} aria-hidden /> Back
+          </button>
+          <button
+            className="btn btn-quiet"
+            onClick={() => void send({ kind: 'reload' })}
+            disabled={!live}
+            title="Reload"
+          >
+            <RotateCcw size={14} aria-hidden /> Reload
+          </button>
+          <button className="btn btn-quiet" onClick={() => void stop()} disabled={terminal}>
+            <Square size={14} aria-hidden /> Stop
+          </button>
+          {terminal && (
+            <button className="btn btn-quiet" onClick={onClose}>
+              Close
+            </button>
+          )}
+        </div>
+      </header>
+
+      {failure && (
+        <p className="recorder-failure" role="alert">
+          {failure}
+        </p>
+      )}
+
+      <div
+        ref={surfaceRef}
+        className="recorder-surface"
+        style={{ aspectRatio: `${frameSize.width} / ${frameSize.height}` }}
+        tabIndex={0}
+        role="application"
+        aria-label="Recorded browser surface. Click to interact, then type."
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        {frame ? (
+          <img src={`data:image/jpeg;base64,${frame}`} alt="" draggable={false} />
+        ) : (
+          <p className="recorder-waiting muted">Waiting for the first frame…</p>
+        )}
+      </div>
+
+      <div className="recorder-evidence">
+        <section>
+          <h4>
+            <ShieldAlert size={14} aria-hidden /> Refused destinations ({blocked.length})
+          </h4>
+          {blocked.length === 0 ? (
+            <p className="muted">Nothing has been refused. Every request stayed inside the allowlist.</p>
+          ) : (
+            <ul>
+              {blocked.map((entry) => (
+                <li key={entry.sequence}>
+                  <code>{entry.destination}</code>
+                  <span className="muted">
+                    {entry.kind.toLowerCase().replace(/_/g, ' ')} — {entry.reason}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section>
+          <h4>Captured requests ({captures.length})</h4>
+          {captures.length === 0 ? (
+            <p className="muted">
+              Nothing captured yet. Static assets are deliberately skipped — only documents and API
+              calls become journey steps.
+            </p>
+          ) : (
+            <ul>
+              {captures.map((entry) => (
+                <li key={entry.sequence}>
+                  <code>
+                    {entry.method} {entry.url}
+                  </code>
+                  {entry.findingCount > 0 && (
+                    <span className="muted">
+                      {entry.findingCount} item{entry.findingCount === 1 ? '' : 's'} removed by the
+                      sanitizer
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}

@@ -13,7 +13,9 @@ import com.perfplatform.domain.plan.ExecutionPlanCompiler;
 import com.perfplatform.domain.port.ArtifactStore;
 import com.perfplatform.domain.port.DatasetCatalog;
 import com.perfplatform.domain.port.DatasetStore;
+import com.perfplatform.domain.port.HostAddressResolver;
 import com.perfplatform.domain.port.RecorderAuditLog;
+import com.perfplatform.domain.port.RecorderBrowser;
 import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.ProgressCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
@@ -40,7 +42,14 @@ import com.perfplatform.engine.playwright.PlaywrightEngineProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
+import com.perfplatform.domain.recorder.RecorderAddressAllowances;
+import com.perfplatform.domain.recorder.RecorderViewport;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
+import com.perfplatform.orchestration.recorder.RecorderBridgeSettings;
+import com.perfplatform.orchestration.recorder.RecorderSessionRegistry;
+import com.perfplatform.orchestration.recorder.UnavailableRecorderBrowser;
+import com.perfplatform.runner.chrome.ChromeRecorderSettings;
+import com.perfplatform.runner.chrome.LocalChromeRecorderBrowser;
 import com.perfplatform.results.DefaultRunAnalyzer;
 import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ExternalSessionBrokerSessionAcquisitionProvider;
@@ -78,14 +87,18 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -705,10 +718,105 @@ public class OrchestrationConfiguration {
         return new ManageTargetsUseCase(targets, teams);
     }
 
+    /**
+     * The recorder bridge this deployment runs.
+     *
+     * <p>A local Chrome only when it is switched on <em>and</em> the profile is not production. The
+     * fallback is not null — it is {@link UnavailableRecorderBrowser}, so a session honestly reports
+     * that no browser exists rather than appearing to wait for one.
+     */
+    @Bean
+    public RecorderBrowser recorderBrowser(Clock clock) {
+        OrchestrationProperties.Recorder.LocalBrowser local =
+                properties.getRecorder().getLocalBrowser();
+
+        if (!local.isEnabled()) {
+            return new UnavailableRecorderBrowser(
+                    "the local recorder browser is not enabled on this deployment");
+        }
+        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
+            throw new IllegalStateException("The local recorder browser must not be enabled under "
+                    + "a production profile. It runs a user-driven Chrome inside the control-plane "
+                    + "process, which CLAUDE.md §4 forbids; set "
+                    + "platform.orchestration.recorder.local-browser.enabled=false and use a "
+                    + "recorder cell.");
+        }
+
+        ChromeRecorderSettings settings = new ChromeRecorderSettings(
+                Optional.ofNullable(local.getBinary()).filter(path -> !path.isBlank()).map(Path::of),
+                local.isHeadless(),
+                Duration.ofSeconds(20),
+                Duration.ofSeconds(10),
+                local.getFrameQuality(),
+                local.getMaxCaptureBytes());
+
+        LocalChromeRecorderBrowser browser = new LocalChromeRecorderBrowser(settings, clock);
+        if (browser.isAvailable()) {
+            log.warn("Local recorder browser ENABLED using {}. This is a development bridge: it "
+                    + "starts Chrome inside the control-plane process.", browser.describe());
+        } else {
+            log.warn("Local recorder browser is enabled but no Chrome or Chromium was found. "
+                    + "Recorder sessions will stay in PENDING_BROWSER_BRIDGE.");
+        }
+        return browser;
+    }
+
+    @Bean
+    public RecorderBridgeSettings recorderBridgeSettings() {
+        OrchestrationProperties.Recorder recorder = properties.getRecorder();
+        boolean loopback = recorder.getLocalBrowser().isAllowLoopbackTarget();
+
+        if (loopback && environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
+            throw new IllegalStateException("The recorder loopback-target allowance must not be "
+                    + "enabled under a production profile. A recording browser that may address "
+                    + "loopback can reach whatever else listens on the pod; set "
+                    + "platform.orchestration.recorder.local-browser.allow-loopback-target=false.");
+        }
+        if (loopback) {
+            log.warn("Recorder loopback targets are PERMITTED. This is local testing only: the "
+                    + "address floor still denies metadata, link-local, wildcard and multicast "
+                    + "addresses, but a recording browser may reach this machine's own services.");
+        }
+
+        return new RecorderBridgeSettings(
+                new RecorderViewport(recorder.getViewportWidth(), recorder.getViewportHeight()),
+                recorder.getIdleTimeout(),
+                recorder.getDeadline(),
+                recorder.getFrameBufferSize(),
+                recorder.getEventBufferSize(),
+                loopback ? RecorderAddressAllowances.permittingLoopback()
+                        : RecorderAddressAllowances.strict());
+    }
+
+    @Bean
+    public RecorderSessionRegistry recorderSessionRegistry() {
+        return new RecorderSessionRegistry(properties.getRecorder().getMaxConcurrentSessions());
+    }
+
+    /**
+     * Freezes a recorder target's addresses at session start.
+     *
+     * <p>A bean rather than a static call so a test can hand back a metadata address and prove the
+     * session is refused, which is the control this resolver exists to feed.
+     */
+    @Bean
+    public HostAddressResolver hostAddressResolver() {
+        return host -> {
+            try {
+                return List.of(InetAddress.getAllByName(host));
+            } catch (UnknownHostException e) {
+                throw new HostAddressResolver.UnresolvableHostException(host, e);
+            }
+        };
+    }
+
     @Bean
     public ManageRecordingsUseCase manageRecordingsUseCase(TeamDirectory teams,
-            TargetRegistry targets, RecorderAuditLog audit, Clock clock) {
-        return new ManageRecordingsUseCase(teams, targets, audit, clock);
+            TargetRegistry targets, RecorderAuditLog audit, RecorderBrowser browser,
+            HostAddressResolver hosts, RecorderSessionRegistry registry,
+            RecorderBridgeSettings bridgeSettings, Clock clock) {
+        return new ManageRecordingsUseCase(teams, targets, audit, browser, hosts, registry,
+                bridgeSettings, clock);
     }
 
     @Bean

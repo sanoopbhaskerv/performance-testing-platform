@@ -112,6 +112,35 @@ platform:
         # profiles refuse false before any recorder endpoint can start.
         enabled: ${RECORDER_NETWORK_ENFORCEMENT_ENABLED:true}
 
+      # No brokered input for this long and the browser closes itself. An unattended recording
+      # browser holds a live corporate session inside the runner network.
+      idle-timeout: 5m
+      # A hard cap regardless of activity. A recording is authoring work, not a long-lived session.
+      deadline: 30m
+      # Catches the user who closed the tab, whose session nobody polls any more.
+      sweep-interval: 30s
+
+      viewport-width: 1280
+      viewport-height: 800
+      # Frames held for a client that has fallen behind. Small on purpose: showing someone the past
+      # while they are trying to click the present is worse than dropping frames.
+      frame-buffer-size: 8
+      event-buffer-size: 500
+      max-concurrent-sessions: 5
+
+      local-browser:
+        # A Chrome child process as the recorder bridge. Development only — production profiles
+        # refuse it outright, because the control plane is not where user-driven browsers belong.
+        enabled: ${RECORDER_LOCAL_BROWSER_ENABLED:false}
+        # Empty searches the usual Chrome and Chromium locations.
+        binary: ${RECORDER_LOCAL_BROWSER_BINARY:}
+        headless: ${RECORDER_LOCAL_BROWSER_HEADLESS:true}
+        # Needed to record a demo service on this machine. Production profiles refuse it. It relaxes
+        # only the loopback rule; metadata, link-local, wildcard and multicast stay denied.
+        allow-loopback-target: ${RECORDER_ALLOW_LOOPBACK_TARGET:false}
+        frame-quality: 60
+        max-capture-bytes: 262144
+
     # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
     # actively working on to a peer mid-provision.
     lease-duration: 2m

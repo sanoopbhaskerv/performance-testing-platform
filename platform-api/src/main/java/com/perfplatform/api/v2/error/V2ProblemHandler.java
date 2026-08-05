@@ -15,6 +15,7 @@ import com.perfplatform.orchestration.run.CancelTestRunUseCase;
 import com.perfplatform.orchestration.run.ReadRunReportUseCase;
 import com.perfplatform.orchestration.run.TriggerTestRunUseCase;
 import com.perfplatform.orchestration.recorder.ManageRecordingsUseCase;
+import com.perfplatform.orchestration.recorder.RecorderSessionRegistry;
 import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -327,6 +328,40 @@ public class V2ProblemHandler {
     public ProblemDetail handleUnknownRecorderSession(
             ManageRecordingsUseCase.UnknownSessionException e, HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "recording.session.notFound",
+                e.getMessage(), request, e);
+    }
+
+    /**
+     * The registered target cannot be recorded, whatever the caller's permissions.
+     *
+     * <p>422 rather than 403: nothing about this caller is wrong. The target resolves somewhere the
+     * recorder address floor refuses — loopback, link-local, a metadata endpoint — and no
+     * re-authorization changes that.
+     */
+    @ExceptionHandler(ManageRecordingsUseCase.UnsafeRecorderTargetException.class)
+    public ProblemDetail handleUnsafeRecorderTarget(
+            ManageRecordingsUseCase.UnsafeRecorderTargetException e, HttpServletRequest request) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, e.code(), e.getMessage(), request, e);
+    }
+
+    /**
+     * The session will not take this input right now.
+     *
+     * <p>409, because the request is well-formed and the caller is authorized — the session is
+     * simply in a state that refuses it, or the caller is going too fast. Retrying later can work,
+     * which is exactly what a conflict means and what a 400 would wrongly deny.
+     */
+    @ExceptionHandler(ManageRecordingsUseCase.RecorderInputRefusedException.class)
+    public ProblemDetail handleRefusedRecorderInput(
+            ManageRecordingsUseCase.RecorderInputRefusedException e, HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "recording.input.refused",
+                e.getMessage(), request, e);
+    }
+
+    @ExceptionHandler(RecorderSessionRegistry.CapacityExceededException.class)
+    public ProblemDetail handleRecorderCapacity(
+            RecorderSessionRegistry.CapacityExceededException e, HttpServletRequest request) {
+        return problem(HttpStatus.TOO_MANY_REQUESTS, "recording.capacity.exceeded",
                 e.getMessage(), request, e);
     }
 

@@ -65,7 +65,8 @@ public final class RecorderRouteGuard {
         }
 
         RecorderDecision addressDecision = RecorderAddressPolicy.check(
-                origin.host(), allowed.get().resolvedAddresses(), policy.prohibitedRanges());
+                origin.host(), allowed.get().resolvedAddresses(), policy.prohibitedRanges(),
+                policy.allowances());
         if (!addressDecision.allowed()) {
             return addressDecision;
         }

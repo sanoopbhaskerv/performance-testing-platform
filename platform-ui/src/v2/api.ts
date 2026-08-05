@@ -139,15 +139,107 @@ export interface Target {
   createdAt: string;
 }
 
+export type RecorderSessionState =
+  | 'PENDING_BROWSER_BRIDGE'
+  | 'STARTING'
+  | 'LIVE'
+  | 'CLOSING'
+  | 'CLOSED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
 export interface RecordingSession {
   id: string;
   teamId: string;
   application: string;
   environment: string;
   target: string;
-  status: 'PENDING_BROWSER_BRIDGE' | string;
+  status: RecorderSessionState;
   browserUrl: string | null;
+  /** The surface pointer coordinates must be scaled to. Never assume the rendered image size. */
+  viewportWidth: number;
+  viewportHeight: number;
+  /**
+   * What this deployment runs the browser with.
+   *
+   * A session stuck in PENDING_BROWSER_BRIDGE is not broken — this says why, and the console shows
+   * it rather than leaving someone waiting for a browser that will never arrive.
+   */
+  bridge: string;
+  failureCode: string | null;
+  failureReason: string | null;
+  capturedCount: number;
+  blockedCount: number;
   events: RecorderAuditEvent[];
+}
+
+/** The fixed vocabulary the bridge accepts. There is no way to name a DevTools method. */
+export type RecorderInputKind =
+  | 'mouse-moved'
+  | 'mouse-pressed'
+  | 'mouse-released'
+  | 'mouse-wheel'
+  | 'key-down'
+  | 'key-up'
+  | 'text'
+  | 'navigate'
+  | 'reload'
+  | 'navigate-back';
+
+export interface RecorderInput {
+  kind: RecorderInputKind;
+  x?: number;
+  y?: number;
+  button?: 'none' | 'left' | 'middle' | 'right';
+  clickCount?: number;
+  deltaX?: number;
+  deltaY?: number;
+  key?: string;
+  code?: string;
+  text?: string;
+  modifiers?: number;
+  url?: string;
+}
+
+export interface RecorderFrame {
+  sequence: number;
+  /** Base64 JPEG, no data-URI prefix. */
+  imageBase64: string;
+  width: number;
+  height: number;
+  capturedAt: string;
+}
+
+export interface RecorderBlockedDestination {
+  sequence: number;
+  destination: string;
+  kind: string;
+  code: string;
+  reason: string;
+  blockedAt: string;
+}
+
+export interface RecorderCapturedExchange {
+  sequence: number;
+  method: string;
+  url: string;
+  requestContentType: string | null;
+  responseContentType: string | null;
+  findingCount: number;
+  capturedAt: string;
+}
+
+/** One poll. `frame` is null when the client is already current — not an error. */
+export interface RecorderLiveUpdate {
+  status: RecorderSessionState;
+  viewportWidth: number;
+  viewportHeight: number;
+  frame: RecorderFrame | null;
+  blocked: RecorderBlockedDestination[];
+  captures: RecorderCapturedExchange[];
+  failureCode: string | null;
+  failureReason: string | null;
 }
 
 export interface RecorderAuditEvent {
@@ -589,13 +681,65 @@ export class V2Client {
       .then((r) => r.data);
   }
 
-  startRecording(teamId: string, application: string, environment: string) {
+  startRecording(
+    teamId: string,
+    application: string,
+    environment: string,
+    viewport?: { width: number; height: number },
+  ) {
     return axios
       .post<RecordingSession>(
         '/api/v2/recordings',
-        { teamId, application, environment },
+        {
+          teamId,
+          application,
+          environment,
+          viewportWidth: viewport?.width,
+          viewportHeight: viewport?.height,
+        },
         { headers: this.headers },
       )
+      .then((r) => r.data);
+  }
+
+  getRecording(sessionId: string) {
+    return axios
+      .get<RecordingSession>(`/api/v2/recordings/${sessionId}`, { headers: this.headers })
+      .then((r) => r.data);
+  }
+
+  /**
+   * Polls the live recorder surface.
+   *
+   * Sequences are echoed back so a slow client resumes where it left off instead of replaying the
+   * whole session. Only the newest frame comes back: showing someone the past while they are
+   * clicking the present is worse than dropping frames.
+   */
+  pollRecording(
+    sessionId: string,
+    after: { frame: number; blocked: number; capture: number },
+  ) {
+    return axios
+      .get<RecorderLiveUpdate>(`/api/v2/recordings/${sessionId}/live`, {
+        headers: this.headers,
+        params: {
+          afterFrame: after.frame,
+          afterBlocked: after.blocked,
+          afterCapture: after.capture,
+        },
+      })
+      .then((r) => r.data);
+  }
+
+  sendRecorderInput(sessionId: string, input: RecorderInput) {
+    return axios
+      .post<void>(`/api/v2/recordings/${sessionId}/input`, input, { headers: this.headers })
+      .then(() => undefined);
+  }
+
+  stopRecording(sessionId: string) {
+    return axios
+      .post<RecordingSession>(`/api/v2/recordings/${sessionId}/stop`, {}, { headers: this.headers })
       .then((r) => r.data);
   }
 

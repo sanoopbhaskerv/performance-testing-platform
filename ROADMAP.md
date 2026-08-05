@@ -29,13 +29,16 @@ than a surprise.
 > protocol load and a browser cohort, with an engine this deployment lacks refused at validation.
 > `HANDOFF.md` §3n–§3y.
 >
-> **S10 has started.** The required security review is complete:
+> **The recorder records.** The required security review is complete:
 > [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
 > S10a added the domain-level recorder allowlist, address policy and route guard. S10b added the
 > recorder pod manifest, per-session egress policy renderer and local-only network-enforcement
 > bypass. S10c added durable recorder audit events, capture sanitization and a safe pending console
-> entry point. The remaining recorder work is the guarded CDP bridge, sanitized draft persistence and
-> git-pinned Playwright import. S11 added coordinated web performance under load.
+> entry point. **S10d added the guarded CDP bridge**: a session attaches a real browser behind the
+> `RecorderBrowser` port, streams JPEG frames to the console and accepts a closed vocabulary of ten
+> interactions, with frozen DNS, per-request route guarding and audit-by-origin. What remains is
+> turning a recording into a draft definition, and git-pinned Playwright import. S11 added
+> coordinated web performance under load.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -48,8 +51,8 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
-slice, S7's live monitoring, S8's load models, S9's per-workload plans, S10c's recorder
-audit/sanitizer entry point and S11's hybrid coordination are built. Everything below is still an
+slice, S7's live monitoring, S8's load models, S9's per-workload plans, the S10a–S10d recorder
+through to a live guarded browser, and S11's hybrid coordination are built. Everything below is still an
 accurate inventory of what exists and what
 does not.
 

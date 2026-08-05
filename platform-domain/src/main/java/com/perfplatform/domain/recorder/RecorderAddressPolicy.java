@@ -26,9 +26,17 @@ public final class RecorderAddressPolicy {
     private RecorderAddressPolicy() {
     }
 
+    /** Checks against the strict floor, with no allowances. */
     public static RecorderDecision check(String host, List<InetAddress> resolvedAddresses,
             List<CidrBlock> prohibitedRanges) {
+        return check(host, resolvedAddresses, prohibitedRanges, RecorderAddressAllowances.strict());
+    }
 
+    public static RecorderDecision check(String host, List<InetAddress> resolvedAddresses,
+            List<CidrBlock> prohibitedRanges, RecorderAddressAllowances allowances) {
+
+        RecorderAddressAllowances effective =
+                allowances == null ? RecorderAddressAllowances.strict() : allowances;
         String normalizedHost = host == null ? "" : host.trim().toLowerCase(Locale.ROOT);
         if (normalizedHost.isBlank()) {
             return RecorderDecision.block("recorder.address.hostMissing",
@@ -47,7 +55,7 @@ public final class RecorderAddressPolicy {
 
         List<CidrBlock> ranges = prohibitedRanges == null ? List.of() : List.copyOf(prohibitedRanges);
         for (InetAddress address : addresses) {
-            RecorderDecision decision = checkOne(normalizedHost, address, ranges);
+            RecorderDecision decision = checkOne(normalizedHost, address, ranges, effective);
             if (!decision.allowed()) {
                 return decision;
             }
@@ -56,7 +64,7 @@ public final class RecorderAddressPolicy {
     }
 
     private static RecorderDecision checkOne(String host, InetAddress address,
-            List<CidrBlock> prohibitedRanges) {
+            List<CidrBlock> prohibitedRanges, RecorderAddressAllowances allowances) {
 
         Objects.requireNonNull(address, "address");
         String literal = address.getHostAddress().toLowerCase(Locale.ROOT);
@@ -64,7 +72,7 @@ public final class RecorderAddressPolicy {
             return RecorderDecision.block("recorder.address.metadata",
                     "Cloud metadata endpoints are not permitted from a recording browser.");
         }
-        if (address.isLoopbackAddress()) {
+        if (address.isLoopbackAddress() && !allowances.loopbackPermitted()) {
             return RecorderDecision.block("recorder.address.loopback",
                     "Loopback addresses are not permitted from a recording browser.");
         }

@@ -27,6 +27,13 @@ what to click. Ctrl-C stops all three; `--stop` cleans up after a run that was k
   the fake provider a run ends in **`Failed` / `NO_LOAD_GENERATED`** — correct, not broken: the run
   measured nothing, so nothing can pass (`HANDOFF.md` §3b). `brew install jmeter` for real load.
 
+The start script also enables the **recorder bridge** — `local-browser.enabled`,
+`allow-loopback-target` and a disabled network-enforcement floor. All three are refused under a
+production profile; the loopback allowance is what lets a recording browser reach the demo service on
+this machine, and it relaxes *only* loopback. Press **Start guarded recording** and the session goes
+`LIVE` with a live browser surface. If it stays `PENDING_BROWSER_BRIDGE`, this machine has no Chrome
+or Chromium — the panel says so rather than spinning.
+
 Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
 **New test** opens the **studio**: choose *Test an API*, bring a source (a cURL command, an OpenAPI
 document, a HAR or a Postman collection), review the journeys, set the load and the objectives, and
@@ -42,7 +49,18 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S11 ran this to completion: **1,148 tests, 0 failures, 0 skipped** across all 15 modules. S7 was
+S10d ran this to completion: **1,264 tests, 0 failures** across all 16 modules. **One skip is
+expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
+and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
+
+```bash
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -pl runners/runner-chrome -am test -Drecorder.live=true
+```
+
+It needs Chrome or Chromium installed and takes about a second. It is the only test that proves the
+CDP wiring works against the browser as shipped, and it has already caught two defects the unit
+tests could not. S7 was
 the first fully green `mvn clean verify` on the branch and it has stayed green through S11.
 Docker must be running:
 Testcontainers uses PostgreSQL and MinIO. The environment limits earlier sessions recorded (Mockito
@@ -53,7 +71,7 @@ note them rather than assuming they are permanent. If a PostgreSQL module fails 
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 158 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 168 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -99,7 +117,7 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | S10 has started. The required security review is complete in [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md). S10a added domain-level allowlist, address and route-guard policy; S10b added the recorder pod manifest, egress policy renderer and local-only network-enforcement bypass; **S10c added durable audit events, capture sanitization and a safe pending console entry point**. The CDP bridge/live browser stream and sanitized draft persistence remain. |
+| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **Turning a recording into a draft definition is the remaining piece**, along with git-pinned Playwright import. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |

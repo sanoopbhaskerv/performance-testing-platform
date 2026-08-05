@@ -212,9 +212,16 @@ wait_for "http://localhost:$DEMO_PORT/api/users" "Demo service"
 
 # ── Control plane ─────────────────────────────────────────────────────────
 step "Starting the control plane on :$API_PORT (provider: $PROVIDER)"
+# The recorder bridge is switched on here and only here. Both flags are refused outright under a
+# production profile: the local bridge starts Chrome inside the control-plane process, and the
+# loopback allowance is what lets a recording browser reach the demo service on this machine. The
+# rest of the address floor — metadata, link-local, wildcard, multicast — still applies.
 "$JAVA" -jar "$CONTROL_PLANE_JAR" \
   --platform.config-dir=config/teams \
   --platform.orchestration.execution-provider="$PROVIDER" \
+  --platform.orchestration.recorder.local-browser.enabled=true \
+  --platform.orchestration.recorder.local-browser.allow-loopback-target=true \
+  --platform.orchestration.recorder.network-enforcement.enabled=false \
   > "$LOG_DIR/control-plane.log" 2>&1 &
 # /actuator/health returns 503 locally because the mail health indicator cannot reach SMTP
 # (defect D6), so readiness is checked against a real endpoint instead.

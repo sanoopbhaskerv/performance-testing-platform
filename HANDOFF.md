@@ -4,8 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10c recorder audit/sanitizer/clickable safe entry and S11 web performance under
-load. Increments 0–2h and S1–S11 are complete. The recorder has a governed pending entry point,
+**Last updated:** S10d, the guarded CDP bridge — a recorder session now attaches a real browser,
+streams it to the console and accepts brokered input. Increments 0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -96,11 +96,13 @@ and git-pinned Playwright import, or continue to S12 scale hardening.
 | **S10a — recorder route-policy foundation** | **Complete** | see §3aa |
 | **S10b — recorder pod and egress-rendering foundation** | **Complete** | see §3ab |
 | **S10c — recorder audit, capture sanitizer and safe console entry** | **Complete** | see §3ac |
+| **S10d — guarded CDP bridge and live browser stream** | **Complete** | see §3ag |
 | **S11 — web performance under load** | **Complete** | see §3ad |
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,148 tests green, 0 failures, 0 skipped at S11** — a full
+**Last full Java verification: 1,264 tests green, 0 failures at S10d** (one skip, the opt-in live
+Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
 S3 engine, 936 after S3 Rules, 941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at
@@ -2149,6 +2151,121 @@ Verification:
 - `yarn --cwd platform-ui build` — passed.
 - Full `mvn -B -f pom.xml clean verify` — **BUILD SUCCESS** across all 15 modules, **1,148 tests, 0
   failures, 0 skipped**, Testcontainers included.
+
+## 3ag. S10d — the guarded CDP bridge
+
+**S10d is complete.** A recorder session now attaches a real browser, streams it to the console and
+accepts interaction. `PENDING_BROWSER_BRIDGE` stops being the only outcome and becomes what it
+always should have meant: *this deployment has no browser configured*, with the reason attached.
+
+### The shape
+
+One port, `RecorderBrowser`, with two intended adapters — exactly the split CLAUDE.md §15 requires
+of JMeter. `LocalChromeRecorderBrowser` is the development one and is refused under a production
+profile. The recorder-cell adapter reuses the port; nothing in orchestration knows which it has.
+
+`UnavailableRecorderBrowser` is the fallback rather than null, so "no browser" is a describable
+state and the console can say *why* instead of showing a wait that never ends.
+
+### Why the user cannot reach the protocol
+
+`RecorderInputKind` is a closed enum of ten interactions. `ChromeInputCommands` is a pure function
+from that enum to a DevTools call, and `ChromeInputCommandsTest` asserts that the image of that
+function is a five-element set — no `Runtime.evaluate`, no file access, no target attachment. An
+unknown `kind` fails Bean Validation at the boundary. Going back is a history lookup rather than
+`history.back()` precisely so that no brokered input becomes script execution.
+
+### Three independent egress controls, and why
+
+1. **Chrome's own resolver** is pinned: `--host-resolver-rules` maps each allowed host to the address
+   frozen at session start and everything else to `~NOTFOUND`, with `--no-proxy-server` so nothing
+   resolves names on the browser's behalf. This is the DNS-rebinding control (review §4.2).
+2. **The route guard** pauses every request through `Fetch.requestPaused` and refuses what is outside
+   the allowlist, which is what makes a block *visible* to the user.
+3. **NetworkPolicy**, in a cell, from the same frozen addresses — the one that holds if the adapter
+   has a bug.
+
+Known gap, stated rather than hidden: the `Fetch` domain does not pause WebSocket handshakes, so a
+WebSocket to an unlisted origin is caught by (1) and (3) but produces no blocked-destination event.
+
+### The loopback allowance — a real relaxation, deliberately visible
+
+`RecorderAddressPolicy` denies loopback, which made the recorder impossible to exercise against the
+demo service on `http://localhost:8081`. Rather than weaken the floor, S10d adds
+`RecorderAddressAllowances` — a value object, so a relaxation is a thing you can see and test rather
+than a missing check. It permits loopback and nothing else; metadata, link-local, wildcard, multicast
+and prohibited ranges stay denied, and `RecorderAddressAllowancesTest` pins that. Production profiles
+refuse it, the session's audit detail records `addressFloor=relaxed-local-development`, and startup
+logs a warning.
+
+### Two threading traps, both real
+
+- **`WebSocket.sendText` may not overlap.** A user's input and a page's routing decision are
+  concurrent in the normal case, so sends are serialized through one thread in
+  `ChromeDevToolsClient`.
+- **A blocking `send` from an event handler deadlocks**, because the reply is delivered by the thread
+  that is waiting. Routing decisions and screencast acks use `fire` (no reply); reading a response
+  body hands off to an executor. `LiveRecorderSession` closes its handle *outside* its own lock for
+  the same class of reason.
+
+### Orphaned browsers
+
+Found by killing the control plane during verification: the JVM died and Chrome did not. Two halves
+now cover it — a `@PreDestroy` closes live sessions on orderly shutdown, and the adapter arms its own
+deadline *inside* the session so a `kill -9` bounds the orphan to the session deadline rather than
+forever.
+
+### Streaming
+
+Polling, not SSE. `EventSource` cannot set headers, so an SSE stream would carry the API key in the
+query string. Frames are sequenced so a poll is resumable, and only the newest frame is returned —
+showing someone the past while they click the present is worse than dropping frames.
+
+Frames and captured bodies are **never durable**: they live in bounded in-memory buffers and are
+dropped with the session (review §5). The audit trail is what survives. Blocked destinations are
+audited **by origin, deduplicated by origin-and-reason** — a page retrying a blocked asset sixty
+times is one security fact, and a blocked SSO callback carries a grant code in its query string.
+
+### Files
+
+- `platform-domain` — `RecorderSessionState`, `RecorderInputKind`, `RecorderInputEvent`,
+  `RecorderMouseButton`, `RecorderViewport`, `RecorderScreencastFrame`,
+  `RecorderBlockedDestination`, `RecorderInputRateLimiter`, `RecorderAddressAllowances`;
+  ports `RecorderBrowser`, `RecorderBrowserListener`, `HostAddressResolver`.
+- `platform-orchestration` — `LiveRecorderSession`, `RecorderSessionRegistry`,
+  `RecorderBridgeSettings`, `UnavailableRecorderBrowser`; `ManageRecordingsUseCase` rewritten.
+- `runners/runner-chrome` — **new module**. `LocalChromeRecorderBrowser`, `ChromeDevToolsClient`,
+  `ChromeProcess`, `ChromeCommandLine`, `ChromeInputCommands`, `ChromeResourceTypes`,
+  `ChromeRecorderSettings`. No new dependency: the WebSocket is `java.net.http`, Jackson was already
+  in the reactor.
+- `platform-api` — `GET /{id}`, `GET /{id}/live`, `POST /{id}/input`, `POST /{id}/stop`; new problem
+  types for a refused target (422), refused input (409) and exhausted capacity (429).
+- `platform-core` — `recorder.local-browser.*` properties, bean wiring, two production guards,
+  `RecorderSessionScheduler`, `RecorderSessionShutdown`.
+- `platform-ui` — `RecorderPanel.tsx` plus client methods and styles.
+
+### Verification
+
+Full `mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, 16 modules, **1,264 tests, 0 failures**.
+One skip, and it is not a false green: `LocalChromeRecorderBrowserLiveTest` is `@EnabledIfSystemProperty`
+and was run separately —
+
+```bash
+mvn -B -pl runners/runner-chrome -am test -Drecorder.live=true
+```
+
+— 35 green, driving a real Chrome against a real HTTP server: screencast frames, the page's own
+`fetch` captured, and both refusals (raw-IP and outside-allowlist) observed through Chrome's
+interception. That test caught two defects that unit tests could not: `Target.createTarget` rejects
+width/height without a new window, and the raw-IP rule fires before the allowlist rule.
+
+`platform-ui`: 168 tests, build clean, lint at the documented 3-errors/3-warnings baseline (all
+pre-existing in V1's `App.tsx`).
+
+End to end against the running platform, which is the check that matters: session `LIVE` not pending,
+frames arriving, `GET /` and `GET /api/users` captured, `https://example.com` refused with 409 and
+audited as `origin=https://example.com` with no query string, `kind: "Runtime.evaluate"` refused 400,
+`stop` returning `CANCELLED` and leaving no Chrome behind. Confirmed in the console too.
 
 ## 3ad. S11 — web performance under load
 
