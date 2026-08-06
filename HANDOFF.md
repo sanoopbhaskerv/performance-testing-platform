@@ -4,8 +4,9 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10h — the Validator now proves a recording's correlations instead of taking them
-on trust (§3ak). Increments 0–2h and S1–S11 are complete.
+**Last updated:** S10i — a git-pinned Playwright source now reaches the runner, and cannot name a
+repository this deployment has not allowlisted (§3al). **S10 is complete.** Increments 0–2h and
+S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -49,8 +50,9 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task after this commit: **git-pinned Playwright import** is
-the last open piece of S10, or continue to S12 scale hardening.
+`NEXT-SESSION.md` §2 has the immediate task after this commit: **the studio cannot author a browser
+test at all** (§3af), which now blocks two shipped increments from having a screen — size that next,
+or continue to S12 scale hardening.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -104,12 +106,12 @@ the last open piece of S10, or continue to S12 scale hardening.
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,312 tests green, 0 failures at S10h** (one skip, the opt-in live
+**Last full Java verification: 1,331 tests green, 0 failures at S10i** (one skip, the opt-in live
 Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
 S3 engine, 936 after S3 Rules, 941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at
-S10b, 1,148 at S10c/S11, 1,304 at S10g). UI: **184 tests**.
+S10b, 1,148 at S10c/S11, 1,304 at S10g, 1,312 at S10h). UI: **184 tests**.
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -2665,6 +2667,121 @@ correlation was sent by nothing.
   **This is the one increment on this branch that lands API-only in git**, against PLAN.md's rule.
   The screen exists and passes its tests in the working tree; it simply is not in this commit.
 - Browser journeys still do not validate; that remains where S4 left it.
+
+---
+
+## 3al. S10i — a git-pinned Playwright source reaches the runner
+
+**S10's last open piece.** The domain already modelled it: `SourceSpec.GitSource` existed,
+`SemanticValidator` refused a mutable ref and a `..` path, the JSON schema described the block, and
+`mutable-git-ref.yaml` was a published invalid fixture. Two things were missing, and the second was
+a defect rather than an absence.
+
+### The defect: validated, accepted, then dropped
+
+`PlaywrightEngineProvider.compile` wrote `sourceUri` and `sourceDigest` and **nothing else**. A
+git-pinned source passed validation and compiled into a plan carrying two empty strings. The runner
+received a browser workload with no script to run.
+
+That is the silent-drop failure S9 removed for engines, arriving from a different direction, and it
+is worse here because everything upstream looks correct: the coordinates were checked, the ref was
+proven immutable, the path was proven safe, and the plan is digested and stored as though it
+described a test. Compiling is a claim. A workload whose source carries neither an artifact nor git
+coordinates is now **refused at compile** rather than emitted empty, and the git coordinates are
+part of the plan — and therefore part of the plan digest, so the commit a run executed is
+recoverable from the stored definition version. That is the whole point of refusing a mutable ref,
+and until now the pinning went no further than validation.
+
+### The absence: nothing constrained the repository
+
+A git source is the **one field in a specification that names a host the platform will contact and
+then execute whatever comes back**. Everywhere else the author says *what* and the platform decides
+*where* — a test cannot choose its own target host, which is what stops it being pointed somewhere
+it should not go (CLAUDE.md §20). A repository URL taken at face value is a hole straight through
+that property.
+
+`GitSourceAllowlist` closes it. An operator declares
+`platform.orchestration.playwright.allowed-repositories`; a specification chooses among them.
+
+**Empty means nothing is permitted.** This is the opposite of the usual default and it is
+deliberate: an empty allowlist is "this deployment has not decided", and the honest answer to a
+fetch request under those conditions is no. The finding names the property, so the refusal reads as
+a configuration gap rather than as a rejected test. `ProductionSafetyGuardTest` pins the default,
+because the mistake would otherwise be invisible until somebody pointed a definition at a repository
+nobody had reviewed.
+
+### Credentials in the URL
+
+`https://x-access-token:ghp_live@github.com/org/repo` is a working clone URL and a secret written
+into a versioned, digested, findings-echoing document — the one thing CLAUDE.md §20 forbids without
+qualification. Refused **before** the allowlist is consulted, so an otherwise-permitted repository
+cannot carry one in.
+
+The rule is scheme-aware, and it has to be. Over ssh a bare username is how everybody clones, so
+only userinfo carrying a password is a credential; over https there is no legitimate username, so a
+lone `ghp_...@github.com` is a token — exactly the shape worth catching. A first version treated any
+`@` as a credential and refused `ssh://git@host/...`, the ordinary case, which is how you teach
+people the check is wrong.
+
+### The runner
+
+`fetch_git_source` in the Playwright image's entrypoint: shallow-fetch the SHA, check out, then
+**verify the resolved `HEAD` equals the SHA it asked for**. `git fetch <sha>` asks a remote for a
+commit and what arrives is whatever the remote chose to send; without that check pinning is a
+comment. It also refuses when the path does not exist at that commit — a test that silently ran
+nothing would report a browser cohort that measured nothing.
+
+`GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=/bin/true` before any git command, so a repository needing
+a credential the platform did not supply fails in seconds rather than blocking until the Job's
+`activeDeadlineSeconds` and reporting as a timeout somebody debugs as a slow target.
+
+### A robustness defect an existing test caught
+
+`SchemaConformanceTest` removes each schema-required field from a valid example and asserts the
+server rejects the result. Removing `spec` made `GitSourceValidator` throw a `NullPointerException`:
+policy validation runs *alongside* structural validation rather than after it, so it has to tolerate
+a half-mapped specification and say nothing rather than throw. Fixed, and worth recording as the
+kind of thing only that test would have found.
+
+### Files
+
+- `platform-domain/spec/GitSourceAllowlist` — the allowlist, with spelling normalization so `.git`,
+  a trailing slash and host casing are one repository.
+- `platform-domain/validation/GitSourceValidator` — policy, deliberately separate from
+  `SemanticValidator`: the latter answers "is this document coherent" from the document alone, which
+  is what lets it run in a pull request with nothing configured.
+- `platform-api/spec/SpecificationValidationService`, `api/v2/config/V2ApiConfiguration` — merged
+  into both validation entry points; the fail-closed bean is the default.
+- `platform-core/OrchestrationProperties`, `OrchestrationConfiguration` — the property, and a
+  startup log for **both** states, because "no test named a repository" and "every test naming one
+  was refused" are different situations an operator should not have to guess between.
+- `engines/engine-playwright/PlaywrightEngineProvider` — carry-through and the refusal.
+- `runner-images/playwright-runner/{Dockerfile,entrypoint.sh,README.md}` — git, and the fetch.
+- `specification/examples/valid/browser-git-pinned.yaml`, the JSON schema, `docs/api/v2-examples.md`.
+
+### Verification
+
+`mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, **1,331 tests, 0 failures**, one skip (the
+opt-in live Chrome test). Nineteen new tests across the allowlist, the policy validator, the
+validation service and the engine.
+
+### Deliberately not done — read this before calling S10 finished
+
+- **Credentials are not wired.** Only a repository the runner can read anonymously, or through a
+  credential already present in its cell, will fetch. A private repository needs a git credential
+  resolved through `SecretResolver` (which S5 built) and mounted into the Job. That is the next
+  slice and it is not large, but it is not done, so **a private repository does not work today**.
+- **The runner path has never been executed.** The entrypoint change shares the caveat every runner
+  image change on this branch carries: it has not been built or run on a cluster. The fetch logic is
+  shell and is covered by no test.
+- **No studio surface**, and this one is blocked rather than skipped. `HANDOFF.md` §3af records that
+  `toSpecification` always emits `type: protocol` and `engine: jmeter`, so **the studio cannot
+  author a browser test at all** — a git-source form would have nowhere to live. This is the second
+  increment in a row to land without its screen, and the browser-authoring gap (§3af) is now the
+  thing blocking two increments rather than one. It should be sized next.
+- The allowlist matches whole repositories only. No wildcards, no org-level entries. Add them when
+  somebody asks, with the prefix-matching bug that usually accompanies them in mind —
+  `perf-journeys` must not match `perf-journeys-evil`, which is pinned by a test.
 
 ---
 

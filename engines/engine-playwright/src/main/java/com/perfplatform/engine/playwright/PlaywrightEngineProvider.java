@@ -184,11 +184,37 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
                 ? new PerformanceTestSpecification.BrowserProfile(null, null, null)
                 : workload.browserProfile();
 
+        /*
+         * A workload whose source carries no material is refused here rather than compiled.
+         *
+         * Until now a git-pinned source produced a plan with sourceUri and sourceDigest empty and
+         * nothing else — the git coordinates were validated, accepted, and then dropped. The runner
+         * received a workload with no script to run, which is the silent-drop failure S9 removed for
+         * engines arriving from a different direction. Refusing is right because compiling is a
+         * claim: a plan is immutable, digested and executed, and one that describes no material
+         * describes a test that cannot exist.
+         */
+        var git = source == null ? null : source.git();
+        boolean hasArtifact = source != null && source.uri() != null && !source.uri().isBlank();
+        if (!hasArtifact && git == null) {
+            throw new IllegalArgumentException(
+                    "Browser workload '" + workload.name() + "' references source '"
+                            + workload.sourceRef() + "', which carries neither a stored artifact "
+                            + "nor git coordinates, so there is no Playwright test to run");
+        }
+
         json.startElement()
                 .field("name", workload.name())
                 .field("sourceRef", workload.sourceRef())
                 .field("sourceUri", source == null ? "" : source.uri())
                 .field("sourceDigest", source == null ? "" : source.digest())
+                // Part of the plan, and therefore part of the plan digest: the commit a run
+                // executed is recoverable from the stored version, which is the whole reason a
+                // mutable ref is refused at validation.
+                .field("sourceGitRepository", git == null ? "" : git.repository())
+                .field("sourceGitRef", git == null ? "" : git.ref())
+                .field("sourceGitPath", git == null ? "" : git.path())
+                .field("sourceGitProject", git == null || git.project() == null ? "" : git.project())
                 .field("browserUsers", workload.browserUsers() == null ? 0 : workload.browserUsers())
                 .field("iterationsPerUser", iterations(workload))
                 .field("device", profile.deviceOrDefault())

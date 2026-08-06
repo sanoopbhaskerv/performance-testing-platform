@@ -22,12 +22,29 @@ public class V2ApiConfiguration {
     }
 
     /**
-     * @param engines the engines this deployment has, so a document naming one it does not have is
-     *                refused while somebody is still editing it rather than at execution time
+     * @param engines    the engines this deployment has, so a document naming one it does not have
+     *                   is refused while somebody is still editing it rather than at execution time
+     * @param gitSources the repositories a Playwright test may be imported from. Supplied by the
+     *                   composition root; absent, nothing may be imported, which is the correct
+     *                   reading of a deployment that has not declared any
      */
     @Bean
     public SpecificationValidationService specificationValidationService(SpecificationParser parser,
-            com.perfplatform.domain.port.EngineCatalog engines) {
-        return new SpecificationValidationService(parser, engines);
+            com.perfplatform.domain.port.EngineCatalog engines,
+            com.perfplatform.domain.spec.GitSourceAllowlist gitSources) {
+        return new SpecificationValidationService(parser, engines, gitSources);
+    }
+
+    /**
+     * The fail-closed default.
+     *
+     * <p>Overridden by the composition root when an operator has declared repositories. Defined
+     * here so that a deployment which says nothing still starts, and refuses git-pinned imports with
+     * a finding that names the missing configuration rather than failing to wire.
+     */
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+    public com.perfplatform.domain.spec.GitSourceAllowlist gitSourceAllowlist() {
+        return com.perfplatform.domain.spec.GitSourceAllowlist.none();
     }
 }

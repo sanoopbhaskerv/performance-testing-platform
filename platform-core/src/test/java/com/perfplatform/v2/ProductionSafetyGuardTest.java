@@ -395,6 +395,43 @@ class ProductionSafetyGuardTest {
         }
     }
 
+    /**
+     * Where a Playwright test may be fetched from.
+     *
+     * <p>The default matters more here than in most settings. A git-pinned source names a host the
+     * runner will contact and then execute whatever comes back, so "not configured" must mean "no
+     * repository", never "any repository" — the mistake would be invisible until the day somebody
+     * pointed a definition at a repository nobody had reviewed.
+     */
+    @Nested
+    @DisplayName("the Playwright git-source allowlist")
+    class PlaywrightGitSources {
+
+        @Test
+        @DisplayName("permits nothing by default")
+        void failsClosed() {
+            var allowlist = configurationFor("local").gitSourceAllowlist();
+
+            assertThat(allowlist.isConfigured()).isFalse();
+            assertThat(allowlist.allows("https://github.com/anyone/anything")).isFalse();
+        }
+
+        @Test
+        @DisplayName("permits exactly what an operator declared, and nothing adjacent")
+        void permitsOnlyWhatIsDeclared() {
+            OrchestrationProperties properties = new OrchestrationProperties();
+            properties.getPlaywright().setAllowedRepositories(
+                    List.of("https://github.com/ameriprise/perf-journeys"));
+
+            var allowlist = configurationFor(properties, "local").gitSourceAllowlist();
+
+            assertThat(allowlist.allows("https://github.com/ameriprise/perf-journeys")).isTrue();
+            assertThat(allowlist.allows("https://github.com/ameriprise/perf-journeys-evil"))
+                    .isFalse();
+            assertThat(allowlist.allows("https://github.com/ameriprise")).isFalse();
+        }
+    }
+
     @Nested
     @DisplayName("the recorder loopback-target allowance")
     class RecorderLoopbackAllowance {

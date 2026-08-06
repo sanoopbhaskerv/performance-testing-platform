@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PlaywrightEngineProviderTest {
 
@@ -115,17 +116,59 @@ class PlaywrightEngineProviderTest {
                         "web.cls@browser-experience/home");
     }
 
+    /**
+     * The defect this closes: git coordinates validated, accepted, and then dropped.
+     *
+     * <p>A git-pinned source used to compile into a plan whose {@code sourceUri} and
+     * {@code sourceDigest} were both empty strings and which said nothing else. The runner received
+     * a workload with no script to run — the silent-drop failure S9 removed for engines, arriving
+     * from a different direction.
+     */
+    @Test
+    @DisplayName("git coordinates reach the compiled plan, and therefore the plan digest")
+    void compilesGitPinnedSource() {
+        EnginePlan plan = provider.compile(gitPinnedSpecification(), "browser-experience");
+
+        assertThat(plan.planJson())
+                .contains("\"sourceGitRepository\":\"https://github.com/ameriprise/perf-journeys\"")
+                .contains("\"sourceGitRef\":\"" + "a".repeat(40) + "\"")
+                .contains("\"sourceGitPath\":\"tests/checkout.spec.ts\"")
+                .contains("\"sourceGitProject\":\"chromium\"");
+    }
+
+    @Test
+    @DisplayName("a source carrying neither an artifact nor git coordinates is refused, not compiled")
+    void refusesSourceWithNoMaterial() {
+        assertThatThrownBy(() -> provider.compile(
+                specificationWithSource(new SourceSpec("proposal-browser", SourceType.PLAYWRIGHT,
+                        null, null, null)),
+                "browser-experience"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no Playwright test to run");
+    }
+
+    private static PerformanceTestSpecification gitPinnedSpecification() {
+        return specificationWithSource(new SourceSpec("proposal-browser", SourceType.PLAYWRIGHT,
+                null, null, new SourceSpec.GitSource(
+                        "https://github.com/ameriprise/perf-journeys", "a".repeat(40),
+                        "tests/checkout.spec.ts", "chromium")));
+    }
+
     private static PerformanceTestSpecification specification() {
+        return specificationWithSource(new SourceSpec("proposal-browser", SourceType.PLAYWRIGHT,
+                "artifact://playwright-sources/proposal-journey.spec.ts",
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                null));
+    }
+
+    private static PerformanceTestSpecification specificationWithSource(SourceSpec source) {
         return new PerformanceTestSpecification(
                 PerformanceTestSpecification.SUPPORTED_API_VERSION,
                 PerformanceTestSpecification.SUPPORTED_KIND,
                 new SpecMetadata("proposal-browser", "platform", "proposal-service", Map.of()),
                 new TestSpec(
                         new EnvironmentSpec("performance", "standalone", TargetClass.NON_PRODUCTION),
-                        List.of(new SourceSpec("proposal-browser", SourceType.PLAYWRIGHT,
-                                "artifact://playwright-sources/proposal-journey.spec.ts",
-                                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                null)),
+                        List.of(source),
                         List.of(),
                         List.of(),
                         List.of(new WorkloadSpec("browser-experience", WorkloadType.BROWSER,

@@ -24,8 +24,9 @@ test**: the captures are rendered as a HAR and read by the ordinary HAR importer
 arrives in the studio with journeys, weights and correlation suggestions. **S10h closed the
 recorder's own gap**: the Validator now runs against the recording and reports a verdict on every
 accepted correlation, so a rule that was applied to nothing fails instead of passing on a replayed
-capture (`HANDOFF.md` §3ak). Git-pinned Playwright import remains; S11 web performance under load is
-built.
+capture (`HANDOFF.md` §3ak). **S10i finished S10**: a git-pinned Playwright source now reaches the
+runner and cannot name a repository this deployment has not allowlisted (§3al). S11 web performance
+under load is built.
 
 ---
 
@@ -757,7 +758,7 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
 | **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — S10a–S10h built (bridge, draft, defect fixes, long-poll, and the Validator proving a recording's correlations); **git-pinned Playwright import is all that remains** |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **built** — S10a–S10i. Bridge, draft, defect fixes, long-poll, the Validator proving a recording's correlations, and git-pinned import with a repository allowlist. **No studio surface for the git source**: §3af's browser-authoring gap blocks it |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | **done** — `HANDOFF.md` §3ad |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
@@ -1018,7 +1019,15 @@ literal it was meant to replace is usually still valid minutes after capture. Th
 against the recording, recovers those literals, and reports `proven` / `unproven` / `used` /
 `unused` / `not-extracted` per rule. A dead rule is an ERROR. `HANDOFF.md` §3ak.
 
-Remaining S10 work: **git-pinned Playwright import**, and only that.
+**S10i — git-pinned Playwright sources.** The domain modelled them already; the engine dropped them.
+A git source compiled into a plan with two empty strings and the runner got a workload with no
+script. Coordinates now reach the plan (and therefore the plan digest), a source with no material is
+refused at compile rather than emitted empty, and `GitSourceAllowlist` stops a specification naming
+a repository nobody declared — fail-closed, because an empty allowlist means "not decided", not "no
+restriction". Credentials in a clone URL are refused outright. `HANDOFF.md` §3al.
+
+**S10 is built.** What remains is not S10's: the studio cannot author a browser test at all
+(`HANDOFF.md` §3af), so neither S10h's correlation panel nor S10i's git-source form has a screen.
 
 ### S11 — web performance under load — **built**
 

@@ -5,8 +5,11 @@ ARG LIGHTHOUSE_VERSION=12.4.0
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# git is here for one job: fetching a Playwright test pinned to an immutable commit. The entrypoint
+# uses it non-interactively only — GIT_TERMINAL_PROMPT=0 — so a repository needing a credential the
+# platform did not supply fails fast instead of hanging until the Job's deadline.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends awscli ca-certificates \
+    && apt-get install -y --no-install-recommends awscli ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g lighthouse@${LIGHTHOUSE_VERSION}

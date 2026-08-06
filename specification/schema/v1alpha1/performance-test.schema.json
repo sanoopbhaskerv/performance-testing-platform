@@ -219,7 +219,9 @@
           "properties": {
             "repository": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^(https://|ssh://|git@)",
+              "description": "An https or ssh clone URL, which must be on the deployment's allowlist (platform.orchestration.playwright.allowed-repositories). A test cannot choose where its code is fetched from, for the same reason it cannot choose its own target host. The URL must not carry credentials: a specification holds references, never secret values."
             },
             "ref": {
               "type": "string",

@@ -1,0 +1,68 @@
+# VALID FIXTURE — a browser test whose Playwright script lives in a repository.
+#
+# The alternative to uploading the script: name the repository, the exact commit and
+# the path, and the runner fetches it. Nothing is copied into the specification, so a
+# reviewed journey stays in the repository where it is reviewed.
+#
+# Three things make this safe, and all three are enforced server-side:
+#
+#   1. `repository` must be on the deployment's allowlist
+#      (platform.orchestration.playwright.allowed-repositories). A test cannot choose
+#      where its code is fetched from, for the same reason it cannot choose its own
+#      target host. A deployment that has declared nothing permits nothing.
+#   2. `ref` must be an immutable commit SHA. A branch moves, so the code that ran
+#      could not be recovered from the stored version and the review that approved it
+#      would be meaningless.
+#   3. `path` must stay inside the checkout. A `..` segment would let imported
+#      material read the runner's filesystem outside the repository.
+#
+# The URL never carries a credential. The runner's git credential is supplied by the
+# platform; a token written here would be stored, digested and echoed in findings.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: proposal-journey-pinned
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-browser
+      type: playwright
+      git:
+        repository: ssh://bitbucket/proposal-e2e
+        # A full commit SHA. `git rev-parse HEAD` on the reviewed commit.
+        ref: 4f2a91c7e0b3d85a16cf7420ab93de5817c04e9b
+        path: tests/performance/proposal-journey.spec.ts
+        # Optional: which Playwright project to run, when the config declares several.
+        project: chromium
+
+  workloads:
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: proposal-browser
+      browserUsers: 5
+      iterationsPerUser: 2
+      browserProfile:
+        device: desktop
+        network: wifi
+
+  objectives:
+    - metric: browser.journey.duration
+      percentile: 95
+      threshold: 8s
+    - metric: web.lcp
+      percentile: 75
+      threshold: 2500ms
+
+  governance:
+    maxDuration: 15m
+    approvalPolicy: non-production-standard
+    retention: 14d

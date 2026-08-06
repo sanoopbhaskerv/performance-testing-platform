@@ -1,9 +1,11 @@
 package com.perfplatform.api.v2.spec;
 
 import com.perfplatform.domain.port.EngineCatalog;
+import com.perfplatform.domain.spec.GitSourceAllowlist;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.SpecificationDigest;
 import com.perfplatform.domain.validation.EngineCapabilityValidator;
+import com.perfplatform.domain.validation.GitSourceValidator;
 import com.perfplatform.domain.validation.SemanticValidator;
 import com.perfplatform.domain.validation.ValidationResult;
 
@@ -49,9 +51,24 @@ public class SpecificationValidationService {
      */
     private final EngineCatalog engines;
 
+    /**
+     * The repositories this deployment will fetch a Playwright test from.
+     *
+     * <p>Deployment policy rather than document shape, so it is passed in for the same reason the
+     * engine catalogue is: the same specification must not be silently valid in one deployment and
+     * invalid in another without a finding that says which.
+     */
+    private final GitSourceAllowlist gitSources;
+
     public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines) {
+        this(parser, engines, GitSourceAllowlist.none());
+    }
+
+    public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines,
+            GitSourceAllowlist gitSources) {
         this.parser = parser;
         this.engines = engines;
+        this.gitSources = gitSources == null ? GitSourceAllowlist.none() : gitSources;
     }
 
     /**
@@ -82,7 +99,8 @@ public class SpecificationValidationService {
         PerformanceTestSpecification specification = parsed.specification().orElseThrow();
         ValidationResult combined = parsed.findings()
                 .merge(SemanticValidator.validate(specification))
-                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()));
+                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()))
+                .merge(GitSourceValidator.validate(specification, gitSources));
 
         Optional<SpecificationDigest> digest = combined.isValid()
                 ? Optional.of(SpecificationDigest.of(specification))
@@ -100,7 +118,8 @@ public class SpecificationValidationService {
      */
     public ValidationOutcome validateSpecification(PerformanceTestSpecification specification) {
         ValidationResult findings = SemanticValidator.validate(specification)
-                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()));
+                .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()))
+                .merge(GitSourceValidator.validate(specification, gitSources));
         Optional<SpecificationDigest> digest = findings.isValid()
                 ? Optional.of(SpecificationDigest.of(specification))
                 : Optional.empty();

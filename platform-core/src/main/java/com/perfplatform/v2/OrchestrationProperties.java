@@ -3,7 +3,9 @@ package com.perfplatform.v2;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -77,6 +79,7 @@ public class OrchestrationProperties {
     private final SecretResolverProperties secretResolver = new SecretResolverProperties();
     private final SessionAcquisition sessionAcquisition = new SessionAcquisition();
     private final Recorder recorder = new Recorder();
+    private final Playwright playwright = new Playwright();
 
     /**
      * Cleanup of runner-owned ephemeral Kubernetes objects.
@@ -624,6 +627,36 @@ public class OrchestrationProperties {
 
     public Recorder getRecorder() {
         return recorder;
+    }
+
+    public Playwright getPlaywright() {
+        return playwright;
+    }
+
+    /**
+     * Where a Playwright test may be imported from.
+     *
+     * <p>One setting, and it is the only thing standing between a specification and an arbitrary
+     * host: a git-pinned source names something the runner will fetch and then execute. Everywhere
+     * else a test states what it wants and the platform decides where the traffic goes; this keeps
+     * that property rather than making the repository an exception to it.
+     *
+     * <p><b>Empty means nothing is permitted</b>, not "no restriction". A deployment that has not
+     * declared its repositories has not made the decision, and the honest answer to a fetch request
+     * under those conditions is no — with a finding that names this property, so the refusal reads
+     * as a configuration gap.
+     */
+    public static class Playwright {
+        private List<String> allowedRepositories = new ArrayList<>();
+
+        public List<String> getAllowedRepositories() {
+            return allowedRepositories;
+        }
+
+        public void setAllowedRepositories(List<String> allowedRepositories) {
+            this.allowedRepositories = allowedRepositories == null
+                    ? new ArrayList<>() : allowedRepositories;
+        }
     }
 
     /**

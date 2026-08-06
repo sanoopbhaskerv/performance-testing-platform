@@ -76,9 +76,65 @@ if [[ "${PROGRESS_INTERVAL_SECONDS}" != "0" ]]; then
     PROGRESS_PID=$!
 fi
 
+# ── Fetching a git-pinned Playwright test ────────────────────────────────────
+#
+# The compiled plan names a repository, an immutable commit SHA and a path inside the checkout. All
+# three were validated and allowlisted by the control plane; this fetches them and refuses anything
+# that does not match what it asked for.
+#
+# Why the verification step below is not paranoia: `git fetch <sha>` asks a remote for a commit, and
+# what arrives is whatever the remote chose to send. Checking that the resolved HEAD equals the
+# requested SHA is what makes the run reproducible from the stored definition version — the entire
+# reason a mutable branch is refused at validation. Without it, pinning is a comment.
+fetch_git_source() {
+    local repository ref path
+    repository="$(node -e 'const p=require("/workspace/playwright-plan.json");process.stdout.write((p.compiledPlan&&p.compiledPlan.workloads&&p.compiledPlan.workloads[0]&&p.compiledPlan.workloads[0].sourceGitRepository)||"")')"
+    [[ -n "${repository}" ]] || return 0
+
+    ref="$(node -e 'const p=require("/workspace/playwright-plan.json");process.stdout.write(p.compiledPlan.workloads[0].sourceGitRef||"")')"
+    path="$(node -e 'const p=require("/workspace/playwright-plan.json");process.stdout.write(p.compiledPlan.workloads[0].sourceGitPath||"")')"
+
+    if [[ -z "${ref}" || -z "${path}" ]]; then
+        echo "Plan names a repository but no ref or path; refusing to guess." >&2
+        return 1
+    fi
+
+    # Never interactive. A missing credential must fail in seconds, not block until the Job's
+    # activeDeadlineSeconds and report as a timeout somebody then debugs as a slow target.
+    export GIT_TERMINAL_PROMPT=0
+    export GIT_ASKPASS=/bin/true
+
+    mkdir -p /workspace/source
+    git -C /workspace/source init --quiet
+    git -C /workspace/source remote add origin "${repository}"
+
+    # Shallow, single commit. The history is not evidence; the commit is.
+    if ! git -C /workspace/source fetch --quiet --depth 1 origin "${ref}"; then
+        echo "Could not fetch ${ref} from the repository named in the plan." >&2
+        return 1
+    fi
+    git -C /workspace/source checkout --quiet FETCH_HEAD
+
+    local resolved
+    resolved="$(git -C /workspace/source rev-parse HEAD)"
+    if [[ "${resolved}" != "${ref}"* ]]; then
+        echo "Refusing to run: asked for ${ref}, the remote supplied ${resolved}." >&2
+        return 1
+    fi
+
+    if [[ ! -e "/workspace/source/${path}" ]]; then
+        echo "Refusing to run: ${path} does not exist at ${resolved}." >&2
+        return 1
+    fi
+
+    echo "Fetched ${repository} at ${resolved}, running ${path}."
+}
+
+fetch_git_source
+
 # The production runner wrapper that executes the reviewed Playwright script is intentionally
 # small and deterministic. It is responsible for:
-#   - fetching the source URI named in the compiled plan,
+#   - running the test fetched above, or fetching the artifact source URI when the plan names one,
 #   - setting BASE_URL plus the correlation header/value as environment variables,
 #   - running `npx playwright test` with one worker per browser session policy,
 #   - appending browser.journey.duration, browser.step.duration and web.* rows to results.csv,

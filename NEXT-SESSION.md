@@ -52,7 +52,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S10h ran this to completion: **1,312 tests, 0 failures** across all 16 modules. **One skip is
+S10i ran this to completion: **1,331 tests, 0 failures** across all 16 modules. **One skip is
 expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
 and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
 
@@ -130,7 +130,7 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. **S10h makes the Validator prove the correlations a person accepted** (§3ak). Git-pinned Playwright import is what remains. |
+| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. **S10h makes the Validator prove the correlations a person accepted** (§3ak), and **S10i completes git-pinned Playwright import** (§3al). |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |
@@ -201,8 +201,20 @@ that exposes it. Nothing lands API-only.
   same value, so nothing is shown either way), **used** (no recording to compare against),
   **unused** (extracted and sent by nothing — an **ERROR**), **not-extracted**.
 
-**Next:** **git-pinned Playwright import** — the last open piece of S10 — or proceed to S12 scale
-hardening.
+- **S10i** (§3al) — a git-pinned Playwright source reaches the runner. `SourceSpec.GitSource` and
+  its validation existed; the engine dropped the coordinates, so a git source compiled into a plan
+  with `sourceUri` and `sourceDigest` empty and the runner got a workload with no script. The
+  coordinates are now part of the plan and its digest, a source carrying no material is refused at
+  compile, and **`GitSourceAllowlist` stops a specification naming a repository nobody declared** —
+  fail-closed, since an empty allowlist means "not decided", not "no restriction". Credentials in a
+  clone URL are refused. Configure with
+  `platform.orchestration.playwright.allowed-repositories`. **Private repositories do not work yet**:
+  the git credential is not wired through `SecretResolver`.
+
+**Next:** **the studio cannot author a browser test at all** (`HANDOFF.md` §3af) — `toSpecification`
+always emits `type: protocol` and `engine: jmeter`, so neither S10h's correlation panel nor S10i's
+git source has anywhere to live. That gap now blocks two shipped increments from having a screen and
+should be sized next. Otherwise, S12 scale hardening.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

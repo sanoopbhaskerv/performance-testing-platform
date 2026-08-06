@@ -371,6 +371,10 @@ design: validation answers "is this test well formed", not "are you allowed to r
 | `spec.parse.enum.invalid` | ERROR | Unsupported value; message lists the permitted set |
 | `spec.secret.inline-value` | ERROR | A credential value where a reference belongs |
 | `spec.source.git.ref.mutable` | ERROR | Playwright source pinned to a branch, not a commit SHA |
+| `spec.source.git.repository.credential` | ERROR | The clone URL carries a user and token |
+| `spec.source.git.repository.scheme` | ERROR | Not an https or ssh clone URL |
+| `spec.source.git.repository.noneAllowed` | ERROR | This deployment allowlists no repositories at all |
+| `spec.source.git.repository.notAllowed` | ERROR | Repository is not on this deployment's allowlist |
 | `spec.workload.sourceRef.unresolved` | ERROR | `sourceRef` names no declared source |
 | `spec.objective.scope.unresolved` | ERROR | Objective scoped to a workload that is not declared |
 | `spec.governance.maxDuration.exceeded` | ERROR | Stages run longer than the declared ceiling |
@@ -386,6 +390,63 @@ design: validation answers "is this test well formed", not "are you allowed to r
 
 The finding never echoes a suspected credential value: findings are logged and returned over
 HTTP, so repeating the value would spread the disclosure.
+
+---
+
+## Importing a Playwright test from a repository
+
+A browser workload's source is either a stored artifact or git coordinates:
+
+```yaml
+  sources:
+    - name: proposal-browser
+      type: playwright
+      git:
+        repository: ssh://bitbucket/proposal-e2e
+        ref: 4f2a91c7e0b3d85a16cf7420ab93de5817c04e9b
+        path: tests/performance/proposal-journey.spec.ts
+        project: chromium
+```
+
+Nothing is copied into the specification, so a reviewed journey stays in the repository where it is
+reviewed. `specification/examples/valid/browser-git-pinned.yaml` is the full example.
+
+### What the platform enforces, and why each rule exists
+
+| Rule | Finding | Why |
+|---|---|---|
+| The repository is on this deployment's allowlist | `spec.source.git.repository.notAllowed` | A git source is the one field naming a host the platform will contact and then execute what comes back. Everywhere else a test says *what* and the platform decides *where* — this keeps that property instead of making the repository an exception to it |
+| A deployment that allowlists nothing permits nothing | `spec.source.git.repository.noneAllowed` | An empty allowlist is "not decided", not "no restriction". The remediation names the property, so the refusal reads as configuration rather than as a bad test |
+| https or ssh only | `spec.source.git.repository.scheme` | `file://` and plaintext http make the imported material unverifiable |
+| No credentials in the URL | `spec.source.git.repository.credential` | `https://x-access-token:ghp_live@host/org/repo` is a secret written into a stored, digested, findings-echoing document. A bare `git@host` over ssh is fine — that is a username, not a secret |
+| `ref` is an immutable commit SHA | `spec.source.git.ref.mutable` | A branch moves, so the code that ran could not be recovered from the stored version |
+| `path` stays inside the checkout | `spec.source.git.path.traversal` | A `..` segment would read the runner's filesystem outside the repository |
+
+Configure the allowlist per deployment:
+
+```yaml
+platform:
+  orchestration:
+    playwright:
+      allowed-repositories:
+        - ssh://bitbucket/proposal-e2e
+        - https://github.com/ameriprise/perf-journeys
+```
+
+Spelling is normalized before comparison, so `.git`, a trailing slash and host casing all match the
+same repository.
+
+### At run time
+
+The repository, ref and path are compiled into the plan and therefore covered by the plan digest —
+the commit a run executed is recoverable from the stored definition version. The runner clones at
+that SHA, **verifies the resolved `HEAD` equals the SHA it asked for**, and refuses otherwise:
+`git fetch <sha>` asks a remote for a commit and what arrives is whatever the remote chose to send,
+so without that check pinning is a comment.
+
+**Not yet implemented: credentials.** Only repositories the runner can read anonymously, or through
+a credential already present in its cell, will fetch. A private repository needs a git credential
+resolved through `SecretResolver` and mounted into the Job, which is a separate slice.
 
 ---
 

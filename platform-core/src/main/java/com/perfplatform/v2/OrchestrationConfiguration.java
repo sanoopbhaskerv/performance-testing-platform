@@ -213,6 +213,29 @@ public class OrchestrationConfiguration {
         return new JmeterEngineProvider();
     }
 
+    /**
+     * The repositories a Playwright test may be imported from.
+     *
+     * <p>Logged at startup either way, because both states are worth knowing about and neither is
+     * self-evident from the outside. An empty allowlist is not a misconfiguration to be fixed
+     * silently — a deployment that does not import Playwright tests from git is a perfectly ordinary
+     * deployment — but it is the difference between "no test named a repository" and "every test
+     * naming one was refused", and an operator reading logs should not have to guess which.
+     */
+    @Bean
+    public com.perfplatform.domain.spec.GitSourceAllowlist gitSourceAllowlist() {
+        var allowlist = com.perfplatform.domain.spec.GitSourceAllowlist.of(
+                properties.getPlaywright().getAllowedRepositories());
+        if (allowlist.isConfigured()) {
+            log.info("Playwright git-pinned imports are permitted from {} repositories: {}",
+                    allowlist.repositories().size(), allowlist.repositories());
+        } else {
+            log.info("Playwright git-pinned imports are DISABLED: no repositories are allowlisted. "
+                    + "Set platform.orchestration.playwright.allowed-repositories to permit them.");
+        }
+        return allowlist;
+    }
+
     @Bean
     public com.perfplatform.engine.spi.ExecutionEngineProvider playwrightEngineProvider() {
         return new PlaywrightEngineProvider();

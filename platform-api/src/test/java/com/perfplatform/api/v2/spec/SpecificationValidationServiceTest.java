@@ -14,6 +14,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -413,6 +415,120 @@ class SpecificationValidationServiceTest {
 
             assertThat(service.validate(json).digest())
                     .isEqualTo(service.validate(yaml).digest());
+        }
+    }
+
+    /**
+     * Where a Playwright test may be fetched from.
+     *
+     * <p>Deployment policy, not document shape — the same specification is legitimately valid in a
+     * deployment that allowlists the repository and invalid in one that does not. What must never
+     * happen is the third case: accepted, and then silently fetched from anywhere.
+     */
+    @Nested
+    @DisplayName("git-pinned Playwright sources")
+    class GitPinnedSources {
+
+        private static final String ALLOWED = "ssh://bitbucket/proposal-e2e";
+
+        private SpecificationValidationService withAllowlist(String... repositories) {
+            return new SpecificationValidationService(new SpecificationParser(), ENGINES,
+                    com.perfplatform.domain.spec.GitSourceAllowlist.of(List.of(repositories)));
+        }
+
+        /**
+         * The shipped example. It is checked here rather than in {@code ValidExamples} because it
+         * is the one valid example whose validity depends on deployment configuration — under the
+         * default allowlist it is correctly refused, and asserting it there would have to either
+         * weaken the default or pretend the policy does not exist.
+         */
+        @Test
+        @DisplayName("the shipped browser-git-pinned example validates against its repository")
+        void shippedExampleValidates() {
+            var outcome = withAllowlist("ssh://bitbucket/proposal-e2e")
+                    .validate(ExampleFixtures.valid("browser-git-pinned.yaml"));
+
+            assertThat(outcome.findings().errors())
+                    .as("errors: %s", outcome.findings().errors())
+                    .isEmpty();
+            assertThat(outcome.digest()).isPresent();
+        }
+
+        @Test
+        @DisplayName("an allowlisted repository at an immutable commit validates")
+        void allowlistedRepositoryValidates() {
+            var outcome = withAllowlist(ALLOWED).validate(document("a".repeat(40)));
+
+            assertThat(outcome.findings().codes())
+                    .doesNotContain("spec.source.git.repository.notAllowed",
+                            "spec.source.git.repository.noneAllowed");
+            assertThat(outcome.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a repository this deployment does not allowlist is refused")
+        void unlistedRepositoryIsRefused() {
+            var outcome = withAllowlist("ssh://bitbucket/something-else")
+                    .validate(document("a".repeat(40)));
+
+            assertThat(outcome.findings().codes())
+                    .contains("spec.source.git.repository.notAllowed");
+            assertThat(outcome.isValid()).isFalse();
+            assertThat(outcome.digest())
+                    .as("a refused specification must not be given a digest")
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("the default deployment allowlists nothing, so git-pinned imports are refused")
+        void defaultDeploymentRefuses() {
+            var outcome = service.validate(document("a".repeat(40)));
+
+            assertThat(outcome.findings().codes())
+                    .contains("spec.source.git.repository.noneAllowed");
+        }
+
+        /** Shape and policy are separate layers, and both findings should arrive together. */
+        @Test
+        @DisplayName("a mutable ref on an allowlisted repository still fails on the ref")
+        void allowlistDoesNotExcuseAMutableRef() {
+            var outcome = withAllowlist(ALLOWED).validate(document("main"));
+
+            assertThat(outcome.findings().codes()).contains("spec.source.git.ref.mutable");
+            assertThat(outcome.isValid()).isFalse();
+        }
+
+        private String document(String ref) {
+            return """
+                    apiVersion: performance.ameriprise.com/v1alpha1
+                    kind: PerformanceTest
+                    metadata:
+                      name: mutable-ref
+                      team: advice-implementation
+                      application: proposal
+                    spec:
+                      environment:
+                        name: performance
+                        runnerCell: advice-perf-eks
+                        targetClass: non-production
+                      sources:
+                        - name: proposal-browser
+                          type: playwright
+                          git:
+                            repository: ssh://bitbucket/proposal-e2e.git
+                            ref: REF
+                            path: tests/performance/proposal-journey.spec.ts
+                      workloads:
+                        - name: browser-experience
+                          type: browser
+                          engine: playwright
+                          sourceRef: proposal-browser
+                          browserUsers: 5
+                      objectives:
+                        - metric: browser.journey.duration
+                          percentile: 95
+                          threshold: 8s
+                    """.replace("REF", ref);
         }
     }
 
