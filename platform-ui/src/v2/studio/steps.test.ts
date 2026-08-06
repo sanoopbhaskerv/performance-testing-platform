@@ -59,6 +59,7 @@ describe('stepsFor', () => {
   it('puts rules between journey review and load', () => {
     expect(stepsFor('api-load').map((step) => step.id)).toEqual([
       'sources',
+      'about',
       'refine',
       'rules',
       'load',
@@ -66,6 +67,18 @@ describe('stepsFor', () => {
       'validate',
       'review',
     ]);
+  });
+
+  /**
+   * The Validator resolves its target from team, application and environment. Asking for them after
+   * it ran meant it failed with `metadata.team is required` against a draft the studio had never
+   * asked about.
+   */
+  it('asks what the test points at before trying to validate it', () => {
+    for (const type of ['api-load', 'web-experience'] as const) {
+      const ids = stepsFor(type).map((step) => step.id);
+      expect(ids.indexOf('about')).toBeLessThan(ids.indexOf('validate'));
+    }
   });
 });
 
@@ -105,9 +118,11 @@ describe('blockerFor', () => {
     expect(blockerFor('objectives', draft({ objectives: [] }))).toBeNull();
   });
 
-  it('requires a name and an application before saving', () => {
-    expect(blockerFor('review', draft({ name: '' }))).toMatch(/needs a name/);
-    expect(blockerFor('review', draft({ application: '' }))).toMatch(/an application/);
+  it('requires a name, a team and an application before validating', () => {
+    expect(blockerFor('about', draft({ name: '' }))).toMatch(/needs a name/);
+    expect(blockerFor('about', draft({ team: '' }))).toMatch(/needs a team/);
+    expect(blockerFor('about', draft({ application: '' }))).toMatch(/an application/);
+    expect(blockerFor('about', draft({}))).toBeNull();
   });
 
   it('phrases every blocker as the thing to do, not the rule that was broken', () => {

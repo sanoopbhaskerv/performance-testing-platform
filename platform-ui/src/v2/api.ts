@@ -429,6 +429,29 @@ export interface ValidatorJourney {
   name: string;
   passed: boolean;
   steps: ValidatorStep[];
+  correlations: CorrelationProof[];
+}
+
+/**
+ * Whether one correlation rule actually did anything.
+ *
+ * Not the same question as the extraction result on a step, which only says whether a value came
+ * out. A rule can produce a value, be applied to nothing, and leave the journey sending the literal
+ * it was supposed to replace — every step passes and the rule is decorative.
+ *
+ * `proven` needs a recording to compare against: it means the value this iteration extracted was
+ * *different* from the one the recording captured, so the journey demonstrably carried a fresh
+ * value rather than replaying the capture. Without a recording the verdict stops at `used`.
+ */
+export type CorrelationVerdict = 'proven' | 'unproven' | 'used' | 'unused' | 'not-extracted';
+
+export interface CorrelationProof {
+  variable: string;
+  fromStep: string;
+  usedBySteps: string[];
+  verdict: CorrelationVerdict;
+  livePreview: string | null;
+  message: string;
 }
 
 export interface ValidatorStep {
@@ -623,6 +646,24 @@ export class V2Client {
   }
 
   /**
+   * The same live iteration, judged against the recording the draft came from.
+   *
+   * Worth a separate call rather than a flag on `validateTarget`, because it answers a question the
+   * ordinary Validator cannot: a specification no longer holds the literal a correlation replaced —
+   * accepting the rule is what removed it — so only the recording can say whether the value this
+   * iteration carried was fresh or was the captured one replayed.
+   *
+   * Creates nothing and books no load slot, exactly like `validateTarget`.
+   */
+  validateAgainstRecording(sessionId: string, document: string) {
+    return axios
+      .post<ValidatorResult>(`/api/v2/recordings/${sessionId}/validator`, document, {
+        headers: { ...this.headers, 'Content-Type': 'application/yaml' },
+      })
+      .then((r) => r.data);
+  }
+
+  /**
    * Reads a source into draft scenarios.
    *
    * Creates nothing — no definition, no version, no run — which is what makes it safe to call
@@ -753,6 +794,18 @@ export class V2Client {
    * same shape `importSource` returns — underneath, the recording is rendered as a HAR and read by
    * the ordinary HAR importer, so anything that can display an import can display a recording.
    */
+  /**
+   * Team names this deployment knows about.
+   *
+   * A V1 endpoint, deliberately: it is the only thing that lists teams, and the studio uses it for
+   * suggestions rather than authority. Nothing yet reports the *caller's own* team.
+   */
+  listTeamNames() {
+    return axios
+      .get<string[]>('/api/v1/config/teams', { headers: this.headers })
+      .then((r) => r.data);
+  }
+
   recordingDraft(sessionId: string) {
     return axios
       .get<ImportResponse>(`/api/v2/recordings/${sessionId}/draft`, { headers: this.headers })

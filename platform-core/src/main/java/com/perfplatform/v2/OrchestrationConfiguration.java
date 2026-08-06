@@ -905,9 +905,25 @@ public class OrchestrationConfiguration {
         return new ReadRunProgressUseCase(runs, progress, versions, analyzer, settings, clock);
     }
 
+    /**
+     * The client the Validator sends its single iteration with.
+     *
+     * <p><b>Pinned to HTTP/1.1.</b> Java's {@code HttpClient} defaults to HTTP/2, which over
+     * cleartext means attempting an {@code h2c} upgrade — and a server that answers HTTP/1.1 without
+     * handling that upgrade leaves the request hanging until the timeout. Measured against a Vite
+     * dev server: 10s timeout on HTTP/2, 2ms on HTTP/1.1, for the same URL that {@code curl}
+     * answered instantly.
+     *
+     * <p>That is not a niche target. Cleartext h2c is rarely deployed and unevenly implemented, so
+     * the Validator would report "the request could not reach the target" for a great many
+     * applications that are up and perfectly reachable — the single worst thing a pre-flight check
+     * can do, because it sends someone to debug their service instead of ours. Load engines send
+     * HTTP/1.1 by default too, so this also makes the Validator resemble the run it precedes.
+     */
     @Bean
     public HttpClient validatorHttpClient() {
         return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(properties.getExecutionGrace())
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();

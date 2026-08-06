@@ -310,7 +310,13 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
    * panel's — and because clearing it on save is what stops a second visit to the studio reopening
    * somebody's old recording.
    */
-  const [recordingSeed, setRecordingSeed] = useState<Journey[] | null>(null);
+  const [recordingSeed, setRecordingSeed] = useState<{
+    journeys: Journey[];
+    application: string;
+    environment: string;
+    name: string;
+    recordingSessionId: string;
+  } | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -600,7 +606,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           <Studio
             client={client}
             team=""
-            seed={recordingSeed ? { testType: 'api-load', journeys: recordingSeed } : null}
+            seed={recordingSeed ? { testType: 'api-load', ...recordingSeed } : null}
             onSaved={(name) => {
               setStudioOpen(false);
               setRecordingSeed(null);
@@ -661,7 +667,20 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
                 );
                 return;
               }
-              setRecordingSeed(journeys);
+              setRecordingSeed({
+                journeys,
+                // The recording already knows these — the person chose them when they picked a
+                // target and pressed record. About opens answered rather than blank, and the
+                // Validator has what it needs by the time it runs.
+                application: recordingSession.application,
+                environment: recordingSession.environment,
+                name: `${recordingSession.application}-recorded`,
+                // Kept so the Validator can be run against the recording rather than against the
+                // draft alone. It is the only thing that still knows the literal each accepted
+                // correlation replaced, and therefore the only way to tell a rule that carried a
+                // fresh value from one that quietly did nothing.
+                recordingSessionId: recordingSession.id,
+              });
               setEditorOpen(false);
               setStudioOpen(true);
               setNotice(

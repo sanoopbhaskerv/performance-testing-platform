@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, Check, Gauge, MonitorSmartphone } from 'lucide-react';
 import type { V2Client } from '../api';
 import { describeError } from '../api';
@@ -8,7 +8,14 @@ import type { StepId } from './steps';
 import { blockerFor, stepsFor } from './steps';
 import SourcesStep from './SourcesStep';
 import RefineStep from './RefineStep';
-import { LoadStep, ObjectivesStep, ReviewStep, RulesStep, ValidateStep } from './StepScreens';
+import {
+  AboutStep,
+  LoadStep,
+  ObjectivesStep,
+  ReviewStep,
+  RulesStep,
+  ValidateStep,
+} from './StepScreens';
 import './studio.css';
 
 /**
@@ -40,14 +47,58 @@ export default function Studio({
    * it. Asking them to pick a test type and a source afterwards would be asking them to repeat
    * themselves.
    */
-  seed?: { testType: TestType; journeys: Journey[] } | null;
+  seed?: {
+    testType: TestType;
+    journeys: Journey[];
+    /** Carried from the recording, so About opens answered rather than blank. */
+    team?: string;
+    application?: string;
+    environment?: string;
+    name?: string;
+    /**
+     * The recording itself, kept so the Validator can be run against it.
+     *
+     * Without it the Validator can only report that an extraction produced a value. With it, it can
+     * say whether each accepted correlation carried a *different* value from the one the recording
+     * captured — which is the difference between a rule that works and a rule that was applied to
+     * nothing and passed because the captured literal had not expired yet.
+     */
+    recordingSessionId?: string;
+  } | null;
   /** Called with the created definition's name once it exists, so the console can refresh. */
   onSaved: (name: string) => void;
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<StudioDraft | null>(
-    seed ? { ...newDraft(seed.testType, team), journeys: seed.journeys } : null,
+    seed
+      ? {
+          ...newDraft(seed.testType, seed.team ?? team),
+          journeys: seed.journeys,
+          // A recording already knows what it was pointed at. Asking again would be asking someone
+          // to repeat the choice they made when they pressed "Start guarded recording".
+          application: seed.application ?? '',
+          environment: seed.environment ?? 'performance',
+          name: seed.name ?? '',
+          recordingSessionId: seed.recordingSessionId ?? null,
+        }
+      : null,
   );
+  const [knownTeams, setKnownTeams] = useState<string[]>([]);
+
+  // Suggestions for the team field. Best effort: a deployment that will not list its teams simply
+  // gets a plain text box, which is what this was before.
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listTeamNames()
+      .then((teams) => {
+        if (!cancelled) setKnownTeams(teams);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
   const [stepId, setStepId] = useState<StepId>(seed ? 'refine' : 'sources');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +183,9 @@ export default function Studio({
       <div className="studio-body">
         {step.id === 'sources' && (
           <SourcesStep client={client} draft={draft} onChange={setDraft} />
+        )}
+        {step.id === 'about' && (
+          <AboutStep client={client} draft={draft} onChange={setDraft} knownTeams={knownTeams} />
         )}
         {step.id === 'refine' && <RefineStep draft={draft} onChange={setDraft} />}
         {step.id === 'rules' && <RulesStep draft={draft} onChange={setDraft} />}

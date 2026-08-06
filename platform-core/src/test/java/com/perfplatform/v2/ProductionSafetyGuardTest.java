@@ -343,6 +343,24 @@ class ProductionSafetyGuardTest {
     }
 
     @Nested
+    @DisplayName("the Validator's HTTP client")
+    class ValidatorHttpClient {
+
+        /**
+         * Java defaults to HTTP/2, which over cleartext attempts an h2c upgrade. A server that
+         * answers HTTP/1.1 without handling it leaves the request hanging until the timeout —
+         * measured at 10s against a Vite dev server that curl answered in milliseconds. The
+         * Validator would then tell someone their healthy service was unreachable.
+         */
+        @Test
+        @DisplayName("speaks HTTP/1.1, so an ordinary server is not reported as unreachable")
+        void pinnedToHttp11() {
+            assertThat(configurationFor("local").validatorHttpClient().version())
+                    .isEqualTo(java.net.http.HttpClient.Version.HTTP_1_1);
+        }
+    }
+
+    @Nested
     @DisplayName("the local recorder browser")
     class LocalRecorderBrowser {
 

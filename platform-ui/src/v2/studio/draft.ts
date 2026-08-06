@@ -122,6 +122,16 @@ export interface StudioDraft {
   load: LoadShape;
   objectives: ObjectiveDraft[];
   validator: ValidatorDraft | null;
+  /**
+   * The recording these journeys came from, when they came from one.
+   *
+   * Carried so the Validator can be run *against the recording* rather than against the
+   * specification alone. It is the only thing that still knows the literal each accepted
+   * correlation replaced — accepting the rule is what removed it from the draft — and without that
+   * literal the Validator cannot tell a rule that carried a fresh value from one that was applied
+   * to nothing and passed on a replayed capture.
+   */
+  recordingSessionId: string | null;
 }
 
 /**
@@ -157,6 +167,7 @@ export function newDraft(testType: TestType, team: string): StudioDraft {
       { metric: 'http.error.rate', percentile: null, journey: null, value: 1 },
     ],
     validator: null,
+    recordingSessionId: null,
   };
 }
 

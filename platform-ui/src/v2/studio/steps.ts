@@ -10,7 +10,15 @@ import { includedJourneys } from './draft';
  * disabled button with no explanation is the most common way a wizard strands somebody.
  */
 
-export type StepId = 'sources' | 'refine' | 'rules' | 'load' | 'objectives' | 'validate' | 'review';
+export type StepId =
+  | 'sources'
+  | 'about'
+  | 'refine'
+  | 'rules'
+  | 'load'
+  | 'objectives'
+  | 'validate'
+  | 'review';
 
 export interface Step {
   id: StepId;
@@ -22,6 +30,7 @@ export interface Step {
 
 const API_LOAD_STEPS: Step[] = [
   { id: 'sources', title: 'Journeys', hint: 'What requests should the test send?' },
+  { id: 'about', title: 'About', hint: 'What is this test called, and what does it point at?' },
   { id: 'refine', title: 'Review journeys', hint: 'Keep what matters, drop the noise.' },
   { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Load', hint: 'How many people, and for how long?' },
@@ -32,6 +41,7 @@ const API_LOAD_STEPS: Step[] = [
 
 const WEB_EXPERIENCE_STEPS: Step[] = [
   { id: 'sources', title: 'Journey', hint: 'Which pages should the test measure?' },
+  { id: 'about', title: 'About', hint: 'What is this test called, and what does it point at?' },
   { id: 'refine', title: 'Review journey', hint: 'Check what will be measured.' },
   { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
   { id: 'load', title: 'Browsers', hint: 'How many real browsers, and how many times?' },
@@ -56,6 +66,20 @@ export function blockerFor(step: StepId, draft: StudioDraft): string | null {
       return draft.journeys.length === 0
         ? 'Import a source, or add a request by hand, so the test has something to send.'
         : null;
+
+    /**
+     * Asked early because the Validator needs it.
+     *
+     * These used to live on the last screen, which put them *after* Validate — and the Validator
+     * resolves its target from team, application and environment, so it failed with
+     * "metadata.team is required" on a draft the studio had said nothing about. A step cannot
+     * depend on an answer the wizard has not asked for yet.
+     */
+    case 'about':
+      if (!draft.name.trim()) return 'The test needs a name.';
+      if (!draft.team.trim()) return 'The test needs a team — it decides where the traffic may go.';
+      if (!draft.application.trim()) return 'The test needs an application to point at.';
+      return null;
 
     case 'refine':
       return includedJourneys(draft).length === 0
@@ -96,8 +120,8 @@ export function blockerFor(step: StepId, draft: StudioDraft): string | null {
       return null;
 
     case 'review':
-      if (!draft.name.trim()) return 'The test needs a name.';
-      if (!draft.application.trim()) return 'The test needs an application to point at.';
+      // Nothing of its own: everything it needs was asked for on About, and the studio reports
+      // outstanding blockers across all steps rather than only the current one.
       return null;
   }
 }

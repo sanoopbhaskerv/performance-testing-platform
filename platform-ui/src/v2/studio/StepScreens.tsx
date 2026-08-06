@@ -14,6 +14,7 @@ import { describeError } from '../api';
 import type { ObjectiveDraft, ObjectiveMetric, StudioDraft } from './draft';
 import { includedJourneys, toResourceName } from './draft';
 import { downloadSpecification } from './download';
+import CorrelationProofs from './CorrelationProofs';
 import {
   approximateDuration,
   toSpecification,
@@ -626,7 +627,12 @@ export function ValidateStep({ client, draft, onChange }: StepProps & { client: 
     setRunning(true);
     setError(null);
     try {
-      const result = await client.validateTarget(document.text);
+      // Against the recording when there is one. Same iteration either way; the recording is what
+      // lets the platform say whether each accepted correlation actually carried a fresh value,
+      // rather than only that a value came out of the response.
+      const result = draft.recordingSessionId
+        ? await client.validateAgainstRecording(draft.recordingSessionId, document.text)
+        : await client.validateTarget(document.text);
       onChange({ ...draft, validator: { forDocument: document.text, result } });
     } catch (err) {
       setError(describeError(err));
@@ -783,6 +789,7 @@ function ValidatorSummary({ result }: { result: ValidatorResult }) {
                 )}
               </details>
             ))}
+            <CorrelationProofs proofs={journey.correlations ?? []} />
           </article>
         ))}
       </div>
@@ -801,7 +808,6 @@ function ValidatorSummary({ result }: { result: ValidatorResult }) {
 export function ReviewStep({
   client,
   draft,
-  onChange,
   onSave,
   saving,
 }: StepProps & {
@@ -822,10 +828,6 @@ export function ReviewStep({
     findings: ValidationFinding[] | null;
     error: string | null;
   } | null>(null);
-  const [targetBaseUrl, setTargetBaseUrl] = useState('');
-  const [targetStatus, setTargetStatus] = useState<string | null>(null);
-  const [targetError, setTargetError] = useState<string | null>(null);
-  const [targetBusy, setTargetBusy] = useState(false);
 
   const document = useMemo(() => {
     try {
@@ -878,128 +880,9 @@ export function ReviewStep({
   const validatorPassed = validatorCurrent?.valid === true;
   const ready = document.text !== null && errors.length === 0 && !checking && validatorPassed;
 
-  async function registerTarget() {
-    if (!targetBaseUrl.trim()) return;
-    setTargetBusy(true);
-    setTargetStatus(null);
-    setTargetError(null);
-    try {
-      const target = await client.registerTarget({
-        team: draft.team,
-        application: draft.application,
-        environment: draft.environment,
-        baseUrl: targetBaseUrl,
-        targetClass: 'NON_PRODUCTION',
-      });
-      setTargetStatus(`Registered ${target.application} ${target.environment}: ${target.baseUrl}`);
-    } catch (err) {
-      setTargetError(describeError(err));
-    } finally {
-      setTargetBusy(false);
-    }
-  }
 
   return (
     <>
-      <div className="studio-grid">
-        <div className="studio-field">
-          <label htmlFor="test-name">Name this test</label>
-          <input
-            id="test-name"
-            type="text"
-            value={draft.name}
-            placeholder="checkout-baseline"
-            // Normalized as they type rather than rejected on save. A validation error about label
-            // syntax is a demand that a consumer learn Kubernetes' naming rules to run a test.
-            onChange={(e) => onChange({ ...draft, name: toResourceName(e.target.value) })}
-            aria-describedby="test-name-hint"
-          />
-          <p className="studio-hint" id="test-name-hint">
-            Lowercase letters, numbers and hyphens. You will find the test by this name later.
-          </p>
-        </div>
-
-        <div className="studio-field">
-          <label htmlFor="team">Your team</label>
-          <input
-            id="team"
-            type="text"
-            value={draft.team}
-            placeholder="local-dev"
-            onChange={(e) => onChange({ ...draft, team: e.target.value })}
-            aria-describedby="team-hint"
-          />
-          <p className="studio-hint" id="team-hint">
-            The team your API key belongs to. Asked for rather than filled in: nothing yet reports
-            the caller&rsquo;s own team name, which is part of what S5&rsquo;s identity work fixes.
-          </p>
-        </div>
-
-        <div className="studio-field">
-          <label htmlFor="application">Which application?</label>
-          <input
-            id="application"
-            type="text"
-            value={draft.application}
-            placeholder="demo-service"
-            onChange={(e) => onChange({ ...draft, application: e.target.value })}
-            aria-describedby="application-hint"
-          />
-          <p className="studio-hint" id="application-hint">
-            The platform looks up where to send the traffic from this. A test cannot choose its own
-            address — that is what stops it being pointed somewhere it should not go.
-          </p>
-        </div>
-
-        <div className="studio-field">
-          <label htmlFor="environment">Environment</label>
-          <input
-            id="environment"
-            type="text"
-            value={draft.environment}
-            placeholder="performance"
-            onChange={(e) => onChange({ ...draft, environment: e.target.value })}
-          />
-        </div>
-      </div>
-
-      <section className="studio-section">
-        <h3>Target</h3>
-        <div className="studio-grid">
-          <div className="studio-field">
-            <label htmlFor="target-base-url">Base URL</label>
-            <input
-              id="target-base-url"
-              type="text"
-              value={targetBaseUrl}
-              placeholder="https://demo-service.perf.internal"
-              onChange={(e) => setTargetBaseUrl(e.target.value)}
-            />
-          </div>
-          <div className="studio-field studio-action-field">
-            <label aria-hidden="true">&nbsp;</label>
-            <button
-              type="button"
-              className="btn btn-quiet"
-              disabled={targetBusy || !targetBaseUrl.trim()}
-              onClick={registerTarget}
-            >
-              {targetBusy ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
-              {targetBusy ? 'Registering...' : 'Register target'}
-            </button>
-          </div>
-        </div>
-        {targetStatus && (
-          <div className="banner banner-info" role="status">
-            <CheckCircle2 size={16} /> {targetStatus}
-          </div>
-        )}
-        {targetError && (
-          <div className="banner banner-bad" role="alert">
-            <AlertCircle size={16} /> {targetError}
-          </div>
-        )}
-      </section>
 
       <p className="studio-summary">
         {includedJourneys(draft).length} journey
@@ -1083,6 +966,173 @@ export function ReviewStep({
         </button>
         {checking && <span className="studio-hint"> Checking with the platform…</span>}
       </div>
+    </>
+  );
+}
+
+/**
+ * What the test is called, whose it is, and where it points.
+ *
+ * These four answers used to be asked on the very last screen, which put them **after** Validate.
+ * The Validator resolves its target from team, application and environment, so it failed with
+ * `metadata.team is required` against a draft the studio had never asked about — a step depending on
+ * an answer the wizard had not requested yet.
+ *
+ * Registering a target belongs here for the same reason. "Where does this point" is one question,
+ * and the Validator cannot send its single iteration anywhere until it has been answered.
+ */
+export function AboutStep({
+  client,
+  draft,
+  onChange,
+  knownTeams,
+}: StepProps & {
+  client: V2Client;
+  /**
+   * Team names this deployment knows about, offered as suggestions.
+   *
+   * Suggestions rather than a closed list: nothing yet reports the *caller's own* team, so picking
+   * one for them would be a guess. A datalist narrows the typing without pretending to know.
+   */
+  knownTeams: string[];
+}) {
+  const [targetBaseUrl, setTargetBaseUrl] = useState('');
+  const [targetBusy, setTargetBusy] = useState(false);
+  const [targetStatus, setTargetStatus] = useState<string | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+
+  async function registerTarget() {
+    if (!targetBaseUrl.trim()) return;
+    setTargetBusy(true);
+    setTargetStatus(null);
+    setTargetError(null);
+    try {
+      const target = await client.registerTarget({
+        team: draft.team,
+        application: draft.application,
+        environment: draft.environment,
+        baseUrl: targetBaseUrl,
+        targetClass: 'NON_PRODUCTION',
+      });
+      setTargetStatus(`Registered ${target.application} ${target.environment}: ${target.baseUrl}`);
+    } catch (err) {
+      setTargetError(describeError(err));
+    } finally {
+      setTargetBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="studio-grid">
+        <div className="studio-field">
+          <label htmlFor="test-name">Name this test</label>
+          <input
+            id="test-name"
+            type="text"
+            value={draft.name}
+            placeholder="checkout-baseline"
+            // Normalized as they type rather than rejected on save. A validation error about label
+            // syntax is a demand that a consumer learn Kubernetes' naming rules to run a test.
+            onChange={(e) => onChange({ ...draft, name: toResourceName(e.target.value) })}
+            aria-describedby="test-name-hint"
+          />
+          <p className="studio-hint" id="test-name-hint">
+            Lowercase letters, numbers and hyphens. You will find the test by this name later.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="team">Your team</label>
+          <input
+            id="team"
+            type="text"
+            list="known-teams"
+            value={draft.team}
+            placeholder="local-dev"
+            onChange={(e) => onChange({ ...draft, team: e.target.value })}
+            aria-describedby="team-hint"
+          />
+          <datalist id="known-teams">
+            {knownTeams.map((team) => (
+              <option key={team} value={team} />
+            ))}
+          </datalist>
+          <p className="studio-hint" id="team-hint">
+            The team your API key belongs to. Suggested rather than filled in: nothing yet reports
+            the caller&rsquo;s own team name, which is part of what S5&rsquo;s identity work fixes.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="application">Which application?</label>
+          <input
+            id="application"
+            type="text"
+            value={draft.application}
+            placeholder="demo-service"
+            onChange={(e) => onChange({ ...draft, application: e.target.value })}
+            aria-describedby="application-hint"
+          />
+          <p className="studio-hint" id="application-hint">
+            The platform looks up where to send the traffic from this. A test cannot choose its own
+            address — that is what stops it being pointed somewhere it should not go.
+          </p>
+        </div>
+
+        <div className="studio-field">
+          <label htmlFor="environment">Environment</label>
+          <input
+            id="environment"
+            type="text"
+            value={draft.environment}
+            placeholder="performance"
+            onChange={(e) => onChange({ ...draft, environment: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <section className="studio-section">
+        <h3>Target</h3>
+        <p className="studio-hint">
+          Where this application lives, if the platform does not already know. Already-registered
+          targets need nothing here.
+        </p>
+        <div className="studio-grid">
+          <div className="studio-field">
+            <label htmlFor="target-base-url">Base URL</label>
+            <input
+              id="target-base-url"
+              type="text"
+              value={targetBaseUrl}
+              placeholder="https://demo-service.perf.internal"
+              onChange={(e) => setTargetBaseUrl(e.target.value)}
+            />
+          </div>
+          <div className="studio-field studio-action-field">
+            <label aria-hidden="true">&nbsp;</label>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={targetBusy || !targetBaseUrl.trim()}
+              onClick={registerTarget}
+            >
+              {targetBusy ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
+              {targetBusy ? 'Registering...' : 'Register target'}
+            </button>
+          </div>
+        </div>
+        {targetStatus && (
+          <div className="banner banner-info" role="status">
+            <CheckCircle2 size={16} /> {targetStatus}
+          </div>
+        )}
+        {targetError && (
+          <div className="banner banner-bad" role="alert">
+            <AlertCircle size={16} /> {targetError}
+          </div>
+        )}
+      </section>
     </>
   );
 }

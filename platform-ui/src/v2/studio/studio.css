@@ -264,6 +264,26 @@
   font-size: var(--pf-text-sm);
 }
 
+/*
+  The Validator's verdict on each correlation. Set apart from the per-step evidence above it
+  because it answers a different question: the steps say what happened to each request, this says
+  whether the rules a person accepted are actually carrying anything.
+*/
+.v2 .correlation-proofs {
+  margin-top: var(--pf-space-4);
+  padding-top: var(--pf-space-3);
+  border-top: 1px solid var(--pf-border);
+}
+
+.v2 .correlation-proofs h5 {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .correlation-proofs .rule-evidence li {
+  margin-bottom: var(--pf-space-2);
+}
+
 .v2 .rule-actions {
   display: flex;
   gap: var(--pf-space-2);
