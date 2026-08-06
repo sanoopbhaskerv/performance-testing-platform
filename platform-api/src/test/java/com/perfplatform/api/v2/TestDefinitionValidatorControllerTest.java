@@ -114,7 +114,7 @@ class TestDefinitionValidatorControllerTest {
                       type: protocol
                       engine: jmeter
                       model:
-                        type: staged
+                        type: stages
                         stages:
                           - duration: 1s
                             targetUsers: 1

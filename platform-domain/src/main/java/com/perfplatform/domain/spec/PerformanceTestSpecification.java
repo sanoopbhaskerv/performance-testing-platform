@@ -3,10 +3,15 @@ package com.perfplatform.domain.spec;
 import com.perfplatform.domain.spec.support.SpecEnums;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The canonical, engine-neutral description of a performance test.
@@ -572,6 +577,41 @@ public record PerformanceTestSpecification(
         /** Whether this step sends a body. */
         public boolean hasBody() {
             return body != null && !body.isEmpty();
+        }
+
+        /**
+         * The {@code ${name}} variables this step actually sends.
+         *
+         * <p>Scans everything a step can carry a variable in — path, query, headers and body. It is
+         * what distinguishes an extraction that feeds the journey from one that resolves and is then
+         * discarded, and the second kind is a real defect rather than a tidiness problem: the step
+         * that was supposed to consume it is still sending whatever literal the capture recorded, so
+         * the journey looks correlated, passes, and hard-codes a value that will be stale by the time
+         * anyone runs it at load.
+         *
+         * @return the variable names referenced, in the order first seen
+         */
+        public Set<String> referencedVariables() {
+            Set<String> found = new LinkedHashSet<>();
+            collectVariables(path, found);
+            query.values().forEach(value -> collectVariables(value, found));
+            headers.values().forEach(value -> collectVariables(value, found));
+            if (body != null) {
+                collectVariables(body.content(), found);
+            }
+            return Collections.unmodifiableSet(found);
+        }
+    }
+
+    private static final Pattern VARIABLE_REFERENCE = Pattern.compile("\\$\\{([^}]+)}");
+
+    private static void collectVariables(String text, Set<String> into) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        Matcher matcher = VARIABLE_REFERENCE.matcher(text);
+        while (matcher.find()) {
+            into.add(matcher.group(1));
         }
     }
 

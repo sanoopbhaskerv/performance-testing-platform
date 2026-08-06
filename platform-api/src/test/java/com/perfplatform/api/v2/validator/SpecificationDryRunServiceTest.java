@@ -122,12 +122,105 @@ class SpecificationDryRunServiceTest {
         assertThat(order.assertions().get(0).message()).contains("Expected status");
     }
 
+    /**
+     * The case the recorder's authoring loop could not previously catch.
+     *
+     * <p>Every step passes. The extraction resolves. The journey is nonetheless broken: nothing
+     * sends the extracted value, so it still carries the literal the capture recorded — which will
+     * be stale long before anyone runs this at load.
+     */
+    @Test
+    @DisplayName("a correlation extracted but sent by no later step fails the validator")
+    void deadCorrelationIsAnError() {
+        ValidatorResponse response = service.validate(
+                specification("$.token", 201, Map.of("session", "abc123")),
+                ValidationResult.valid(), CALLER);
+
+        assertThat(response.journeys().get(0).steps())
+                .allSatisfy(step -> assertThat(step.passed()).isTrue());
+        assertThat(response.journeys().get(0).correlations()).singleElement().satisfies(proof -> {
+            assertThat(proof.variable()).isEqualTo("session");
+            assertThat(proof.verdict()).isEqualTo("unused");
+            assertThat(proof.usedBySteps()).isEmpty();
+        });
+        assertThat(response.findings()).extracting("code")
+                .contains("validator.correlation.unused");
+        assertThat(response.valid()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a live value differing from the recorded one proves the correlation")
+    void differentValueFromTheRecordingIsProven() {
+        CorrelationBaseline baseline = new CorrelationBaseline(
+                Map.of("checkout", Map.of("session", "the-token-that-was-recorded")));
+
+        ValidatorResponse response = service.validate(specification("$.token", 201),
+                ValidationResult.valid(), CALLER, baseline);
+
+        assertThat(response.valid()).isTrue();
+        assertThat(response.journeys().get(0).correlations()).singleElement().satisfies(proof -> {
+            assertThat(proof.verdict()).isEqualTo("proven");
+            assertThat(proof.usedBySteps()).containsExactly("create-order");
+            assertThat(proof.message()).contains("fresh value");
+        });
+    }
+
+    /**
+     * The trap: the recorded literal is usually still valid, so replaying it passes. A verdict of
+     * "proven" here would be a claim the run cannot support.
+     */
+    @Test
+    @DisplayName("a live value identical to the recorded one is reported as unproven, not passed")
+    void identicalValueIsUnproven() {
+        CorrelationBaseline baseline = new CorrelationBaseline(
+                Map.of("checkout", Map.of("session", "abc123")));
+
+        ValidatorResponse response = service.validate(specification("$.token", 201),
+                ValidationResult.valid(), CALLER, baseline);
+
+        // A warning, not an error: a value that genuinely never changes is a legitimate reading.
+        assertThat(response.valid()).isTrue();
+        assertThat(response.journeys().get(0).correlations()).singleElement().satisfies(proof ->
+                assertThat(proof.verdict()).isEqualTo("unproven"));
+        assertThat(response.findings()).extracting("code")
+                .contains("validator.correlation.unproven");
+    }
+
+    @Test
+    @DisplayName("without a recording the validator claims only that the value was used")
+    void withoutABaselineTheVerdictStopsAtUsed() {
+        ValidatorResponse response = service.validate(specification("$.token", 201),
+                ValidationResult.valid(), CALLER);
+
+        assertThat(response.journeys().get(0).correlations()).singleElement().satisfies(proof -> {
+            assertThat(proof.verdict()).isEqualTo("used");
+            assertThat(proof.message()).contains("no recording to compare against");
+        });
+    }
+
+    @Test
+    @DisplayName("an extraction that matched nothing is reported as not-extracted")
+    void unmatchedExtractionIsNotExtracted() {
+        ValidatorResponse response = service.validate(specification("$.missing", 201),
+                ValidationResult.valid(), CALLER);
+
+        assertThat(response.journeys().get(0).correlations()).singleElement().satisfies(proof -> {
+            assertThat(proof.verdict()).isEqualTo("not-extracted");
+            assertThat(proof.livePreview()).isNull();
+        });
+    }
+
     private PerformanceTestSpecification specification(String extraction, int expectedStatus) {
+        return specification(extraction, expectedStatus, Map.of("session", "${session}"));
+    }
+
+    private PerformanceTestSpecification specification(String extraction, int expectedStatus,
+            Map<String, String> orderQuery) {
         StepSpec login = new StepSpec("login", "GET", "/login", Map.of(), Map.of(), null,
                 List.of(new ExtractionSpec("session", ExtractionSource.JSON_BODY, extraction)),
                 List.of(AssertionSpec.status(200)), null);
         StepSpec order = new StepSpec("create-order", "POST", "/orders", Map.of(),
-                Map.of("session", "${session}"),
+                orderQuery,
                 new ScenarioSpec.RequestBody("application/json", "{\"sku\":\"demo\"}"),
                 List.of(), List.of(AssertionSpec.status(expectedStatus)), null);
         ScenarioSpec scenario = new ScenarioSpec("checkout", 100, null, null, null,

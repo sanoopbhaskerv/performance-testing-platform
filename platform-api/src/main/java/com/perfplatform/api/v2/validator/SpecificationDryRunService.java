@@ -74,8 +74,21 @@ public class SpecificationDryRunService {
         this.clock = clock;
     }
 
+    /** Validates a specification on its own, with no recording to compare correlations against. */
     public ValidatorResponse validate(PerformanceTestSpecification specification,
             ValidationResult existingFindings, CallerContext caller) {
+        return validate(specification, existingFindings, caller, CorrelationBaseline.none());
+    }
+
+    /**
+     * Validates a specification, judging its correlations against what a recording captured.
+     *
+     * @param baseline the literals the recording sent for each correlated variable. With one, the
+     *                 Validator can say whether a rule carried a fresh value or replayed the
+     *                 capture; without one it reports only that the value was extracted and used
+     */
+    public ValidatorResponse validate(PerformanceTestSpecification specification,
+            ValidationResult existingFindings, CallerContext caller, CorrelationBaseline baseline) {
 
         List<ValidationFinding> findings = new ArrayList<>(existingFindings.findings());
         if (!existingFindings.isValid()) {
@@ -113,7 +126,7 @@ public class SpecificationDryRunService {
         for (PerformanceTestSpecification.WorkloadSpec workload
                 : specification.workloadsOfType(WorkloadType.PROTOCOL)) {
             for (ScenarioSpec scenario : workload.scenarios()) {
-                journeys.add(validateJourney(target.get(), scenario, findings));
+                journeys.add(validateJourney(target.get(), scenario, baseline, findings));
             }
         }
 
@@ -140,7 +153,7 @@ public class SpecificationDryRunService {
     }
 
     private ValidatorResponse.JourneyResult validateJourney(TargetAddress target,
-            ScenarioSpec scenario, List<ValidationFinding> findings) {
+            ScenarioSpec scenario, CorrelationBaseline baseline, List<ValidationFinding> findings) {
 
         Map<String, String> variables = new LinkedHashMap<>();
         List<ValidatorResponse.StepResult> steps = new ArrayList<>();
@@ -160,7 +173,13 @@ public class SpecificationDryRunService {
             }
         }
 
-        return new ValidatorResponse.JourneyResult(scenario.name(), passed, steps);
+        // Judged after the whole journey, not per step: whether a correlation did anything is a
+        // question about the steps that come *after* the one that extracted it.
+        List<ValidatorResponse.CorrelationProof> correlations =
+                new CorrelationProofEvaluator(this::preview)
+                        .evaluate(scenario, variables, baseline, findings);
+
+        return new ValidatorResponse.JourneyResult(scenario.name(), passed, steps, correlations);
     }
 
     private ValidatorResponse.StepResult validateStep(TargetAddress target, String scenarioName,

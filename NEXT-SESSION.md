@@ -52,7 +52,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S10g ran this to completion: **1,304 tests, 0 failures** across all 16 modules. **One skip is
+S10h ran this to completion: **1,312 tests, 0 failures** across all 16 modules. **One skip is
 expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
 and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
 
@@ -74,7 +74,7 @@ note them rather than assuming they are permanent. If a PostgreSQL module fails 
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 176 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 184 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
@@ -105,6 +105,14 @@ machine.
 
 ## 2. What to do next
 
+> **Before anything else: there is uncommitted studio work in the tree, on purpose.** An **About**
+> step that moves name/team/application/environment ahead of Validate (the Validator resolves its
+> target from those and was failing with `metadata.team is required`), plus S10h's correlation-proof
+> panel. Eight files: `api.ts`, `StepScreens.tsx`, `Studio.tsx`, `PerformanceConsole.tsx`,
+> `draft.ts`, `studio.css`, `CorrelationProofs.tsx`, `CorrelationProofs.test.tsx`. The tree
+> typechecks, tests (184) and builds. **Do not revert it**; commit it as one studio commit when the
+> About work is finished. S10h's backend is already committed without it — see `HANDOFF.md` §3ak.
+
 **Read [`PLAN.md`](PLAN.md) first. It is the decision about what happens next**; `ROADMAP.md` is now
 the inventory of what exists, and `HANDOFF.md` §3 is the account of how each piece was built.
 
@@ -122,7 +130,7 @@ that exposes it. Nothing lands API-only.
 | Decision | Chosen |
 |---|---|
 | **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
-| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. Git-pinned Playwright import is what remains. |
+| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. **S10h makes the Validator prove the correlations a person accepted** (§3ak). Git-pinned Playwright import is what remains. |
 | **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
 | **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
 | **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |
@@ -184,8 +192,17 @@ that exposes it. Nothing lands API-only.
   boundary has elapsed and live progress has samples. Browser sessions are capped separately from
   protocol virtual users, defaulting to 20 per run.
 
-**Next:** finish the remaining recorder runtime bridge and sanitized draft persistence, then
-git-pinned Playwright import; or proceed to S12 scale hardening.
+- **S10h** (§3ak) — the Validator proves a recording's correlations. Accepting a suggestion used to
+  be an unchecked claim: the extraction resolved, every assertion passed, and the Validator reported
+  success whether or not the rule had been applied to anything — because the literal it replaces is
+  usually still valid minutes after capture. `POST /api/v2/recordings/{id}/validator` runs the same
+  iteration against the recording, recovers those literals, and returns a verdict per rule:
+  **proven** (a different value from the recorded one, and a later step sent it), **unproven** (the
+  same value, so nothing is shown either way), **used** (no recording to compare against),
+  **unused** (extracted and sent by nothing — an **ERROR**), **not-extracted**.
+
+**Next:** **git-pinned Playwright import** — the last open piece of S10 — or proceed to S12 scale
+hardening.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

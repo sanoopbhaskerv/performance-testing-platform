@@ -4,8 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10g — the live view long-polls instead of busy-polling, and the recorded page can
-be scrolled. Increments 0–2h and S1–S11 are complete.
+**Last updated:** S10h — the Validator now proves a recording's correlations instead of taking them
+on trust (§3ak). Increments 0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -49,8 +49,8 @@ Scope decisions taken with the user, recorded so they are not relitigated:
 - **Web performance is browser-only in release 1**, which needs no multi-plan refactor. Under-load
   web performance (the hybrid) is S11.
 
-`NEXT-SESSION.md` §2 has the immediate task after this commit: finish the recorder runtime bridge
-and git-pinned Playwright import, or continue to S12 scale hardening.
+`NEXT-SESSION.md` §2 has the immediate task after this commit: **git-pinned Playwright import** is
+the last open piece of S10, or continue to S12 scale hardening.
 
 ```bash
 ./scripts/start-platform.sh     # demo service + control plane + console, one command
@@ -104,12 +104,12 @@ and git-pinned Playwright import, or continue to S12 scale hardening.
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,304 tests green, 0 failures at S10g** (one skip, the opt-in live
+**Last full Java verification: 1,312 tests green, 0 failures at S10h** (one skip, the opt-in live
 Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
 S3 engine, 936 after S3 Rules, 941 at S4 Validator, 1,058 at S7, 1,093 at S8, 1,106 at S9, 1,115 at
-S10b, 1,148 at S10c/S11).
+S10b, 1,148 at S10c/S11, 1,304 at S10g). UI: **184 tests**.
 
 **This is the first fully green `mvn clean verify` on this branch**, and getting there meant fixing
 two pre-existing failures that had been masked (§3w): the Spring context could not start at all
@@ -2555,6 +2555,116 @@ Vitals evaluate. Three things are missing above it:
 
 Until (3) is closed, browser testing is reachable only by placing an artifact in the store out of
 band. This is the S6-UI slice that S6 deferred, and it should be sized as an increment of its own.
+
+---
+
+## 3ak. S10h — the Validator can now prove a recording's correlations
+
+**The recorder's authoring loop used to end in an unchecked claim.** The importer proposes a
+correlation with evidence (§3r), a person accepts it, the draft is saved — and nothing ever checked
+the accepted rule. S4's Validator ran the journey, watched the extraction produce a value, watched
+every assertion pass, and reported success.
+
+**It would have reported exactly the same thing had the rule been applied to nothing.** The literal
+the rule was meant to replace is usually still valid a few minutes after it was recorded: a session
+token, an order id nothing has cleaned up yet. So a journey that still hard-codes the captured value
+gets a clean 200 from every step. The rule is then discovered at load, as an error rate, by somebody
+reading a report — the failure mode CLAUDE.md guards against in six other places, arriving from a
+seventh direction.
+
+### The three questions, all answerable from one iteration
+
+| Question | No | Yes |
+|---|---|---|
+| Did a value come out? | `not-extracted` — the step already fails | ↓ |
+| Does any later step send it? | `unused` — **ERROR**, the rule is dead | ↓ |
+| Is it different from what the recording captured? | `unproven` — WARNING | `proven` |
+
+Without a recording to compare against the verdict stops at **`used`**, which is the whole truth
+available and no more. That is what a hand-written definition reports, and it is why the ordinary
+Validator's behaviour is unchanged in tone.
+
+**`unused` is an ERROR, deliberately.** There is no reading of an accepted rule that changes nothing
+under which the journey is correct — accepting a suggestion is what rewrites the downstream steps,
+so a rule sent by nothing means the rewrite did not happen. It is worth knowing this newly fails a
+saved definition carrying a stray extraction. That is the defect being surfaced, not a regression.
+
+**`unproven` is a WARNING, equally deliberately.** A value that genuinely never changes is a
+legitimate reading, and failing Save on it would train people to ignore the panel.
+
+### Where the baseline comes from
+
+A specification no longer holds the literal a correlation replaced — accepting the rule is what
+removed it. Only the recording still knows. `CorrelationBaseline.from(ImportResult)` recovers it
+from the importer's correlation suggestions, reading `ReplacementEvidence.currentValue` rather than
+`ExtractionEvidence.valuePreview`: the preview is truncated for display, while `currentValue` is the
+exact string the studio rewrote to `${variable}`, so it is the one thing guaranteed to equal what the
+journey used to send.
+
+**Comparison happens on raw values inside the control plane; only a redacted preview is returned.** A
+session token is precisely the value most worth proving, so redaction must not weaken the verdict.
+
+### Endpoint
+
+`POST /api/v2/recordings/{sessionId}/validator`. Same live iteration, same authorization, creates
+nothing, books no admission slot.
+
+An invalid specification is refused **before** the recording is read. The dry run refuses it anyway,
+so fetching somebody's captured session on behalf of a request that was never going to execute would
+be an authorized read with no work behind it — and would make a junk body a way to probe which
+session ids exist. The guard is on *validity*, not merely on whether the document parsed: a
+malformed document still maps to a specification carrying error findings.
+
+### Files
+
+- `platform-domain` — `StepSpec.referencedVariables()`: the `${name}` tokens a step actually sends,
+  scanning path, query, headers and body. This is what separates a correlation that feeds the journey
+  from one that resolves and is discarded.
+- `platform-api/validator/CorrelationBaseline` — the literals, and how to recover them.
+- `platform-api/validator/CorrelationProofEvaluator` — the verdict logic, package-private and
+  testable without HTTP.
+- `platform-api/validator/SpecificationDryRunService` — a second `validate` overload taking a
+  baseline; the single-argument form delegates with `CorrelationBaseline.none()`.
+- `platform-api/RecordingValidatorController` — the endpoint.
+- `platform-ui/studio/CorrelationProofs.tsx` — the panel, in its own file with its own tests.
+- `docs/operations/recording-locally.md` §4, `docs/api/v2-examples.md`.
+
+### A pre-existing test defect this uncovered
+
+`TestDefinitionValidatorControllerTest.validDocument()` emitted `type: staged`, which is not a
+supported load model — the supported values are `stages` and `arrival-rate`. The test passed anyway
+because that controller does not gate on validity and its dry run is a mock. A fixture named
+`validDocument` that is not valid is a trap; both fixtures now say `stages`.
+
+### Verification
+
+`mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, **1,312 tests, 0 failures**, one skip (the
+opt-in live Chrome test, as always). UI **184 tests**, lint 3 errors / 3 warnings, all pre-existing
+in V1's `App.tsx`.
+
+Thirteen new tests. The one that matters most asserts the combination that was previously invisible:
+every step passes, `journey.passed` is `true`, and the run is nonetheless not `valid` because the
+correlation was sent by nothing.
+
+### Deliberately not done
+
+- **Not verified against a live recording in a browser.** The logic is covered by tests at every
+  layer, but the end-to-end path — record, accept a rule, validate — has not been walked on this
+  machine. Worth doing before trusting the verdicts on real material.
+- **The studio surface is written and green but deliberately uncommitted.** `api.ts`,
+  `StepScreens.tsx`, `Studio.tsx` and `PerformanceConsole.tsx` already carried unrelated in-progress
+  work — an **About** step moving name/team/application/environment ahead of Validate, because the
+  Validator resolves its target from those and was failing with `metadata.team is required` — and the
+  user asked for that to stay in the working tree. The UI half of this increment touches the same
+  files, so **this commit is backend and documentation only**; every UI file involved
+  (`api.ts`, `StepScreens.tsx`, `Studio.tsx`, `PerformanceConsole.tsx`, `draft.ts`, `studio.css`,
+  `CorrelationProofs.tsx`, `CorrelationProofs.test.tsx`) stays uncommitted and lands with the About
+  work as one studio commit. Splitting them the other way would have committed a tree that does not
+  typecheck, since `CorrelationProofs.tsx` imports types defined in `api.ts`.
+
+  **This is the one increment on this branch that lands API-only in git**, against PLAN.md's rule.
+  The screen exists and passes its tests in the working tree; it simply is not in this commit.
+- Browser journeys still do not validate; that remains where S4 left it.
 
 ---
 

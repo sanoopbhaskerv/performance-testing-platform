@@ -381,9 +381,88 @@ design: validation answers "is this test well formed", not "are you allowed to r
 | `spec.dataset.partition.disabled` | WARNING | A sharded run would replay the same rows on every shard |
 | `spec.dataset.columns.undeclared` | WARNING | Nothing can check that the columns a journey asks for exist |
 | `spec.objective.missing` | WARNING | No objectives, so the test cannot pass or fail |
+| `validator.correlation.unused` | ERROR | A correlation is extracted and then sent by no later step |
+| `validator.correlation.unproven` | WARNING | The extracted value matched the recorded one, so nothing was shown |
 
 The finding never echoes a suspected credential value: findings are logged and returned over
 HTTP, so repeating the value would spread the disclosure.
+
+---
+
+## Proving a recording's correlations
+
+`POST /api/v2/test-definitions/validator` runs one live iteration and returns request, response,
+extraction and assertion evidence. It cannot judge a **correlation**, because a specification no
+longer holds the literal a correlation replaced — accepting the rule is what removed it.
+
+`POST /api/v2/recordings/{sessionId}/validator` runs the same iteration against the recording the
+draft came from, so the literals are available and each rule gets a verdict.
+
+```bash
+curl -sS -X POST "$PERF_PLATFORM_URL/api/v2/recordings/$SESSION_ID/validator" \
+  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Content-Type: application/yaml" \
+  --data-binary @draft.yaml
+```
+
+```json
+{
+  "valid": false,
+  "target": "http://demo-service.perf.internal",
+  "findings": [
+    {
+      "code": "validator.correlation.unused",
+      "severity": "ERROR",
+      "path": "/spec/workloads/scenarios/checkout/steps/login/extract/session",
+      "message": "The correlation 'session' is extracted but no later step sends it.",
+      "remediation": "The journey is still sending the value that was captured, which will be stale under load. Re-accept the suggestion, or remove the rule if the value is genuinely fixed."
+    }
+  ],
+  "journeys": [
+    {
+      "name": "checkout",
+      "passed": true,
+      "steps": ["…"],
+      "correlations": [
+        {
+          "variable": "session",
+          "fromStep": "login",
+          "usedBySteps": [],
+          "verdict": "unused",
+          "livePreview": "[redacted]",
+          "message": "Extracted, then sent by nothing. The steps that should use 'session' are still carrying the captured value."
+        }
+      ]
+    }
+  ]
+}
+```
+
+Note `"passed": true` on the journey alongside a failed run. That combination is the point: every
+step succeeded, because the literal the rule was meant to replace was still valid. The rule is
+nonetheless dead, and only the comparison against the recording could say so.
+
+### The verdicts
+
+| Verdict | Meaning |
+|---|---|
+| `proven` | The live value **differed** from the recorded one and a later step sent it |
+| `unproven` | The live value **equalled** the recorded one, so a journey ignoring the rule would look identical |
+| `used` | Extracted and sent onwards; no recording was supplied, so nothing stronger is claimed |
+| `unused` | Extracted and sent by nothing. An `ERROR` finding, and the response is not `valid` |
+| `not-extracted` | Nothing matched. The step already failed |
+
+Comparison happens on the raw values inside the control plane; only the redacted preview is
+returned. A session token is exactly the value most worth proving, so redaction must not weaken the
+verdict.
+
+Like the ordinary Validator, this creates no definition, run or artifact and consumes no admission
+slot. A document that would not validate is refused **before** the recording is read: fetching
+somebody's captured session on behalf of a request that was never going to execute would make a
+junk body a way to probe which session ids exist.
+
+`correlations` is present on the ordinary Validator's response too — it simply never reports
+`proven` or `unproven` there, because there is nothing to compare against.
 
 ---
 

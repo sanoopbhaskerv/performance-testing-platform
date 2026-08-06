@@ -21,8 +21,11 @@ events, capture sanitization and a safe pending console entry point. **S10d buil
 bridge**: a session now attaches a real browser behind a `RecorderBrowser` port, streams it to the
 console and accepts a closed vocabulary of ten interactions. **S10e turned a recording into a draft
 test**: the captures are rendered as a HAR and read by the ordinary HAR importer, so a recording
-arrives in the studio with journeys, weights and correlation suggestions. Git-pinned Playwright
-import remains; S11 web performance under load is built.
+arrives in the studio with journeys, weights and correlation suggestions. **S10h closed the
+recorder's own gap**: the Validator now runs against the recording and reports a verdict on every
+accepted correlation, so a rule that was applied to nothing fails instead of passing on a replayed
+capture (`HANDOFF.md` §3ak). Git-pinned Playwright import remains; S11 web performance under load is
+built.
 
 ---
 
@@ -754,7 +757,7 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
 | **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — S10a/S10b/S10c built; runtime bridge, sanitized draft persistence and git import remain |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **in progress** — S10a–S10h built (bridge, draft, defect fixes, long-poll, and the Validator proving a recording's correlations); **git-pinned Playwright import is all that remains** |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | **done** — `HANDOFF.md` §3ad |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
@@ -1008,8 +1011,14 @@ state and suspicious bodies before captured material can be rendered or converte
 credentials are still stripped from captures because the issue is propagation into versioned
 authoring material, API responses and audit surfaces, not only production blast radius.
 
-Remaining S10 work: CDP bridge/live browser stream, sanitized draft persistence and git-pinned
-Playwright import.
+**S10h — proving what a recording's correlations actually do.** Accepting a suggestion used to be
+an unchecked claim: the Validator saw the extraction resolve, saw every assertion pass, and reported
+success — which it would have done just as readily had the rule been applied to nothing, because the
+literal it was meant to replace is usually still valid minutes after capture. The Validator now runs
+against the recording, recovers those literals, and reports `proven` / `unproven` / `used` /
+`unused` / `not-extracted` per rule. A dead rule is an ERROR. `HANDOFF.md` §3ak.
+
+Remaining S10 work: **git-pinned Playwright import**, and only that.
 
 ### S11 — web performance under load — **built**
 

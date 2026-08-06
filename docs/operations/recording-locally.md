@@ -97,6 +97,27 @@ is used by a later request. The studio's **Rules** screen proposes them with evi
 accepts or rejects each one. Nothing is correlated silently — a wrongly correlated journey looks
 wired up and sends the wrong value.
 
+### Then the Validator checks the rules you accepted
+
+Accepting a rule is a claim, and the **Validate** step is where the platform checks it. On a draft
+that came from a recording the Validator runs against **the recording**, not against the
+specification alone, and reports a verdict for every correlation:
+
+| Verdict | What it means | What to do |
+|---|---|---|
+| **Proven** | The value this iteration extracted was *different* from the one the recording captured, and a later step sent it. The rule works. | Nothing |
+| **Unproven** | The extracted value was *identical* to the recorded one. | Fine for a value that never changes. If it should differ each time — a session, a token, a created id — record again and re-validate |
+| **Not used** | The value was extracted and then sent by nothing. | **Fails validation.** Go back to Rules and re-accept the suggestion, or remove it |
+| **Not found** | Nothing matched the extraction. | The step already failed; fix the expression |
+| **Used** | Extracted and sent onwards, with no recording to compare against. | Nothing. This is what a hand-written definition reports |
+
+**Why the comparison needs the recording.** Once a rule is accepted the literal it replaced is gone
+from the draft — replacing it is the whole point. Only the recording still knows what the journey
+used to send, and without that the Validator cannot distinguish a rule that carried a fresh value
+from one that was never applied at all. The second case passes every step, because a token captured
+five minutes ago is usually still valid; it fails at load, as an error rate, in a report somebody
+then has to interpret.
+
 ---
 
 ## 5. What the start script switched on, and why production refuses it

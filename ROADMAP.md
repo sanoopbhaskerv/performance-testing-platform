@@ -39,8 +39,11 @@ than a surprise.
 > interactions, with frozen DNS, per-request route guarding and audit-by-origin. **S10e turned a
 > recording into a draft test** — the captures are rendered as a HAR and read by the ordinary HAR
 > importer, so a recording reaches the studio with journeys, frequency-derived weights and
-> evidence-backed correlation suggestions, none of it written twice. Git-pinned Playwright import
-> remains. S11 added coordinated web performance under load.
+> evidence-backed correlation suggestions, none of it written twice. **S10h made the Validator prove
+> them**: run against the recording, each accepted correlation gets a verdict, and a rule extracted
+> but sent by nothing fails validation instead of passing on a still-valid captured literal.
+> **Git-pinned Playwright import is the only S10 piece left.** S11 added coordinated web performance
+> under load.
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -54,7 +57,8 @@ HAR or a Postman collection, give it real data, run it and read a report — wit
 ~~**Recommendation: this is a good place to stop.**~~ That was the recommendation before a direction
 was chosen. It has been: `PLAN.md`, release 1 (S1–S6), and that release plus the S6a readiness
 slice, S7's live monitoring, S8's load models, S9's per-workload plans, the S10a–S10e recorder
-through to a live guarded browser and a draft test, and S11's hybrid coordination are built. Everything below is still an
+through to a live guarded browser, a draft test and a Validator that proves its correlations, and
+S11's hybrid coordination are built. Everything below is still an
 accurate inventory of what exists and what
 does not.
 
