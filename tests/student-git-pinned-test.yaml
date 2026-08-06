@@ -1,0 +1,52 @@
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: student-crud-browser-git-pinned
+  team: local-dev
+  application: demo-service
+
+spec:
+  environment:
+    name: performance
+    runnerCell: local
+    targetClass: non-production
+
+  sources:
+    - name: student-journey-source
+      type: playwright
+      git:
+        repository: https://github.com/my-org/performance-testing-platform.git
+        ref: 4e6511328a4ca91efa49c06b5e3161c3706bb36633146db9a428791a0e0ac6ef
+        path: tests/student-journey.spec.ts
+        project: chromium
+
+  workloads:
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: student-journey-source
+      browserUsers: 15
+      iterationsPerUser: 3
+      browserProfile:
+        device: desktop
+        network: wifi
+
+  objectives:
+    - metric: browser.journey.duration
+      scope: browser-experience
+      percentile: 95
+      threshold: 8s
+    - metric: web.lcp
+      scope: browser-experience
+      percentile: 75
+      threshold: 2500ms
+    - metric: web.cls
+      scope: browser-experience
+      percentile: 75
+      threshold: 0.1score
+
+  governance:
+    maxDuration: 15m
+    approvalPolicy: non-production-standard
+    retention: 14d

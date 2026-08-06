@@ -58,6 +58,9 @@ public class TestDefinitionStore implements TestDefinitionRepository {
     @Transactional
     public TestDefinitionSummary create(TeamId teamId, ApplicationId applicationId, String name,
             String createdBy) {
+        if (registry.findDefinitionByName(teamId, name).isPresent()) {
+            throw new DuplicateDefinitionException(name);
+        }
         try {
             return toSummary(registry.createDefinition(
                     TestDefinitionId.generate(), teamId, applicationId, name, createdBy));
