@@ -350,6 +350,79 @@ class ManageRecordingsUseCaseTest {
                     .hasSize(1);
         }
 
+        /**
+         * Chrome emits a frame only on repaint, so a static page produces none. Without a wait the
+         * client asked eight times a second for nothing: a five-minute recording was two thousand
+         * empty requests.
+         */
+        @Test
+        @DisplayName("a poll waits rather than returning empty straight away")
+        void pollWaitsForSomethingToHappen() throws Exception {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            var handle = browser.lastHandle;
+
+            java.util.concurrent.CompletableFuture<ManageRecordingsUseCase.LiveUpdate> polling =
+                    java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                            useCase.live(session.id(), 0, 0, 0, 50, Duration.ofSeconds(5),
+                                    caller(Scope.RECORDINGS_READ)));
+
+            // Still waiting: nothing has happened yet.
+            Thread.sleep(150);
+            assertThat(polling).isNotDone();
+
+            handle.pushFrame("first", NOW);
+
+            assertThat(polling.get(5, java.util.concurrent.TimeUnit.SECONDS).frame())
+                    .isPresent();
+        }
+
+        @Test
+        @DisplayName("a poll that waits and sees nothing still answers, rather than hanging")
+        void pollGivesUpOnTime() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+
+            long startedAt = System.nanoTime();
+            var update = useCase.live(session.id(), 0, 0, 0, 50, Duration.ofMillis(200),
+                    caller(Scope.RECORDINGS_READ));
+            long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
+
+            assertThat(update.frame()).isEmpty();
+            assertThat(elapsedMillis).isGreaterThanOrEqualTo(150).isLessThan(5_000);
+        }
+
+        @Test
+        @DisplayName("a session that ends releases a waiting poll immediately")
+        void endingWakesAWaitingPoll() throws Exception {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+
+            java.util.concurrent.CompletableFuture<ManageRecordingsUseCase.LiveUpdate> polling =
+                    java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                            useCase.live(session.id(), 0, 0, 0, 50, Duration.ofSeconds(10),
+                                    caller(Scope.RECORDINGS_READ)));
+
+            Thread.sleep(150);
+            assertThat(polling).isNotDone();
+
+            useCase.stop(session.id(), caller(Scope.RECORDINGS_CANCEL));
+
+            assertThat(polling.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
+                    .isEqualTo(RecorderSessionState.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("a client that is behind is answered at once, without waiting")
+        void behindClientIsNotMadeToWait() {
+            var session = useCase.start(command(), caller(Scope.RECORDINGS_CREATE));
+            browser.lastHandle.pushFrame("already-here", NOW);
+
+            long startedAt = System.nanoTime();
+            var update = useCase.live(session.id(), 0, 0, 0, 50, Duration.ofSeconds(10),
+                    caller(Scope.RECORDINGS_READ));
+
+            assertThat(update.frame()).isPresent();
+            assertThat((System.nanoTime() - startedAt) / 1_000_000).isLessThan(1_000);
+        }
+
         @Test
         @DisplayName("reading a session requires recordings:read")
         void readRequiresScope() {

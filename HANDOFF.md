@@ -4,8 +4,8 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10f — four defects found by using the recorder against a real target, all fixed.
-Increments 0–2h and S1–S11 are complete.
+**Last updated:** S10g — the live view long-polls instead of busy-polling, and the recorded page can
+be scrolled. Increments 0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -99,11 +99,12 @@ and git-pinned Playwright import, or continue to S12 scale hardening.
 | **S10d — guarded CDP bridge and live browser stream** | **Complete** | see §3ag |
 | **S10e — recording becomes a draft test** | **Complete** | see §3ah |
 | **S10f — defects found in real use** | **Complete** | see §3ai |
+| **S10g — long-polling and scrolling** | **Complete** | see §3aj |
 | **S11 — web performance under load** | **Complete** | see §3ad |
 | **S12 — release 2 scale hardening** | **Planned** | [`PLAN.md`](PLAN.md) §11 |
 | 4 — enterprise integration | **Not started** | `ROADMAP.md` §4 |
 
-**Last full Java verification: 1,300 tests green, 0 failures at S10f** (one skip, the opt-in live
+**Last full Java verification: 1,304 tests green, 0 failures at S10g** (one skip, the opt-in live
 Chrome test, run separately and green — §3ag) — a full
 `mvn clean verify` across all 15 modules, Testcontainers included (272 at 1B, 486 at 1C, 551 at 1D,
 591 after the demo path, 684 at 2b, 721 at 2c, 760 at 2d, 803 at 2e, 833 at 2g, 898 at 2h, 931 at
@@ -2422,6 +2423,64 @@ opt-in live Chrome test). UI 173 tests.
 End to end, which is the only reason any of this was found: recorded the student app at `:5174`,
 saw it render with real data, captured `GET /` and two `GET /api/students`, drafted two journeys
 (`home`, `api-students`) and watched the studio open on **Review journeys** with both loaded.
+
+## 3aj. S10g — the live view was a busy poll, and the page could not scroll
+
+Both found by a person using it, not by a test.
+
+### Two thousand requests to say nothing
+
+The panel polled `/live` every 120ms whatever was happening. Chrome emits a screencast frame **only
+when the page repaints**, so someone reading a static page produces none — and the client then spent
+the whole session asking for them. Measured: **68 requests in 10 seconds on an idle page, every one
+returning no frame**; roughly two thousand over a five-minute recording.
+
+It also made the recorder look broken in two directions at once. The network tab showed a runaway
+loop, and the surface looked frozen when it was simply a page that was not repainting.
+
+`/live` now **long-polls**: `awaitUpdate` blocks on the session monitor until there is a frame, a
+block, a capture or a terminal state, bounded by `waitMillis` and capped at 20s by the API layer.
+`wait()` releases the monitor, which is the whole point — the browser's callback threads need it to
+deliver the very frame the request is waiting for.
+
+Measured after: **1 request in the same 10 seconds**, and a wait released **0.09s** after a reload.
+A client that is already behind is answered immediately rather than made to wait, so catching up
+stays fast.
+
+### The recorded page could not be scrolled
+
+`MOUSE_WHEEL` was in the vocabulary, `ChromeInputCommands` mapped it to
+`Input.dispatchMouseEvent`, and both were tested. The panel simply never sent one — there was no
+wheel handler. Everything below the fold was unreachable.
+
+The listener has to be attached **natively with `passive: false`**. React registers wheel handlers
+passively, where `preventDefault` is ignored, so the console would have scrolled behind the surface
+while the recorded page stayed put. Line- and page-mode deltas are converted to pixels, because a
+trackpad does not always report pixels and Chrome's input domain expects them.
+
+Verified against real Chrome: six wheel events moved the student list from the top to student #24,
+and frames advanced 7 → 33 as it repainted.
+
+### "Turn this into a test" looked like it did nothing
+
+It opens the studio — which renders **above** the recorder panel, so from where the button is, the
+page did not visibly change. The studio is now scrolled into view, and the notice says what is
+actually true: nothing has been created, review it and press **Save test**, after which it appears
+under *Your tests* with a Run button.
+
+That gap was the documentation's too, and `docs/operations/recording-locally.md` now has a
+"Drive the browser" section covering scrolling and repaint behaviour, and answers "then how do I run
+it?" explicitly.
+
+### Verification
+
+`mvn -B -f pom.xml clean verify` — **BUILD SUCCESS**, **1,304 tests, 0 failures** (one skip: the
+opt-in live Chrome test). UI **176 tests**.
+
+Four new orchestration tests pin the wait: it blocks until a frame arrives, gives up on time rather
+than hanging, is released immediately when the session ends, and does not make an already-behind
+client wait. Three UI tests pin the wheel, including that the event is actually `preventDefault`ed —
+"a handler ran" would have passed while the feature stayed broken.
 
 ## 3ad. S11 — web performance under load
 

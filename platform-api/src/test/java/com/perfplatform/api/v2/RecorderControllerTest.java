@@ -162,7 +162,7 @@ class RecorderControllerTest {
     @Test
     @DisplayName("a poll returns the newest frame, blocked destinations and captures")
     void livePollReturnsSurface() throws Exception {
-        when(recordings.live(eq(SESSION), anyLong(), anyLong(), anyLong(), anyInt(), any()))
+        when(recordings.live(eq(SESSION), anyLong(), anyLong(), anyLong(), anyInt(), any(), any()))
                 .thenReturn(new ManageRecordingsUseCase.LiveUpdate(
                         RecorderSessionState.LIVE,
                         RecorderViewport.DEFAULT,
@@ -193,7 +193,7 @@ class RecorderControllerTest {
     @Test
     @DisplayName("query strings are stripped from the live view, which is where grants travel")
     void liveViewDropsQueryStrings() throws Exception {
-        when(recordings.live(eq(SESSION), anyLong(), anyLong(), anyLong(), anyInt(), any()))
+        when(recordings.live(eq(SESSION), anyLong(), anyLong(), anyLong(), anyInt(), any(), any()))
                 .thenReturn(new ManageRecordingsUseCase.LiveUpdate(
                         RecorderSessionState.LIVE,
                         RecorderViewport.DEFAULT,

@@ -52,7 +52,7 @@ JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/H
   mvn -B -f pom.xml clean verify
 ```
 
-S10f ran this to completion: **1,300 tests, 0 failures** across all 16 modules. **One skip is
+S10g ran this to completion: **1,304 tests, 0 failures** across all 16 modules. **One skip is
 expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
 and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
 
@@ -74,7 +74,7 @@ note them rather than assuming they are permanent. If a PostgreSQL module fails 
 that is a false green: investigate, do not accept it.**
 
 ```bash
-cd platform-ui && npm test && npm run lint && npm run build   # 173 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+cd platform-ui && npm test && npm run lint && npm run build   # 176 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
 ```
 
 For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.

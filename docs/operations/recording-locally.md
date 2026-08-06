@@ -44,13 +44,40 @@ you normally would. Typing goes to the recorded page, not to the console.
 
 ---
 
-## 3. Turn the recording into a test
+## 3. Drive the browser
+
+Click the surface once to give it focus. After that:
+
+| To | Do |
+|---|---|
+| Click, type | Just click and type — input goes to the recorded page, not the console |
+| Scroll | Scroll over the surface, as you would on any page |
+| Go back, reload | The **Back** and **Reload** buttons above the surface |
+
+**The surface only updates when the page repaints.** Chrome sends a frame on repaint and at no other
+time, so a page you are simply reading looks frozen. It is not — scroll it or click something and it
+updates immediately. This is also why an idle recording makes about one network request every
+fifteen seconds rather than a continuous stream.
+
+---
+
+## 4. Turn the recording into a test
 
 Press **Turn this into a test** once you have done the journey you care about. You do not have to
-stop first — the button works on a live session, and pressing it creates nothing.
+stop first — the button works on a live session.
 
-The studio opens on **Review journeys** with what was recorded already loaded. From there it is the
-ordinary flow: review, set the load, set the objectives, save.
+**It creates nothing.** It opens the studio, scrolled into view, on **Review journeys** with the
+recorded journeys loaded. From there it is the ordinary flow: review the journeys, set the load, set
+the objectives, and press **Save test** on the last step. That is the step that creates something.
+
+### Then how do you run it?
+
+After saving, the test appears under **Your tests** in the console. Select it and press **Run this**.
+The run then shows live progress and, when it finishes, a report.
+
+If you never press **Save test**, nothing is created — no definition, no version, no run. That is
+deliberate: a recording is authoring material, and CLAUDE.md §23 requires a person to review it
+before it can execute.
 
 **What will not be in the draft, by design:**
 
@@ -72,7 +99,7 @@ wired up and sends the wrong value.
 
 ---
 
-## 4. What the start script switched on, and why production refuses it
+## 5. What the start script switched on, and why production refuses it
 
 Three flags, all passed by `start-platform.sh`:
 
@@ -97,7 +124,7 @@ wildcard, multicast and every configured prohibited range stay denied.
 
 ---
 
-## 5. Where a recording can and cannot go
+## 6. Where a recording can and cannot go
 
 A session is locked to **one registered target**. You cannot type a URL into it and browse: the
 address comes from the target registry, and the platform pins DNS to the addresses resolved when the
@@ -112,7 +139,7 @@ widen it from inside a recording, and redirects do not expand it.
 
 ---
 
-## 6. When it does not work
+## 7. When it does not work
 
 ### The session says `PENDING_BROWSER_BRIDGE`
 
@@ -121,7 +148,7 @@ The deployment has no browser. The panel prints which bridge it has, and it will
 `local-chrome (no Chrome or Chromium found on this machine)`.
 
 - Started the control plane yourself rather than through the script? It defaults to **off**. Pass the
-  flags in §4.
+  flags in §5.
 - No Chrome on this machine? Install Chrome or Chromium, or point at one:
 
   ```bash
@@ -161,6 +188,11 @@ listening on:
 lsof -nP -iTCP:5174 -sTCP:LISTEN
 ```
 
+### The surface is not updating
+
+Expected, if nothing on the page is changing — see §3. Scroll or click and it updates. If it stays
+static while you are clearly interacting, check the control-plane log.
+
 ### The session expires while you are reading this
 
 Five minutes without interaction and it closes itself; thirty minutes total regardless. Both are
@@ -181,7 +213,7 @@ whatever you recorded and is removed on close.
 
 ---
 
-## 7. What a recording is not
+## 8. What a recording is not
 
 **It is not a way to capture a credential for a run.** If you sign in as yourself during a recording,
 that session belongs to that recording and stops with it. Material execution uses `run://session` or

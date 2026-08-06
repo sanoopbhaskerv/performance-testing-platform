@@ -666,7 +666,18 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
               setStudioOpen(true);
               setNotice(
                 `Turned ${journeys.length} recorded journey${journeys.length === 1 ? '' : 's'} ` +
-                  'into a draft. Review it before saving — nothing has been created yet.',
+                  'into a draft. Nothing has been created yet — review it below, then ' +
+                  '“Save test” to create it. It appears under Your tests, with a Run button.',
+              );
+              // The studio opens above the recorder, so from down here it looked like the button
+              // did nothing. Bring it into view rather than leaving someone to find it.
+              // window.document, because `document` is a state variable in this component — the
+              // YAML editor's contents.
+              requestAnimationFrame(() =>
+                window.document.querySelector('.studio')?.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'start',
+                }),
               );
             }}
           />

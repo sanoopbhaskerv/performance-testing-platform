@@ -714,18 +714,27 @@ export class V2Client {
    * Sequences are echoed back so a slow client resumes where it left off instead of replaying the
    * whole session. Only the newest frame comes back: showing someone the past while they are
    * clicking the present is worse than dropping frames.
+   *
+   * `waitMillis` long-polls: the server holds the request until something happens. Chrome emits a
+   * frame only when the page repaints, so reading a static page produces none — without the wait,
+   * a client spends the whole session asking for nothing several times a second.
    */
   pollRecording(
     sessionId: string,
     after: { frame: number; blocked: number; capture: number },
+    waitMillis = 0,
   ) {
     return axios
       .get<RecorderLiveUpdate>(`/api/v2/recordings/${sessionId}/live`, {
         headers: this.headers,
+        // Above the server's own ceiling, so the server is what ends the wait. A client timeout
+        // firing first would abort a healthy held connection and look like a failure.
+        timeout: waitMillis > 0 ? waitMillis + 10_000 : 0,
         params: {
           afterFrame: after.frame,
           afterBlocked: after.blocked,
           afterCapture: after.capture,
+          waitMillis,
         },
       })
       .then((r) => r.data);

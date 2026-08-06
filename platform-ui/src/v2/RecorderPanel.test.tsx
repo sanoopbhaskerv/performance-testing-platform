@@ -303,4 +303,77 @@ describe('RecorderPanel', () => {
     // Bounded: five attempts, not five hundred.
     expect(callsAfterGiveUp).toBeLessThanOrEqual(5);
   });
+
+  /**
+   * The vocabulary and the CDP mapping for wheel events both existed and were tested; the panel
+   * simply never sent one, so the recorded page could not be scrolled at all.
+   */
+  it('forwards the wheel to the recorded page, in browser coordinates', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const client = stubClient({ sendRecorderInput: send as V2Client['sendRecorderInput'] });
+    renderPanel(client);
+
+    const surface = screen.getByRole('application');
+    surface.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 640, height: 400, right: 640, bottom: 400, x: 0, y: 0 }) as DOMRect;
+
+    surface.dispatchEvent(
+      new WheelEvent('wheel', {
+        clientX: 320,
+        clientY: 200,
+        deltaY: 120,
+        deltaMode: 0,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    await waitFor(() => {
+      const wheel = send.mock.calls
+        .map((call) => call[1] as RecorderInput)
+        .find((input) => input.kind === 'mouse-wheel');
+      expect(wheel).toBeDefined();
+      expect(wheel?.deltaY).toBe(120);
+      // Half of a 640x400 rendering is the middle of the 1280x800 browser surface.
+      expect(wheel?.x).toBeCloseTo(640);
+      expect(wheel?.y).toBeCloseTo(400);
+    });
+  });
+
+  it('scrolls the recorded page rather than the console behind it', async () => {
+    const client = stubClient();
+    renderPanel(client);
+
+    const surface = screen.getByRole('application');
+    surface.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 640, height: 400, right: 640, bottom: 400, x: 0, y: 0 }) as DOMRect;
+
+    const event = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
+    surface.dispatchEvent(event);
+
+    // Not merely "a handler ran": an unprevented wheel scrolls the page the surface sits on, and
+    // React's own onWheel is passive, where preventDefault silently does nothing.
+    await waitFor(() => expect(event.defaultPrevented).toBe(true));
+  });
+
+  it('converts a wheel that reports lines rather than pixels', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const client = stubClient({ sendRecorderInput: send as V2Client['sendRecorderInput'] });
+    renderPanel(client);
+
+    const surface = screen.getByRole('application');
+    surface.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 640, height: 400, right: 640, bottom: 400, x: 0, y: 0 }) as DOMRect;
+
+    surface.dispatchEvent(
+      new WheelEvent('wheel', { deltaY: 3, deltaMode: 1, bubbles: true, cancelable: true }),
+    );
+
+    await waitFor(() => {
+      const wheel = send.mock.calls
+        .map((call) => call[1] as RecorderInput)
+        .find((input) => input.kind === 'mouse-wheel');
+      expect(wheel?.deltaY).toBe(48);
+    });
+  });
 });

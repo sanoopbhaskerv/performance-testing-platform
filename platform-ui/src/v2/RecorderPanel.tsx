@@ -33,8 +33,19 @@ import type {
  * has no browser configured — and this renders the reason rather than a spinner that never resolves.
  */
 
-/** Frames are polled, not streamed: EventSource cannot send the API key header. */
-const POLL_INTERVAL_MS = 120;
+/**
+ * Frames are polled, not streamed: EventSource cannot send the API key header.
+ *
+ * The poll is a *long* poll — the server holds the request until there is something to say. So this
+ * is the pause between one answer and the next request, not the rate: a quiet recording makes one
+ * request every {@link LIVE_WAIT_MS}, not eight a second. The first version had no wait and polled
+ * on this interval regardless, which turned a five-minute recording into two thousand requests that
+ * almost all returned nothing.
+ */
+const POLL_INTERVAL_MS = 30;
+
+/** How long the server may hold a poll open waiting for a frame, a block or a capture. */
+const LIVE_WAIT_MS = 15_000;
 
 /** Consecutive poll failures before the panel stops trying and says it lost contact. */
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -46,6 +57,21 @@ const MODIFIER_META = 4;
 const MODIFIER_SHIFT = 8;
 
 const TERMINAL_STATES = new Set(['CLOSED', 'FAILED', 'CANCELLED', 'EXPIRED']);
+
+/** Approximate pixels for a line and a page of scrolling, for wheels that report in those units. */
+const PIXELS_PER_LINE = 16;
+const PIXELS_PER_PAGE = 800;
+
+/** Converts a wheel delta to the pixels Chrome's input domain expects. */
+function scaleDelta(delta: number, deltaMode: number): number {
+  if (deltaMode === 1) {
+    return delta * PIXELS_PER_LINE;
+  }
+  if (deltaMode === 2) {
+    return delta * PIXELS_PER_PAGE;
+  }
+  return delta;
+}
 
 /**
  * Whether the server has forgotten this session.
@@ -131,7 +157,7 @@ export function RecorderPanel({
 
     const poll = async () => {
       try {
-        const update = await client.pollRecording(session.id, cursors.current);
+        const update = await client.pollRecording(session.id, cursors.current, LIVE_WAIT_MS);
         if (cancelled) {
           return;
         }
@@ -194,6 +220,43 @@ export function RecorderPanel({
       }
     };
   }, [client, session.id, terminal, unbridged, onError]);
+
+  // ── Scrolling ────────────────────────────────────────────────────────
+
+  /**
+   * Forwards the wheel to the recorded page.
+   *
+   * Attached natively rather than with React's `onWheel` because the listener has to be
+   * **non-passive**. React registers wheel handlers passively, where `preventDefault` is ignored, so
+   * every scroll would move the console behind the surface instead of the page inside it — the
+   * recorded page would simply never scroll.
+   */
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface || !live) {
+      return undefined;
+    }
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const bounds = surface.getBoundingClientRect();
+      if (bounds.width === 0 || bounds.height === 0) {
+        return;
+      }
+      void send({
+        kind: 'mouse-wheel',
+        x: ((event.clientX - bounds.left) / bounds.width) * frameSize.width,
+        y: ((event.clientY - bounds.top) / bounds.height) * frameSize.height,
+        // Chrome expects pixels. A trackpad reports lines or pages on some platforms, so the
+        // deltaMode is converted rather than passed through as if it were always pixels.
+        deltaX: scaleDelta(event.deltaX, event.deltaMode),
+        deltaY: scaleDelta(event.deltaY, event.deltaMode),
+        modifiers: modifiersOf(event),
+      });
+    };
+
+    surface.addEventListener('wheel', onWheel, { passive: false });
+    return () => surface.removeEventListener('wheel', onWheel);
+  }, [live, send, frameSize.width, frameSize.height]);
 
   // ── Coordinates ──────────────────────────────────────────────────────
 

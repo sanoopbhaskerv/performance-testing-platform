@@ -33,6 +33,7 @@ import com.perfplatform.domain.target.RegisteredTarget;
 
 import java.net.InetAddress;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -273,12 +274,33 @@ public final class ManageRecordingsUseCase {
 
     // ------------------------------------------------------------------ driving
 
-    /** One poll: the newest frame plus anything blocked or captured since the client last looked. */
+    /** One poll, returning immediately with whatever the client has not seen. */
     public LiveUpdate live(RecorderSessionId sessionId, long afterFrame, long afterBlocked,
             long afterCapture, int limit, CallerContext caller) {
+        return live(sessionId, afterFrame, afterBlocked, afterCapture, limit, Duration.ZERO, caller);
+    }
+
+    /**
+     * One poll, optionally waiting for something to happen first.
+     *
+     * <p>The wait is what makes this affordable. Chrome produces a screencast frame only when the
+     * page repaints, so someone reading a static page generates nothing at all — and a client on a
+     * fixed interval then spends the whole session asking for it. Waiting server-side turns a
+     * recording into roughly one request per event instead of eight per second.
+     *
+     * @param wait how long to block before answering empty-handed; {@link Duration#ZERO} to return
+     *             at once. The API layer bounds it, because a request that never returns is one a
+     *             client cannot cancel cleanly.
+     */
+    public LiveUpdate live(RecorderSessionId sessionId, long afterFrame, long afterBlocked,
+            long afterCapture, int limit, Duration wait, CallerContext caller) {
 
         LiveRecorderSession session = requireLive(sessionId);
         caller.requireAct(Scope.RECORDINGS_READ, session.teamId());
+
+        if (wait != null && !wait.isZero() && !wait.isNegative()) {
+            session.awaitUpdate(afterFrame, afterBlocked, afterCapture, wait);
+        }
 
         expireIfStale(session);
         flushBlockedAudit(session);

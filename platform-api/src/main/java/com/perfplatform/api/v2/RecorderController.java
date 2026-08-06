@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 
 @RestController
@@ -67,25 +68,43 @@ public class RecorderController {
     }
 
     /**
-     * Polls the live browser surface.
+     * The longest a live poll may block before answering empty-handed.
+     *
+     * <p>Long enough that an idle recording costs a handful of requests a minute rather than eight a
+     * second; short enough that a proxy, a load balancer or an impatient browser does not time the
+     * connection out first, which would look exactly like the failure this is meant to remove.
+     */
+    private static final long MAX_LIVE_WAIT_MILLIS = 20_000;
+
+    /**
+     * Polls the live browser surface, waiting for something to happen.
      *
      * <p>Polling rather than Server-Sent Events, for one blunt reason: {@code EventSource} cannot
      * set request headers, so an SSE stream would have to carry the caller's credential in the
      * query string. Frames are sequenced, so a poll is resumable and a slow client falls behind
-     * without losing its place — and the console already polls for live run progress, so this is
-     * the same shape as the rest of the UI rather than a second streaming mechanism.
+     * without losing its place.
+     *
+     * <p><b>Long-polled, not busy-polled.</b> Chrome emits a screencast frame only when the page
+     * repaints, so a person reading a static page produces none — and the first version of this,
+     * which polled every 120ms regardless, made a five-minute recording into two thousand requests
+     * that almost all returned nothing. Blocking server-side until there is something to say costs
+     * one held connection and removes the storm.
      */
-    @Operation(summary = "Poll the live recorder surface, blocked destinations and captures")
+    @Operation(summary = "Poll the live recorder surface, blocked destinations and captures",
+            description = "Waits up to waitMillis for new material before answering, so an idle "
+                    + "recording does not require continuous polling.")
     @GetMapping(value = "/{sessionId}/live", produces = MediaType.APPLICATION_JSON_VALUE)
     public RecorderLiveUpdateResponse live(
             @PathVariable String sessionId,
             @RequestParam(defaultValue = "0") long afterFrame,
             @RequestParam(defaultValue = "0") long afterBlocked,
             @RequestParam(defaultValue = "0") long afterCapture,
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") long waitMillis) {
 
+        Duration wait = Duration.ofMillis(Math.max(0, Math.min(waitMillis, MAX_LIVE_WAIT_MILLIS)));
         return RecorderLiveUpdateResponse.from(recordings.live(RecorderSessionId.of(sessionId),
-                afterFrame, afterBlocked, afterCapture, limit, callers.current()));
+                afterFrame, afterBlocked, afterCapture, limit, wait, callers.current()));
     }
 
     @Operation(summary = "Send one brokered interaction to the recorded browser")

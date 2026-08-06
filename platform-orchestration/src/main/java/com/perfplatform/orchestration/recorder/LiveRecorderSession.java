@@ -201,6 +201,9 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
         closeReason = reason;
         lastActivityAt = now;
         terminatedAt = now;
+        // A client waiting for the next frame must not sit there until its timeout when the answer
+        // is "this session is over".
+        notifyAll();
         return attached;
     }
 
@@ -281,6 +284,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
                 frames.removeFirst();
                 droppedFrames++;
             }
+            notifyAll();
         }
     }
 
@@ -295,6 +299,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
                     ++blockedSequence, destination, kind, decision, blockedAt);
             blocked.addLast(event);
             trim(blocked);
+            notifyAll();
             // One audit row per distinct origin-and-reason. A page that retries a blocked asset
             // sixty times is one security fact, not sixty.
             if (auditedBlocks.add(decision.code() + '|' + originOf(destination))) {
@@ -321,6 +326,7 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
                 captures.removeFirst();
                 droppedCaptures++;
             }
+            notifyAll();
         }
     }
 
@@ -332,6 +338,47 @@ public final class LiveRecorderSession implements RecorderBrowserListener {
     }
 
     // ------------------------------------------------------------------ reading
+
+    /**
+     * Waits until there is something the client has not seen, or the session ends, or time runs out.
+     *
+     * <p>This is what makes a live view affordable. Chrome emits a screencast frame only when the
+     * page <em>repaints</em>, so a person reading a static page generates no frames at all — and a
+     * client polling on a fixed interval then spends its entire session asking for nothing. At the
+     * 120ms this used to poll at, a five-minute recording was two thousand requests, almost all of
+     * them empty, which reads as a broken loop and is one.
+     *
+     * <p>Waiting here instead collapses that to roughly one request per thing that actually
+     * happened. The timeout is the caller's, and is bounded above by the API layer: a wait that
+     * never returns is a connection a client cannot cancel cleanly.
+     *
+     * @return true if there is new material, false if the wait timed out
+     */
+    public synchronized boolean awaitUpdate(long afterFrame, long afterBlocked, long afterCapture,
+            Duration timeout) {
+
+        long remainingNanos = timeout == null ? 0 : timeout.toNanos();
+        while (remainingNanos > 0 && !state.isTerminal()
+                && !hasNewerThan(afterFrame, afterBlocked, afterCapture)) {
+            long startedAt = System.nanoTime();
+            try {
+                // wait() releases this monitor, which is the whole point: the browser's callback
+                // threads need it to deliver the very frame this is waiting for.
+                wait(remainingNanos / 1_000_000L, (int) (remainingNanos % 1_000_000L));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            remainingNanos -= System.nanoTime() - startedAt;
+        }
+        return state.isTerminal() || hasNewerThan(afterFrame, afterBlocked, afterCapture);
+    }
+
+    private boolean hasNewerThan(long afterFrame, long afterBlocked, long afterCapture) {
+        return frameSequence > afterFrame
+                || blockedSequence > afterBlocked
+                || captureSequence > afterCapture;
+    }
 
     /** The newest frame after {@code afterSequence}, or empty when the client is current. */
     public synchronized Optional<RecorderScreencastFrame> frameAfter(long afterSequence) {
