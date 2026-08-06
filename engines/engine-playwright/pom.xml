@@ -30,6 +30,17 @@
       <artifactId>platform-engine-spi</artifactId>
     </dependency>
 
+    <!--
+      The logging facade only. The local execution provider starts and destroys process trees whose
+      leaves are real browsers, and an operator needs to see which tree belonged to which run when
+      one has to be killed. slf4j-api is already the facade used throughout the repository; no
+      binding is added here, so the composition root still chooses one.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

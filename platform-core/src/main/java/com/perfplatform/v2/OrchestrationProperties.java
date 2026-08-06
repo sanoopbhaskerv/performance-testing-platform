@@ -649,6 +649,22 @@ public class OrchestrationProperties {
     public static class Playwright {
         private List<String> allowedRepositories = new ArrayList<>();
 
+        /**
+         * The checkout {@code workspace://} source paths resolve against.
+         *
+         * <p>Development only, and empty by default so nothing is readable until an operator names a
+         * directory. It is a root rather than a list of files because it is also the boundary: the
+         * runner refuses any path that resolves outside it, so setting this to a narrow directory
+         * is what limits which scripts a specification can reach.
+         */
+        private String workspaceRoot = "";
+
+        /** Node launcher. Empty means "search the usual places". */
+        private String nodeCommand = "";
+
+        /** npx launcher, which starts Playwright from the project's own install. */
+        private String npxCommand = "";
+
         public List<String> getAllowedRepositories() {
             return allowedRepositories;
         }
@@ -656,6 +672,30 @@ public class OrchestrationProperties {
         public void setAllowedRepositories(List<String> allowedRepositories) {
             this.allowedRepositories = allowedRepositories == null
                     ? new ArrayList<>() : allowedRepositories;
+        }
+
+        public String getWorkspaceRoot() {
+            return workspaceRoot;
+        }
+
+        public void setWorkspaceRoot(String workspaceRoot) {
+            this.workspaceRoot = workspaceRoot;
+        }
+
+        public String getNodeCommand() {
+            return nodeCommand;
+        }
+
+        public void setNodeCommand(String nodeCommand) {
+            this.nodeCommand = nodeCommand;
+        }
+
+        public String getNpxCommand() {
+            return npxCommand;
+        }
+
+        public void setNpxCommand(String npxCommand) {
+            this.npxCommand = npxCommand;
         }
     }
 

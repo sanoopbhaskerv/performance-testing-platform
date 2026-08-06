@@ -250,6 +250,21 @@ public final class LocalJmeterExecutionProvider implements ExecutionProvider {
 
     @Override
     public ProvisioningResult provision(ProvisionRequest request) {
+        // Kept even though EngineRoutingExecutionProvider now dispatches by engine and a browser
+        // shard should never arrive here. A misrouted shard would otherwise be handed to JMeter,
+        // which loads what it is given, skips what it cannot resolve and exits zero — reporting a
+        // successful run that generated no load. Refusing is the cheaper failure by a wide margin.
+        if (!"jmeter".equalsIgnoreCase(request.engine())) {
+            log.error("LocalJmeterExecutionProvider cannot run engine '{}' runId={} shardIndex={}",
+                    request.engine(), request.runId(), request.shardIndex());
+            return ProvisioningResult.rejected(
+                    "Engine '" + request.engine() + "' cannot be run by the local-jmeter provider, "
+                            + "which runs protocol workloads only. Browser workloads run on a "
+                            + "Playwright provider: locally, configure "
+                            + "platform.orchestration.playwright.workspace-root; in production, the "
+                            + "Kubernetes provider with the playwright-runner image.");
+        }
+
         Instant now = clock.instant();
         String uid = request.shardId().value().toString();
 

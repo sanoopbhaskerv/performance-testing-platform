@@ -226,9 +226,16 @@ step "Starting the control plane on :$API_PORT (provider: $PROVIDER)"
 # production profile: the local bridge starts Chrome inside the control-plane process, and the
 # loopback allowance is what lets a recording browser reach the demo service on this machine. The
 # rest of the address floor — metadata, link-local, wildcard, multicast — still applies.
+#
+# The Playwright workspace root is this checkout, which is what makes a browser journey runnable
+# from the console rather than from a terminal: a specification can name
+# workspace://demo-student-ui/tests/student-journey.spec.ts and nothing outside this directory.
+# Development only — production browser runs use the pinned runner image against a git-pinned commit,
+# because a file on disk can change between two runs of the same immutable definition version.
 "$JAVA" -jar "$CONTROL_PLANE_JAR" \
   --platform.config-dir=config/teams \
   --platform.orchestration.execution-provider="$PROVIDER" \
+  --platform.orchestration.playwright.workspace-root="$REPO_ROOT" \
   --platform.orchestration.recorder.local-browser.enabled=true \
   --platform.orchestration.recorder.local-browser.allow-loopback-target=true \
   --platform.orchestration.recorder.network-enforcement.enabled=false \

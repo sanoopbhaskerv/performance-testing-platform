@@ -1,0 +1,54 @@
+# A browser journey executed from the platform against a script in the runner's own checkout.
+#
+# Development only. `workspace://` names a file on disk, so what executes is not fixed by this
+# definition version — validation reports that as a warning, and the run's report carries it. Pin the
+# reviewed script to a commit SHA (see student-git-pinned-test.yaml) before approving a definition,
+# so the code that ran is recoverable from the stored version months later.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: student-crud-browser-workspace
+  team: local-dev
+  application: demo-service
+
+spec:
+  environment:
+    name: performance
+    runnerCell: local
+    targetClass: non-production
+
+  sources:
+    - name: student-journey-source
+      type: playwright
+      # Relative to platform.orchestration.playwright.workspace-root. Nothing outside that root
+      # is readable.
+      uri: workspace://demo-student-ui/tests/student-journey.spec.ts
+
+  workloads:
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: student-journey-source
+      # Concurrent real browser instances, not protocol virtual users. CLAUDE.md §21 puts the
+      # default at 5 and the policy ceiling at 20; a local machine also runs the control plane,
+      # so keep this small until the cohort has been calibrated.
+      browserUsers: 5
+      iterationsPerUser: 2
+      browserProfile:
+        device: desktop
+        network: wifi
+
+  objectives:
+    # Scoped to the workload name, which is the label the runner records one row per completed
+    # journey under. Step durations sit at browser-experience/<step> and are judged only when
+    # an objective names them.
+    - metric: browser.journey.duration
+      scope: browser-experience
+      percentile: 95
+      threshold: 8s
+
+  governance:
+    maxDuration: 15m
+    approvalPolicy: non-production-standard
+    retention: 14d

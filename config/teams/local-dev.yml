@@ -37,13 +37,18 @@ targets:
   # Generating real load against it also needs the local-jmeter provider; the
   # default fake provider sends no traffic anywhere. See the README.
   - name: demo-service
-    baseUrl: "http://localhost:5174"
+    baseUrl: "http://localhost:8081"
     healthCheckPath: "/actuator/health"
     jvmEnabled: false
 
+  # The student web app (demo-student-ui/, port 5174) — the browser client for the demo
+  # service, and therefore the target a Playwright journey navigates. It points at the UI
+  # rather than the API on 8081: a browser workload loads pages, and a target resolving to
+  # a JSON endpoint would give the cohort nothing to render.
   - name: student-app
-    baseUrl: "http://localhost:8081"
-    healthCheckPath: "/actuator/health"
+    baseUrl: "http://localhost:5174"
+    # Vite serves the app at the root; there is no actuator on a static dev server.
+    healthCheckPath: "/"
     jvmEnabled: false
 
 # V1 needs this block to consider the team runnable. V2 takes its load model from

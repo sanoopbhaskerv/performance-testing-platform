@@ -39,7 +39,9 @@ import com.perfplatform.orchestration.definition.AuthorTestDefinitionUseCase;
 import com.perfplatform.orchestration.target.ManageTargetsUseCase;
 import com.perfplatform.engine.jmeter.JmeterEngineProvider;
 import com.perfplatform.engine.jmeter.LocalJmeterExecutionProvider;
+import com.perfplatform.engine.playwright.LocalPlaywrightExecutionProvider;
 import com.perfplatform.engine.playwright.PlaywrightEngineProvider;
+import com.perfplatform.orchestration.execution.EngineRoutingExecutionProvider;
 import com.perfplatform.orchestration.execution.FakeExecutionProvider;
 import com.perfplatform.orchestration.plan.EngineDispatchingPlanCompiler;
 import com.perfplatform.orchestration.plan.EngineRegistry;
@@ -355,14 +357,59 @@ public class OrchestrationConfiguration {
                     + "process of this JVM, using {}. Development only — production execution runs "
                     + "in isolated Kubernetes Jobs.", jmeter);
 
-            return new LocalJmeterExecutionProvider(clock, artifacts, catalog, jmeter,
-                    Path.of(properties.getWorkDirectory()));
+            ExecutionProvider jmeterProvider = new LocalJmeterExecutionProvider(
+                    clock, artifacts, catalog, jmeter, Path.of(properties.getWorkDirectory()));
+
+            return routeByEngine(jmeterProvider, clock, artifacts, catalog);
         }
 
         throw new IllegalStateException("Unsupported execution provider '" + selected
                 + "'. Available: " + FakeExecutionProvider.PROVIDER_ID + ", "
                 + LocalJmeterExecutionProvider.PROVIDER_ID + ", "
                 + KubernetesExecutionProvider.PROVIDER_ID + ".");
+    }
+
+    /**
+     * Pairs the local JMeter adapter with a local browser adapter, when one is configured.
+     *
+     * <p>Which adapter runs a shard is a property of the shard's engine, not of the deployment. Both
+     * local adapters exist for the same development loop, and the alternative to routing between
+     * them is what this replaces: a browser workload reaching the JMeter adapter and being refused,
+     * having already been validated, admitted and given a queue slot.
+     *
+     * <p>The browser adapter is added only when a workspace root is configured, and its absence is
+     * not an error. A deployment doing protocol work needs no browser runner, and demanding a Node
+     * install from everyone who runs JMeter locally would be a worse default than a clear refusal at
+     * the point somebody actually triggers a browser run.
+     */
+    private ExecutionProvider routeByEngine(ExecutionProvider jmeterProvider, Clock clock,
+            ArtifactStore artifacts, ResultCatalog catalog) {
+
+        String workspaceRoot = properties.getPlaywright().getWorkspaceRoot();
+        if (workspaceRoot == null || workspaceRoot.isBlank()) {
+            log.info("No Playwright workspace root is configured, so browser workloads have no "
+                    + "local execution provider. Set "
+                    + "platform.orchestration.playwright.workspace-root to run them from here.");
+            return jmeterProvider;
+        }
+
+        Path root = LocalPlaywrightExecutionProvider.requireWorkspaceRoot(workspaceRoot);
+        Path node = LocalPlaywrightExecutionProvider.locateNodeCommand(
+                properties.getPlaywright().getNodeCommand(), "node");
+        Path npx = LocalPlaywrightExecutionProvider.locateNodeCommand(
+                properties.getPlaywright().getNpxCommand(), "npx");
+
+        log.warn("Using the LOCAL PLAYWRIGHT execution provider for browser workloads: real "
+                        + "browsers are started as child processes of this JVM, from {}. "
+                        + "Development only — production browser execution runs in isolated "
+                        + "Kubernetes Jobs using the pinned runner image.", root);
+
+        ExecutionProvider playwrightProvider = new LocalPlaywrightExecutionProvider(
+                clock, artifacts, catalog, node, npx, root, Path.of(properties.getWorkDirectory()));
+
+        return new EngineRoutingExecutionProvider(Map.of(
+                JmeterEngineProvider.ENGINE_ID, jmeterProvider,
+                PlaywrightEngineProvider.ENGINE_ID, playwrightProvider));
     }
 
     /**

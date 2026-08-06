@@ -4,9 +4,11 @@
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.
 **Reference:** `CLAUDE.md`, then `docs/architecture/performance-testing-platform-target-architecture.md`.
-**Last updated:** S10i — a git-pinned Playwright source now reaches the runner, and cannot name a
-repository this deployment has not allowlisted (§3al). **S10 is complete.** Increments 0–2h and
-S1–S11 are complete.
+**Last updated:** S10j — a browser journey now **executes** from the console, through a local
+Playwright adapter and an engine-routing provider, and `CanonicalJson`'s missing field separators are
+fixed (§3am). Before this, no browser workload could run anywhere: the container runner was a
+placeholder and every plan the platform rendered was malformed JSON. **S10 is complete.** Increments
+0–2h and S1–S11 are complete.
 durable audit events and capture sanitization; the actual CDP bridge/browser stream remains a later
 S10 slice.
 
@@ -2782,6 +2784,127 @@ validation service and the engine.
 - The allowlist matches whole repositories only. No wildcards, no org-level entries. Add them when
   somebody asks, with the prefix-matching bug that usually accompanies them in mind —
   `perf-journeys` must not match `perf-journeys-evil`, which is pinned by a test.
+
+---
+
+## 3am. S10j — a browser journey actually runs, from the console
+
+**Before this, no browser workload could execute anywhere.** Not a gap in one adapter — a gap in all
+of them. Triggering a Playwright test from the studio ended in `PROVISIONING_FAILED` with a message
+telling the user to use the Kubernetes provider, and the Kubernetes provider could not run one
+either: `runner-images/playwright-runner/entrypoint.sh` was an explicit placeholder that wrote a
+summary JSON and an empty `results.csv` and never invoked `npx playwright test`. So the platform
+compiled browser plans, digested them, admitted them, reserved capacity for them and stored their
+artifacts, and there was nothing at the end of the pipe.
+
+### Three defects, one of them platform-wide
+
+**1. One provider for the whole deployment.** `OrchestrationConfiguration.executionProvider` chose a
+single `ExecutionProvider` bean, which made *which engine a shard runs* — a property of the shard —
+into a property of the deployment. `LocalJmeterExecutionProvider` then rejected everything that was
+not JMeter. A hybrid run is the case that proves this cannot hold: CLAUDE.md §21 describes one run
+where a JMeter workload holds steady state while a browser cohort walks the UI, and those two shards
+cannot both be executed by one engine-specific adapter.
+
+`EngineRoutingExecutionProvider` (`platform-orchestration`) now dispatches by engine. It holds no
+policy — admission, quotas and team ownership are all settled before a `ProvisionRequest` exists.
+`inspect` and `cancel` resolve through `ExecutionHandle.providerId()` rather than through current
+configuration, so a handle read from the database after a control-plane restart goes back to the
+adapter that created it; inferring it would let an adapter report `NOT_FOUND` for a browser cohort
+that is still open and release its capacity slot while the load continued. A handle whose adapter is
+no longer configured reports `UNKNOWN`, never a terminal phase.
+
+**2. `CanonicalJson` emitted invalid JSON.** This is the serious one. `member()` cleared
+`needsComma` after writing a key, so *every field after the first was written with no separator* —
+`{"a":"1""b":"2"}`. Every execution plan and every rendered workload this platform has ever produced
+was unparseable, and every plan digest was taken over a malformed document.
+
+It survived because nothing had ever parsed one. JMeter executes a rendered JMX file and never reads
+the plan JSON; the browser runner is the **first consumer that parses it**, and it failed on the
+first field. The class had **no test at all** — `CanonicalJsonTest` now covers separators, nesting, a
+field following a closed array, escaping, the null-string rule the digest depends on, and
+determinism. Worth remembering as a pattern: a serializer with no consumer that parses its output
+has no feedback loop, and "it produces a stable digest" is true of malformed bytes too.
+
+**3. `repeatEach` is total, not per worker.** Playwright's `repeatEach` is how many times each *test*
+runs, not how many each worker runs. Setting it to `iterationsPerUser` would schedule 2 journeys
+across 5 workers: three browsers would open, do nothing and close, and the run would report a cohort
+of five having measured two journeys. It is `browserUsers * iterationsPerUser`. (The same mistake is
+in `demo-student-ui/playwright.load.config.ts`, whose comment claims 20 journeys from
+`workers: 10, repeatEach: 2` — that config produces 2.)
+
+### What now exists
+
+`LocalPlaywrightExecutionProvider` (`engines/engine-playwright`), development-only for the same
+reason the local JMeter adapter is, with a lower ceiling because real browsers are heavier than a
+protocol generator. It ships two Node scripts as jar resources, copied per shard:
+
+- `perf-runner.mjs` — reads the rendered plan, resolves the source, generates a config, runs
+  `npx playwright test`. Node rather than Java because the plan is JSON and Node parses JSON with no
+  dependency, keeping a JSON library off the control plane's execution path; it also keeps this file
+  recognizably the same procedure as the container entrypoint.
+- `perf-reporter.mjs` — a Playwright *reporter*, not a post-processor of the JSON report. The report
+  format is Playwright's own and changes between versions; the reporter API is documented. A result
+  format that quietly stopped parsing after a dependency bump would present as a run that measured
+  nothing.
+
+**Operation labels are load-bearing.** A completed journey is recorded under the workload name
+exactly (`browser-experience`); steps go underneath (`browser-experience/<step>`). `ObjectiveEvaluator`
+matches an exact scope before a `scope/` prefix, so a journey objective scoped to the workload sees
+journey rows only. Label both the same and a journey threshold is judged against a mixture of whole
+journeys and individual clicks.
+
+**Source resolution: `workspace://` only.** A path in the runner's own checkout, resolved against
+`platform.orchestration.playwright.workspace-root`, refused if it resolves outside that root (checked
+via `realpath`, so a symlink cannot escape). It exists so a journey can be executed from the platform
+while it is still being written — the alternative is committing and pushing before every trial run,
+which is the friction that sends people back to running `npx playwright test` by hand. It is a
+**warning** at validation (`spec.source.workspace.notReproducible`), not silent acceptance: the file
+can change between two runs of the same immutable definition version, which breaks the promise the
+digest makes.
+
+A git-pinned source is **refused** by this adapter rather than fetched. §3al's verification — that
+the commit the remote sent is the commit asked for — lives in the container runner. Doing the fetch
+here without the verification would make pinning look implemented while it was decorative.
+
+**A failing journey is a result, not a broken shard.** Playwright exits non-zero when an assertion
+fails. Treating that as shard failure would discard the timings of every journey that *did* complete,
+including the ones that explain the failure. The shard fails only if it recorded nothing; otherwise
+the objectives decide the verdict.
+
+### Verified end to end, from the console
+
+`student-crud-browser-workspace` saved through **Write it as YAML** → **Run this**: 5 concurrent
+Chromium instances × 2 iterations = **10 journeys, 126 samples, 1/1 shards, `synthetic=false`**.
+Generated config carried `baseURL: http://localhost:5174` and
+`X-Performance-Test-Run-Id: <runId>` as `extraHTTPHeaders`. The run ended
+**Failed / OBJECTIVE_BREACHED** — p95 journey duration 30,082 ms against an 8 s ceiling, because one
+journey of ten hit Playwright's 30 s default timeout under a 5-browser cohort. That is a real
+finding, not a platform fault, and it is the platform doing its job.
+
+`config/teams/local-dev.yml`: the `student-app` target now points at the UI on **5174**, not the API
+on 8081. A browser workload loads pages; a target resolving to a JSON endpoint gives the cohort
+nothing to render.
+
+### Known gaps
+
+- **Web vitals are not captured.** `web.lcp`, `web.cls` and friends need an observer injected before
+  page load, which a reporter cannot do without changing what the reviewed test runs under. They
+  report **INDETERMINATE** — nothing measured them. Deliberate: a value synthesized from step timings
+  would look like a web vital, pass a threshold and mean nothing. Capturing them properly needs a
+  platform-supplied fixture, which is a decision about altering the test under review.
+- **No live progress.** The JMeter adapter publishes a `ShardProgress` snapshot every five seconds;
+  this one does not, so a browser run's live view stays empty until it finishes. The reducer is
+  engine-neutral, so this is wiring rather than design.
+- **The container runner is still a placeholder.** Everything above is the *local* adapter.
+  `runner-images/playwright-runner/entrypoint.sh` still does not run Playwright, so **browser
+  workloads cannot execute in production**. The `perf-runner.mjs`/`perf-reporter.mjs` pair is written
+  to be the thing that image runs; porting it is the obvious next slice.
+- **Definitions do not survive a control-plane restart** in this local setup — unrelated to this
+  work, but it is why the verification above recreates the definition after each restart.
+- **Still no studio surface** (§3af). This is the third increment to land without one, and it is now
+  blocking three. `toSpecification` always emits `type: protocol` / `engine: jmeter`, so the studio
+  cannot author a browser test — the YAML path is the only way in.
 
 ---
 

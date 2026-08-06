@@ -45,7 +45,11 @@ than a surprise.
 > **S10i finished S10**: a git-pinned Playwright source now reaches the runner, its coordinates are
 > part of the plan digest, and a repository this deployment has not allowlisted is refused — an
 > empty allowlist permitting nothing rather than everything. S11 added coordinated web performance
-> under load.
+> under load. **S10j made a browser journey actually run** from the console: execution is routed per
+> engine rather than per deployment, a local Playwright adapter drives a real browser cohort from a
+> `workspace://` script, and `CanonicalJson`'s missing field separators — which made **every plan
+> this platform ever rendered unparseable** — are fixed. **The container runner is still a
+> placeholder, so browser workloads do not yet execute in production.**
 
 **The foundation is complete.** CLAUDE.md §32's fifteen conditions are met, with one partial
 (team authorization is enforced, but against a development identity provider — corporate OIDC is
@@ -121,7 +125,12 @@ coordinate a small browser cohort during JMeter steady state. Default browser co
 maximum 20 — **not** 1,000, and never equated with protocol virtual users.
 
 The engine SPI is now exercised by JMeter and Playwright for browser-only runs, and S11 coordinates
-delayed browser cohorts under active protocol load.
+delayed browser cohorts under active protocol load. **S10j closed the gap between compiling a browser
+plan and executing one** — until then nothing could run a Playwright workload anywhere, because the
+container entrypoint was a placeholder and the control plane bound a single engine-specific provider
+for the whole deployment. Execution now routes per engine, and a local adapter runs real browsers for
+development. **Porting that adapter into the pinned runner image is the outstanding piece of this
+chapter**: a production deployment still cannot execute a browser workload.
 
 ---
 

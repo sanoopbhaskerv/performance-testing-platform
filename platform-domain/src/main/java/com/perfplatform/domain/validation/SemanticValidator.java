@@ -52,6 +52,9 @@ public final class SemanticValidator {
     /** Content-addressed artifact digest for uploaded or pasted source material. */
     private static final Pattern SHA256_DIGEST = Pattern.compile("^sha256:[0-9a-f]{64}$");
 
+    /** Development-only source scheme: a path inside the runner's own checkout. */
+    private static final String WORKSPACE_SCHEME = "workspace://";
+
     private static final int MAX_NAME_LENGTH = 63;
 
     /**
@@ -198,8 +201,14 @@ public final class SemanticValidator {
     private static void validatePlaywrightSource(SourceSpec source, String path,
             List<ValidationFinding> findings) {
         var git = source.git();
-        boolean hasArtifact = !isBlank(source.uri());
+        boolean hasWorkspace = isWorkspaceUri(source.uri());
+        boolean hasArtifact = !isBlank(source.uri()) && !hasWorkspace;
         boolean hasGit = git != null;
+
+        if (hasWorkspace) {
+            validateWorkspaceSource(source.uri(), path + "/uri", findings);
+            return;
+        }
 
         if (!hasArtifact && !hasGit) {
             findings.add(ValidationFinding.error("spec.source.playwright.material.missing", path,
@@ -245,6 +254,57 @@ public final class SemanticValidator {
                     "Ref '" + git.ref() + "' is not an immutable commit SHA.",
                     "Pin to a commit SHA. A branch or tag can move after review."));
         }
+    }
+
+    /** Whether a source URI names a path in the runner's own checkout rather than stored material. */
+    public static boolean isWorkspaceUri(String uri) {
+        return uri != null && uri.startsWith(WORKSPACE_SCHEME);
+    }
+
+    /** The path part of a {@code workspace://} URI. */
+    public static String workspacePath(String uri) {
+        return isWorkspaceUri(uri) ? uri.substring(WORKSPACE_SCHEME.length()) : null;
+    }
+
+    /**
+     * Checks a development-only workspace source, and says plainly that it is not reproducible.
+     *
+     * <p>{@code workspace://tests/journey.spec.ts} names a file in the checkout the runner already
+     * has. It exists so a browser journey can be executed from the platform while it is still being
+     * written — the alternative is committing and pushing before every trial run, which is the kind
+     * of friction that makes people go back to running {@code npx playwright test} by hand and stop
+     * using the platform at all.
+     *
+     * <p>It is reported as a warning rather than accepted silently, because the file behind the path
+     * can change between two runs of the same immutable definition version. That breaks the promise
+     * the digest is supposed to make: the specification would be identical while the code that
+     * executed was not, so a stored version no longer tells you what ran. Governance is expected to
+     * refuse this for anything approved; the finding is what gives it something to refuse on.
+     */
+    private static void validateWorkspaceSource(String uri, String path,
+            List<ValidationFinding> findings) {
+
+        String relative = workspacePath(uri);
+        if (isBlank(relative)) {
+            findings.add(ValidationFinding.error("spec.source.workspace.path.missing", path,
+                    "A workspace source requires a path, for example "
+                            + "workspace://tests/journey.spec.ts.", null));
+            return;
+        }
+        if (relative.contains("..") || relative.startsWith("/")) {
+            // Same reasoning as the git path check: a path leaving the checkout would let a
+            // specification read the runner's filesystem.
+            findings.add(ValidationFinding.error("spec.source.workspace.path.traversal", path,
+                    "The workspace path must stay inside the configured workspace root.",
+                    "Remove '..' segments and use a path relative to the workspace root."));
+            return;
+        }
+
+        findings.add(ValidationFinding.warning("spec.source.workspace.notReproducible", path,
+                "Source '" + uri + "' reads a file from the runner's workspace, so what executes "
+                        + "is not fixed by this definition version.",
+                "Development only. Pin the reviewed script to a commit SHA with git coordinates "
+                        + "before this definition is approved, so the code that ran is recoverable."));
     }
 
     private static void validateSourceDigest(String digest, String path,

@@ -141,6 +141,17 @@ platform:
         frame-quality: 60
         max-capture-bytes: 262144
 
+    playwright:
+      # The checkout that workspace:// source paths resolve against, and the boundary a browser
+      # journey cannot read outside of. Empty by default: until an operator names a directory,
+      # browser workloads have no local execution provider at all. Development only — production
+      # browser execution runs the pinned runner image against a git-pinned commit, because a file
+      # on a developer's disk can change between two runs of the same immutable definition version.
+      workspace-root: ${PLAYWRIGHT_WORKSPACE_ROOT:}
+      # Empty searches the usual Node locations.
+      node-command: ${PLAYWRIGHT_NODE_COMMAND:}
+      npx-command: ${PLAYWRIGHT_NPX_COMMAND:}
+
     # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
     # actively working on to a peer mid-provision.
     lease-duration: 2m

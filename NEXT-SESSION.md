@@ -211,10 +211,41 @@ that exposes it. Nothing lands API-only.
   `platform.orchestration.playwright.allowed-repositories`. **Private repositories do not work yet**:
   the git credential is not wired through `SecretResolver`.
 
-**Next:** **the studio cannot author a browser test at all** (`HANDOFF.md` §3af) — `toSpecification`
-always emits `type: protocol` and `engine: jmeter`, so neither S10h's correlation panel nor S10i's
-git source has anywhere to live. That gap now blocks two shipped increments from having a screen and
-should be sized next. Otherwise, S12 scale hardening.
+- **S10j** (§3am) — **a browser journey actually runs, triggered from the console.** Until this,
+  none could run anywhere: `LocalJmeterExecutionProvider` rejected every non-JMeter engine and was
+  the only provider bean, and the Kubernetes path it pointed people to was a placeholder entrypoint
+  that never invoked `npx playwright test`. Now `EngineRoutingExecutionProvider` dispatches by
+  engine (resolving `inspect`/`cancel` through the handle's own provider, so a restart cannot hand a
+  shard to an adapter that never started it), and `LocalPlaywrightExecutionProvider` runs a cohort of
+  real browsers from two Node scripts shipped as jar resources. Sources resolve from
+  `workspace://<path>` inside a configured root — development only, and reported as a **warning**,
+  because a file on disk can change between two runs of the same immutable version.
+
+  It also fixed **`CanonicalJson`, which emitted invalid JSON**: every field after the first was
+  written with no separator, so *every plan this platform ever rendered was unparseable* and every
+  plan digest was taken over a malformed document. It survived because JMeter executes a JMX file and
+  never parsed a plan; the browser runner is the first consumer that does. The class had **no test** —
+  it has ten now.
+
+  Verified from the console: 5 browsers × 2 iterations = 10 journeys, 126 samples, `synthetic=false`,
+  ending **Failed / OBJECTIVE_BREACHED** on a genuine p95 breach. **Web vitals report INDETERMINATE**
+  — capturing them needs a fixture injected before page load, and a number synthesized from step
+  timings would be worse than none.
+
+**Next, in order:**
+
+1. **Port the local runner into the container image.** `runner-images/playwright-runner/entrypoint.sh`
+   still does not run Playwright, so **browser workloads cannot execute in production** — only on a
+   developer's machine. `perf-runner.mjs`/`perf-reporter.mjs` were written to be what that image
+   runs; the git-fetch-and-verify block already in the entrypoint stays, and the placeholder tail
+   goes. This is the largest remaining honesty gap: the platform can now show a browser report that
+   no production deployment could produce.
+2. **The studio cannot author a browser test at all** (`HANDOFF.md` §3af) — `toSpecification` always
+   emits `type: protocol` and `engine: jmeter`, so S10h's correlation panel, S10i's git source and
+   now S10j's runnable browser workload all have nowhere to live. Three shipped increments, no
+   screen. The YAML tab is the only way in.
+3. Live progress for browser runs (the reducer is engine-neutral; this is wiring), then S12 scale
+   hardening.
 
 **The saving that makes release 1 affordable:** a browser-**only** web performance test is one
 workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.

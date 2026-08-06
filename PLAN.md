@@ -12,7 +12,9 @@ core features rather than polish.
 
 **Read first:** `HANDOFF.md` for state, `CLAUDE.md` for the contract, `ROADMAP.md` for what remains.
 
-**Status: S1 through S11 are built.** See §11 for the per-increment state and `HANDOFF.md`
+**Status: S1 through S11 are built**, and **S10j made browser journeys executable** — until it,
+nothing in the platform could actually run a Playwright workload. See §11 for the per-increment state
+and `HANDOFF.md`
 §3n–§3ad for what each delivered. The S10 recorder security review is complete in
 [`docs/architecture/recorder-security-review.md`](docs/architecture/recorder-security-review.md).
 S10a and S10b added the security foundation with domain-level recorder allowlist, address and route
@@ -758,7 +760,7 @@ does. So web performance costs S6 alone, not S7 + S8.
 | **S7** | Live monitoring | 9 Monitor | Large | — | **done** — `HANDOFF.md` §3w |
 | **S8** | Load profiles: rate as well as users | 6 Load | Medium | — | **done** — `HANDOFF.md` §3x |
 | **S9** | One run, many workloads | structural | Large | — | **done** — `HANDOFF.md` §3y |
-| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **built** — S10a–S10i. Bridge, draft, defect fixes, long-poll, the Validator proving a recording's correlations, and git-pinned import with a repository allowlist. **No studio surface for the git source**: §3af's browser-authoring gap blocks it |
+| **S10** | The recorder, and git-pinned Playwright sources | 2 Sources → Record | Large | — | **built** — S10a–S10j. Bridge, draft, defect fixes, long-poll, the Validator proving a recording's correlations, git-pinned import with a repository allowlist, and **S10j: browser journeys that actually execute**, via per-engine execution routing plus a local Playwright adapter — which also fixed `CanonicalJson` emitting invalid JSON. **Two gaps remain**: the container runner is still a placeholder (no production browser execution), and §3af's browser-authoring gap leaves all of this with no studio surface |
 | **S11** | Web performance under load | Test type 3 ★ | Medium | — | **done** — `HANDOFF.md` §3ad |
 | **S12** | Scale, baselines, comparison | 10 Report | Medium | — | |
 
@@ -1026,8 +1028,26 @@ refused at compile rather than emitted empty, and `GitSourceAllowlist` stops a s
 a repository nobody declared — fail-closed, because an empty allowlist means "not decided", not "no
 restriction". Credentials in a clone URL are refused outright. `HANDOFF.md` §3al.
 
-**S10 is built.** What remains is not S10's: the studio cannot author a browser test at all
-(`HANDOFF.md` §3af), so neither S10h's correlation panel nor S10i's git-source form has a screen.
+**S10j — a browser journey actually runs.** S6 through S10i built everything up to the moment of
+execution and stopped there: compile, digest, admit, reserve capacity, render, store — and then
+nothing could run a Playwright workload anywhere. The local adapter rejected every non-JMeter engine
+and was the only provider bean; the Kubernetes path its error message recommended was a placeholder
+entrypoint that never invoked `npx playwright test`. Execution now routes **per engine** rather than
+per deployment, and `LocalPlaywrightExecutionProvider` drives a real browser cohort from a
+`workspace://` script for development.
+
+It also fixed `CanonicalJson`, which wrote no separator between object fields, making **every plan
+this platform ever rendered invalid JSON** and every plan digest a hash of a malformed document. It
+went unseen because JMeter executes a JMX file and never parsed a plan — the browser runner is the
+first consumer that does, and it failed on the first field. The class had no test. `HANDOFF.md` §3am.
+
+**S10 is built.** Two things remain, and neither is small:
+
+- **The container runner is still a placeholder**, so browser workloads execute on a developer's
+  machine and nowhere else. The platform can now produce a browser report that no production
+  deployment could. Porting `perf-runner.mjs`/`perf-reporter.mjs` into the pinned image is the fix.
+- **The studio cannot author a browser test at all** (`HANDOFF.md` §3af), so S10h's correlation
+  panel, S10i's git-source form and S10j's runnable browser workload have no screen between them.
 
 ### S11 — web performance under load — **built**
 

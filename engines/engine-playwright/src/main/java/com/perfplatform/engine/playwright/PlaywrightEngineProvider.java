@@ -194,6 +194,8 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
          * claim: a plan is immutable, digested and executed, and one that describes no material
          * describes a test that cannot exist.
          */
+        // A workspace:// URI counts as material here: it arrives in sourceUri like any other, and
+        // the runner resolves it against its own checkout rather than fetching it.
         var git = source == null ? null : source.git();
         boolean hasArtifact = source != null && source.uri() != null && !source.uri().isBlank();
         if (!hasArtifact && git == null) {

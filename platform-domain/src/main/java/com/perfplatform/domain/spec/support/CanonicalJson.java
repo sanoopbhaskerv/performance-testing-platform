@@ -99,7 +99,11 @@ public final class CanonicalJson {
         prefix();
         writeString(key);
         out.append(':');
-        needsComma = false;
+        // needsComma stays true, so the *next* member is separated from this one. Clearing it here
+        // suppressed the separator for every field after the first, producing documents like
+        // {"a":"1""b":"2"} — accepted by nothing. The structures that legitimately need it cleared,
+        // startArray and startObject, clear it themselves after pushing their scope, because it is
+        // the first member *inside* the new structure that must not be preceded by a comma.
     }
 
     private void prefix() {
