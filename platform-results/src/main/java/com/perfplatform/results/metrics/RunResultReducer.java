@@ -57,14 +57,24 @@ public final class RunResultReducer {
 
         long windowStart = Long.MAX_VALUE;
         long windowEnd = Long.MIN_VALUE;
+        // Secondary measurements can have different units (for example layout-shift scores).
+        // They remain individually queryable without changing headline journey/request results.
+        List<Sample> aggregateSamples = samples.stream().filter(Sample::includeInAggregate).toList();
 
         // Grouped by operation in a sorted map so the output order is stable across runs. An order
         // that depended on hash iteration would make two summaries of identical samples differ.
         Map<String, List<Sample>> byOperation = new TreeMap<>();
         for (Sample sample : samples) {
             byOperation.computeIfAbsent(sample.operation(), key -> new ArrayList<>()).add(sample);
-            windowStart = Math.min(windowStart, sample.timestampMillis());
-            windowEnd = Math.max(windowEnd, sample.timestampMillis() + sample.elapsedMillis());
+            if (sample.includeInAggregate()) {
+                windowStart = Math.min(windowStart, sample.timestampMillis());
+                windowEnd = Math.max(windowEnd, sample.timestampMillis() + sample.elapsedMillis());
+            }
+        }
+
+        if (aggregateSamples.isEmpty()) {
+            windowStart = samples.stream().mapToLong(Sample::timestampMillis).min().orElseThrow();
+            windowEnd = samples.stream().mapToLong(Sample::timestampMillis).max().orElseThrow();
         }
 
         long windowMillis = Math.max(1, windowEnd - windowStart);
@@ -75,8 +85,9 @@ public final class RunResultReducer {
 
         // Unparsed rows are attributed to the aggregate only. They cannot be attributed to an
         // operation — being unreadable is precisely why their operation is unknown.
-        OperationMetrics overall = summarize(OperationMetrics.ALL, samples, windowMillis,
-                sampleSet.unparsedRows());
+        OperationMetrics overall = aggregateSamples.isEmpty()
+                ? withUnparsed(OperationMetrics.empty(OperationMetrics.ALL), sampleSet.unparsedRows())
+                : summarize(OperationMetrics.ALL, aggregateSamples, windowMillis, sampleSet.unparsedRows());
 
         return new NormalizedRunResult(runId, engine,
                 Optional.of(Instant.ofEpochMilli(windowStart)),

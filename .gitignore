@@ -15,6 +15,9 @@ Desktop.ini
 
 # Java & Maven Outputs
 **/target/
+# The domain also has Java packages named target; these are source, not Maven output.
+!**/src/**/target/
+!**/src/**/target/**
 *.class
 *.jar
 *.war
@@ -39,3 +42,6 @@ perf-report.html
 
 # Local run state from scripts/start-platform.sh
 .local/
+
+# Python verification helper bytecode
+**/__pycache__/

@@ -121,7 +121,7 @@ function main() {
     // Only journey durations reach the aggregate. A web vital is a page measurement on a different
     // scale — a CLS score and a journey duration averaged together would be a number describing
     // nothing — so vitals stay in their own named rows and out of the headline.
-    if (!metric.startsWith(WEB_METRIC_PREFIX)) {
+    if (metric === 'browser.journey.duration') {
       add(overall, value, success);
     }
   }
@@ -143,14 +143,14 @@ function main() {
 
   const document = {
     schema: SCHEMA,
-    runId: process.env.RUN_ID,
-    shardId: process.env.SHARD_ID,
-    shardIndex: Number.parseInt(process.env.SHARD_INDEX || '0', 10),
-    shardCount: Number.parseInt(process.env.SHARD_COUNT || '1', 10),
+    runId: process.env.PERF_RUN_ID || process.env.RUN_ID,
+    shardId: process.env.PERF_SHARD_ID || process.env.SHARD_ID,
+    shardIndex: Number.parseInt(process.env.PERF_SHARD_INDEX || process.env.SHARD_INDEX || '0', 10),
+    shardCount: Number.parseInt(process.env.PERF_SHARD_COUNT || process.env.SHARD_COUNT || '1', 10),
     engine: 'playwright',
     // Echoed so the control plane can refuse a snapshot describing a different plan, exactly as it
     // does for the runner manifest.
-    planDigest: process.env.PLAN_DIGEST || '',
+    planDigest: process.env.PERF_PLAN_DIGEST || process.env.PLAN_DIGEST || '',
     capturedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
     elapsedSeconds: Math.max(0, Number.parseInt(elapsedSeconds, 10) || 0),
     windowSeconds: window,

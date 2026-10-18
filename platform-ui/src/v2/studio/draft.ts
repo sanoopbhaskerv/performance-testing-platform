@@ -99,7 +99,7 @@ export interface LoadShape {
 }
 
 /** The metrics the platform can currently judge. An objective on anything else is not evaluated. */
-export type ObjectiveMetric = 'http.response.time' | 'http.error.rate' | 'http.throughput';
+export type ObjectiveMetric = 'http.response.time' | 'http.error.rate' | 'http.throughput' | 'browser.journey.duration' | 'browser.error.rate' | 'web.lcp' | 'web.cls' | 'web.ttfb';
 
 export interface ObjectiveDraft {
   metric: ObjectiveMetric;
@@ -118,6 +118,11 @@ export interface StudioDraft {
   application: string;
   environment: string;
   runnerCell: string;
+  browser: {
+    mode: 'upload' | 'git'; script: string; uri: string; digest: string;
+    uploadedForTeam: string; reviewed: boolean; repository: string; ref: string; path: string;
+    users: number; iterations: number; maxMinutes: number; device: 'desktop' | 'mobile';
+  };
   journeys: Journey[];
   load: LoadShape;
   objectives: ObjectiveDraft[];
@@ -150,6 +155,7 @@ export function newDraft(testType: TestType, team: string): StudioDraft {
     application: '',
     environment: 'performance',
     runnerCell: 'local',
+    browser: { mode: 'upload', script: '', uri: '', digest: '', uploadedForTeam: '', reviewed: false, repository: '', ref: '', path: '', users: 1, iterations: 1, maxMinutes: 5, device: 'desktop' },
     journeys: [],
     load: {
       model: 'users',
@@ -162,7 +168,10 @@ export function newDraft(testType: TestType, team: string): StudioDraft {
       steadySeconds: 120,
       rampDownSeconds: 15,
     },
-    objectives: [
+    objectives: testType === 'web-experience' ? [
+      { metric: 'browser.journey.duration', percentile: 95, journey: null, value: 8000 },
+      { metric: 'browser.error.rate', percentile: null, journey: null, value: 0 },
+    ] : [
       { metric: 'http.response.time', percentile: 95, journey: null, value: 1000 },
       { metric: 'http.error.rate', percentile: null, journey: null, value: 1 },
     ],

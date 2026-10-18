@@ -269,7 +269,7 @@ function targetKey(target: Target) {
   return `${target.teamId}:${target.application}:${target.environment}`;
 }
 
-export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
+export default function PerformanceConsole({ apiKey, teamNames = [], recorderAvailable = false }: { apiKey: string; teamNames?: string[]; recorderAvailable?: boolean }) {
   const client = useMemo(() => new V2Client(apiKey), [apiKey]);
 
   const [definitions, setDefinitions] = useState<TestDefinition[]>([]);
@@ -525,7 +525,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
     return (
       <div className="v2-empty">
         <AlertCircle size={18} />
-        <p>Enter your team's API key above to use the performance console.</p>
+        <p>Enter your team access token above. For the local demo, use local-dev-key-not-a-secret.</p>
       </div>
     );
   }
@@ -605,7 +605,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
         {studioOpen && (
           <Studio
             client={client}
-            team=""
+            team={teamNames.length === 1 ? teamNames[0] : ''}
             seed={recordingSeed ? { testType: 'api-load', ...recordingSeed } : null}
             onSaved={(name) => {
               setStudioOpen(false);
@@ -620,7 +620,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           />
         )}
 
-        <div className="recorder-entry">
+        {recorderAvailable && <div className="recorder-entry">
           <div>
             <h3>Recorder</h3>
             <p className="muted">
@@ -649,7 +649,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
               <Video size={14} /> Start guarded recording
             </button>
           </div>
-        </div>
+        </div>}
 
         {recordingSession && (
           <RecorderPanel
@@ -785,6 +785,8 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
           </p>
         ) : (
           <>
+            <details className="advanced"><summary>Optional session authentication</summary>
+            <p className="muted">Only needed when this test explicitly uses a runtime session credential. Leave blank for a public or unauthenticated journey.</p>
             <div className="runtime-credential">
               <label htmlFor="session-credential">Session credential</label>
               <input
@@ -796,6 +798,7 @@ export default function PerformanceConsole({ apiKey }: { apiKey: string }) {
                 autoComplete="off"
               />
             </div>
+            </details>
             <ul className="definitions">
               {definitions.map((definition) => (
                 <li key={definition.id}>

@@ -34,17 +34,23 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.deploymentProfile | quote }}
+            - name: SERVICE_TOKEN_FILE
+              value: {{ if .Values.auth.serviceTokenSecret }}"/var/run/perfplatform/auth/identities.json"{{ else }}""{{ end }}
+            - name: MAX_CONCURRENT_RUNS
+              value: {{ .Values.capacity.maxConcurrentRuns | quote }}
             - name: SPRING_DATASOURCE_URL
               value: {{ include "performance-platform.databaseUrl" . | quote }}
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: password
             # ── V2 execution and storage ──────────────────────────────────
             # Production runs workloads as isolated, ephemeral Kubernetes Jobs.
@@ -138,7 +144,17 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          {{- if .Values.artifacts.controlPlaneCredentialsSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.artifacts.controlPlaneCredentialsSecret | quote }}
+          {{- end }}
           volumeMounts:
+            {{- if .Values.auth.serviceTokenSecret }}
+            - name: service-identities
+              mountPath: /var/run/perfplatform/auth
+              readOnly: true
+            {{- end }}
             - name: team-configs
               mountPath: /config/teams
               readOnly: true
@@ -169,6 +185,11 @@ spec:
               cpu: {{ .Values.resources.platformCore.limits.cpu }}
               memory: {{ .Values.resources.platformCore.limits.memory }}
       volumes:
+        {{- if .Values.auth.serviceTokenSecret }}
+        - name: service-identities
+          secret:
+            secretName: {{ .Values.auth.serviceTokenSecret | quote }}
+        {{- end }}
         - name: team-configs
           configMap:
             name: {{ include "performance-platform.fullname" . }}-team-configs

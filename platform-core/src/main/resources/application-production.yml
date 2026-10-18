@@ -1,0 +1,27 @@
+# Production refuses local execution, filesystem artifacts and development identity in Java too.
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  jpa:
+    open-in-view: false
+  h2:
+    console:
+      enabled: false
+platform:
+  orchestration:
+    synchronize-teams-from-yaml: false
+    session-acquisition:
+      provider: disabled
+management:
+  health:
+    mail:
+      enabled: false
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState

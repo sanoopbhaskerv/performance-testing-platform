@@ -622,7 +622,7 @@ class ProductionSafetyGuardTest {
         void defaults() {
             var limits = configurationFor("local").capacityLimits(TEAMS);
 
-            assertThat(limits.globalMaxRuns()).isEqualTo(10);
+            assertThat(limits.globalMaxRuns()).isEqualTo(5);
             assertThat(limits.defaultTeamMaxRuns()).isEqualTo(1);
         }
 

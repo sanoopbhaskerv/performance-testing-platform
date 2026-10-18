@@ -1,0 +1,13 @@
+{{- if eq .Values.deploymentProfile "production" -}}
+{{- $auth := required "Set auth.serviceTokenSecret to an existing Secret with identities.json" .Values.auth.serviceTokenSecret -}}
+{{- $database := required "Set database.existingSecret to an existing Secret with username/password" .Values.database.existingSecret -}}
+{{- $bucket := required "Set artifacts.bucket to your private artifact bucket" .Values.artifacts.bucket -}}
+{{- if not .Values.runnerCell.egress.allowedCidrs -}}
+{{- fail "Set runnerCell.egress.allowedCidrs to approved target/storage/proxy networks; imported scripts require network isolation" -}}
+{{- end -}}
+{{- range .Values.runnerCell.egress.allowedCidrs -}}
+{{- if or (eq . "0.0.0.0/0") (eq . "::/0") -}}
+{{- fail "Unrestricted runner egress is not permitted by the production profile" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

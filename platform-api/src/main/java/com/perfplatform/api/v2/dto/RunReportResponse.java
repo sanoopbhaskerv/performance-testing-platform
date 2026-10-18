@@ -89,6 +89,7 @@ public record RunReportResponse(
             @Schema(description = "PROTOCOL for API load, BROWSER for a real-browser journey")
             String type,
             int peakUsers,
+            Integer iterationsPerUser,
             long totalDurationSeconds,
             List<StageResponse> stages,
             List<ScenarioResponse> scenarios) {
@@ -255,6 +256,7 @@ public record RunReportResponse(
                     workload.name(),
                     workload.type() == null ? null : workload.type().name(),
                     workload.peakUsers(),
+                    workload.iterationsPerUser(),
                     workload.totalDuration().toSeconds(),
                     stages,
                     scenarios));

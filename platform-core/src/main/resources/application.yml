@@ -10,7 +10,7 @@ spring:
     url: ${DB_URL:jdbc:h2:mem:perfplatform;DB_CLOSE_DELAY=-1}
     username: ${DB_USER:sa}
     password: ${DB_PASS:}
-    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    driver-class-name: ${DB_DRIVER:}
 
   h2:
     console:
@@ -57,6 +57,8 @@ spring:
 
 # Platform configuration
 platform:
+  security:
+    service-token-file: ${SERVICE_TOKEN_FILE:}
   # Where team config YAML files live (can be a mounted ConfigMap in K8s)
   config-dir: ${TEAM_CONFIG_DIR:config/teams}
 
@@ -167,7 +169,7 @@ platform:
     # CLAUDE.md §13. Ten is the worst-case ceiling, not a target — normal operation is three or
     # four. One per team by default is what stops a single team occupying every global slot.
     capacity:
-      global-max-runs: ${MAX_CONCURRENT_RUNS:10}
+      global-max-runs: ${MAX_CONCURRENT_RUNS:5}
       default-team-max-runs: ${MAX_CONCURRENT_RUNS_PER_TEAM:1}
       # Raise a specific team to the policy-approved maximum of 2 by name, e.g.
       # team-overrides:

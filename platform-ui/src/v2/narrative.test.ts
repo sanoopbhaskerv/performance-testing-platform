@@ -41,6 +41,16 @@ const report = (over: Partial<RunReport> = {}): RunReport => ({
 });
 
 describe('summarize', () => {
+  it('describes browser journeys without claiming configured concurrency was observed', () => {
+    const r = report();
+    r.measurements!.engine = 'playwright';
+    r.measurements!.overall = metrics({ sampleCount: 4 });
+    r.objectives = [objective({ metric: 'browser.journey.duration' })];
+    const detail = summarize(r).detail.join(' ');
+    expect(detail).toContain('4 browser journeys were measured');
+    expect(detail).not.toContain('requests were sent');
+    expect(detail).not.toContain('95% completed within');
+  });
   describe('a synthetic run says so before anything else', () => {
     const narrative = summarize(report({ synthetic: true }));
 

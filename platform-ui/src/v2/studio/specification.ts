@@ -61,8 +61,14 @@ export function approximateDuration(seconds: number): string {
 /** The unit an objective's number carries, decided by its metric rather than typed by a consumer. */
 export function objectiveThreshold(objective: ObjectiveDraft): string {
   switch (objective.metric) {
+    case 'browser.journey.duration':
+    case 'web.lcp':
+    case 'web.ttfb':
     case 'http.response.time':
       return `${objective.value}ms`;
+    case 'web.cls':
+      return `${objective.value}score`;
+    case 'browser.error.rate':
     case 'http.error.rate':
       return `${objective.value}%`;
     case 'http.throughput':
@@ -245,6 +251,7 @@ export function toSpecification(draft: StudioDraft): string {
   if (!name) throw new IncompleteDraftError('The test needs a name.');
   if (!draft.application.trim()) throw new IncompleteDraftError('The test needs an application.');
 
+  if (draft.testType === 'web-experience') return browserSpecification(draft);
   const journeys = normalizeShares(includedJourneys(draft));
   if (journeys.length === 0) {
     throw new IncompleteDraftError(
@@ -322,4 +329,31 @@ export function governanceCeilingSeconds(draft: StudioDraft): number {
 export function totalDurationSeconds(draft: StudioDraft): number {
   const { rampUpSeconds, steadySeconds, rampDownSeconds } = draft.load;
   return Math.max(0, rampUpSeconds) + Math.max(0, steadySeconds) + Math.max(0, rampDownSeconds);
+}
+
+/** Browser source, capacity and objectives remain the canonical API/YAML model. */
+function browserSpecification(draft: StudioDraft): string {
+  const b = draft.browser;
+  if (!b.reviewed) throw new IncompleteDraftError('Review the browser journey before saving.');
+  if (b.mode === 'upload' && (!b.uri || b.uploadedForTeam !== draft.team)) {
+    throw new IncompleteDraftError('Store the reviewed script for the selected team.');
+  }
+  if (b.mode === 'git' && (!/^https:\/\//.test(b.repository) || !/^[a-f0-9]{40}$/i.test(b.ref) || !b.path)) {
+    throw new IncompleteDraftError('Provide a repository, complete commit SHA and test path.');
+  }
+  const quote = (value: string) => JSON.stringify(value);
+  const workload = `${draft.name.trim()}-browser`;
+  return [
+    `apiVersion: ${API_VERSION}`, `kind: ${KIND}`, '', 'metadata:',
+    `  name: ${quote(draft.name.trim())}`, `  team: ${quote(draft.team)}`,
+    `  application: ${quote(draft.application.trim())}`, '', 'spec:',
+    '  environment:', `    name: ${quote(draft.environment)}`, `    runnerCell: ${quote(draft.runnerCell)}`,
+    '    targetClass: non-production', '', '  sources:', '    - name: browser-journey', '      type: playwright',
+    ...(b.mode === 'upload' ? [`      uri: ${quote(b.uri)}`, `      digest: ${quote(b.digest)}`] : [
+      '      git:', `        repository: ${quote(b.repository)}`, `        ref: ${quote(b.ref)}`, `        path: ${quote(b.path)}`,
+    ]), '', '  workloads:', `    - name: ${workload}`, '      type: browser', '      engine: playwright',
+    '      sourceRef: browser-journey', `      browserUsers: ${b.users}`, `      iterationsPerUser: ${b.iterations}`,
+    '      browserProfile:', `        device: ${b.device}`, '        network: none', '        cpuThrottle: 1',
+    '', '  objectives:', ...objectiveLines(draft, workload), '', '  governance:', `    maxDuration: ${b.maxMinutes}m`, '',
+  ].join('\n');
 }

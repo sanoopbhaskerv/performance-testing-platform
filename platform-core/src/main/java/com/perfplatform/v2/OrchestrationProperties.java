@@ -707,7 +707,7 @@ public class OrchestrationProperties {
      * occupying every global slot and leaving nine others waiting.
      */
     public static class Capacity {
-        private int globalMaxRuns = 10;
+        private int globalMaxRuns = 5;
         private int defaultTeamMaxRuns = 1;
         private int maxBrowserSessionsPerRun = 20;
 

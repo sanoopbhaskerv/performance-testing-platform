@@ -40,14 +40,12 @@ const API_LOAD_STEPS: Step[] = [
 ];
 
 const WEB_EXPERIENCE_STEPS: Step[] = [
-  { id: 'sources', title: 'Journey', hint: 'Which pages should the test measure?' },
-  { id: 'about', title: 'About', hint: 'What is this test called, and what does it point at?' },
-  { id: 'refine', title: 'Review journey', hint: 'Check what will be measured.' },
-  { id: 'rules', title: 'Rules', hint: 'Correlate values, check responses and add pauses.' },
-  { id: 'load', title: 'Browsers', hint: 'How many real browsers, and how many times?' },
-  { id: 'objectives', title: 'Objectives', hint: 'What counts as fast enough?' },
-  { id: 'validate', title: 'Validate', hint: 'Try one journey before booking load.' },
-  { id: 'review', title: 'Save and run', hint: 'Check the test, then start it.' },
+  { id: 'about', title: 'About', hint: 'Name your test and choose the application to measure.' },
+  { id: 'sources', title: 'Browser journey', hint: 'Bring a reviewed Playwright journey, or try the small example.' },
+  { id: 'load', title: 'Browsers', hint: 'Start with one browser, then increase the cohort after checking the result.' },
+  { id: 'objectives', title: 'Objectives', hint: 'How long may the journey take, and how many failures are acceptable?' },
+  { id: 'validate', title: 'Check configuration', hint: 'Check the saved requirements before making real requests.' },
+  { id: 'review', title: 'Save and run', hint: 'Save this configuration, then start it from the test list.' },
 ];
 
 export function stepsFor(testType: TestType): Step[] {
@@ -61,6 +59,21 @@ export function stepsFor(testType: TestType): Step[] {
  * actionable; "journeys.length must be greater than 0" is a stack trace with better manners.
  */
 export function blockerFor(step: StepId, draft: StudioDraft): string | null {
+  if (draft.testType === 'web-experience') {
+    const b = draft.browser;
+    if (step === 'sources') {
+      if (!b.reviewed) return 'Review the journey and confirm that it may run against this target.';
+      if (b.mode === 'upload' && (!b.uri || b.uploadedForTeam !== draft.team)) return 'Store the reviewed script for this team.';
+      if (b.mode === 'git' && (!/^https:\/\//.test(b.repository) || !/^[a-f0-9]{40}$/i.test(b.ref) || !b.path || b.path.split('/').includes('..'))) return 'Provide an HTTPS repository, complete commit SHA and a path inside it.';
+      return null;
+    }
+    if (step === 'load') {
+      if (!Number.isInteger(b.users) || b.users < 1 || b.users > 20) return 'Choose between 1 and 20 browsers.';
+      if (!Number.isInteger(b.iterations) || b.iterations < 1 || b.iterations > 1000) return 'Choose between 1 and 1,000 journeys per browser.';
+      if (!Number.isInteger(b.maxMinutes) || b.maxMinutes < 1 || b.maxMinutes > 60) return 'Choose a time limit between 1 and 60 minutes.';
+      return null;
+    }
+  }
   switch (step) {
     case 'sources':
       return draft.journeys.length === 0

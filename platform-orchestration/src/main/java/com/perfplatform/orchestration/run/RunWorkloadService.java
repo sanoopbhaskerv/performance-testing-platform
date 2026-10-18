@@ -184,6 +184,12 @@ public final class RunWorkloadService {
 
         PerformanceTestSpecification specification = version.specification();
         ExecutionEngineProvider engine = engines.require(plan.engine());
+        if ("playwright".equals(plan.engine())) {
+            specification.spec().sources().stream()
+                    .filter(source -> source.uri() != null && source.uri().startsWith("artifact://"))
+                    .forEach(source -> com.perfplatform.domain.port.BrowserSourceStore.requireOwned(
+                            run.teamId(), source.uri(), source.digest()));
+        }
 
         TargetAddress target = resolveTarget(run, specification);
 

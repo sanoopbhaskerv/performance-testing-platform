@@ -1,0 +1,35 @@
+name: Verify platform
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: |
+            platform-ui/package-lock.json
+            runner-images/playwright-runner/package-lock.json
+      - run: mvn -B clean verify
+      - run: npm ci --prefix platform-ui
+      - run: npm --prefix platform-ui test
+      - run: npm --prefix platform-ui run lint
+      - run: npm --prefix platform-ui run build
+      - run: npm ci --prefix runner-images/playwright-runner
+      - run: npx --prefix runner-images/playwright-runner playwright install --with-deps chromium
+      - run: npm --prefix runner-images/playwright-runner test
+      - run: python3 scripts/perf.py --help
+      - run: git diff --check

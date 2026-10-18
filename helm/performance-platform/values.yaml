@@ -1,3 +1,12 @@
+# Standalone deployment. Supply existing Secrets before installing in production.
+deploymentProfile: production
+auth:
+  serviceTokenSecret: ""
+capacity:
+  maxConcurrentRuns: 5
+legacyJobTemplate:
+  enabled: false
+
 # ─────────────────────────────────────────────────────────
 #  Performance Testing Platform — Helm values
 #  Customize for your EKS cluster.
@@ -43,6 +52,10 @@ runnerCell:
   # A namespace of its own. A runner executes a plan compiled from a user's
   # document and is the least trusted thing in the platform; it must not share a
   # namespace with the control plane's Secrets and ServiceAccounts.
+  egress:
+    # Restrict imported code at the network layer. Requires a NetworkPolicy-capable CNI.
+    # Include approved targets plus object storage and, for git sources, git/npm egress proxies.
+    allowedCidrs: []
   namespace: perf-runners
 
   # The identity a runner Pod runs as. Scoped to uploading its own artifacts.
@@ -64,7 +77,7 @@ runnerCell:
   # matches while the thing executing it has changed.
   images:
     jmeter: "perfplatform/jmeter-runner:5.6.3-1"
-    playwright: "mcr.microsoft.com/playwright:v1.50.0-noble"
+    playwright: "perfplatform/playwright-runner:1.62.1-1"
 
   # Sized so the generator is not the bottleneck. A throttled load generator
   # reports latencies of itself rather than of the system under test — calibrate
@@ -147,6 +160,7 @@ artifacts:
   # Create it out of band:
   #   kubectl -n perf-runners create secret generic runner-storage-credentials \
   #     --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+  controlPlaneCredentialsSecret: ""
   runnerCredentialsSecret: ""
 
 # Session acquisition provider seam. Values are coordinates and secret
@@ -155,7 +169,7 @@ sessionAcquisition:
   # Local foundation mode. Production profiles refuse this; choose an approved
   # real provider adapter such as oauth2-refresh or external-session-broker once
   # it is installed.
-  provider: runtime-credential
+  provider: disabled
   runtimeCredentialTtl: 12h
   requestTimeout: 10s
   endpoint: ""
@@ -182,6 +196,7 @@ secretResolver:
 # eventually.
 
 database:
+  existingSecret: "" # Keys: username, password. Required for production.
   username: "perf"
   password: "perf" # Use a K8s Secret in production
 
@@ -193,6 +208,7 @@ mat:
 
 # Karpenter node selector for JMeter job pods (CPU-heavy, spot-safe)
 karpenter:
+  enabled: false # Optional; the same chart works on any Kubernetes provider.
   nodePool: perf-testing
   instanceCategory: c # Compute optimised (c5, c6i etc.)
   capacityType: spot # Use spot instances to save cost

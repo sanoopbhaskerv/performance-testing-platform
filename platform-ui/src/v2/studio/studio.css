@@ -209,7 +209,9 @@
 }
 
 .v2 .studio-field input[type='text'],
+.v2 .studio-field input:not([type]),
 .v2 .studio-field input[type='number'],
+.v2 .studio-field textarea,
 .v2 .studio-field select {
   font: inherit;
   font-size: var(--pf-text-md);
@@ -218,6 +220,19 @@
   border: 1px solid var(--pf-border-field);
   background: var(--pf-surface-sunken);
   color: inherit;
+}
+
+.v2 .studio-field textarea {
+  resize: vertical;
+  min-height: 12rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.5;
+}
+
+.v2 fieldset.studio-field {
+  border: 1px solid var(--pf-border-field);
+  border-radius: var(--pf-radius-sm);
+  padding: var(--pf-space-4);
 }
 
 .v2 .studio-grid {

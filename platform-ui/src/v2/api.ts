@@ -282,6 +282,7 @@ export interface WorkloadProfile {
   name: string;
   type: string | null;
   peakUsers: number;
+  iterationsPerUser?: number | null;
   totalDurationSeconds: number;
   stages: Stage[];
   scenarios: Scenario[];
@@ -608,7 +609,14 @@ export class V2Client {
   }
 
   private get headers() {
-    return { 'X-API-Key': this.apiKey };
+    return { 'X-API-Key': this.apiKey, Authorization: `Bearer ${this.apiKey.replace(/^Bearer\s+/, '')}` };
+  }
+
+  uploadBrowserSource(team: string, script: string) {
+    return axios.post<{ uri: string; digest: string; sizeBytes: number }>(
+      '/api/v2/browser-sources', script, {
+        params: { team, reviewed: true }, headers: { ...this.headers, 'Content-Type': 'text/plain' },
+      }).then(r => r.data);
   }
 
   listDefinitions() {
@@ -802,8 +810,8 @@ export class V2Client {
    */
   listTeamNames() {
     return axios
-      .get<string[]>('/api/v1/config/teams', { headers: this.headers })
-      .then((r) => r.data);
+      .get<{ teams: string[] }>('/api/v2/platform/caller', { headers: this.headers })
+      .then((r) => r.data.teams);
   }
 
   recordingDraft(sessionId: string) {

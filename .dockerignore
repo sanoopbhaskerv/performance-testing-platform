@@ -1,0 +1,9 @@
+.git
+.local
+**/node_modules
+**/target
+**/dist
+**/test-results
+**/playwright-report
+!platform-core/target/
+!platform-core/target/platform-core-1.0.0.jar

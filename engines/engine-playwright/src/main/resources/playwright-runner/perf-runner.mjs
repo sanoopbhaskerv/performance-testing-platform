@@ -1,188 +1,128 @@
-/*
- * Local browser runner bootstrap.
- *
- * Reads the immutable rendered plan the control plane wrote beside it, resolves the reviewed
- * Playwright script, generates a config from the plan's cohort settings, and runs
- * `npx playwright test`. It decides nothing: every number it uses — browser sessions, iterations,
- * target URL, correlation header — comes from the plan, which is digested and was validated before
- * a slot was ever reserved for it.
- *
- * Written in Node rather than Java for one reason: the plan is JSON and Node parses JSON without a
- * dependency, so the control plane needs no JSON library on the execution path. It also keeps this
- * file close in shape to runner-images/playwright-runner/entrypoint.sh, so the local adapter and the
- * production container stay recognizably the same procedure.
- *
- * Exit codes: 0 success, non-zero failure. Playwright's own exit code is passed through when it ran,
- * so a failing journey fails the shard rather than being reported as a platform fault.
- */
-
-import { spawn } from 'node:child_process';
+/** Shared local/container bootstrap. Only reviewed source runs, with capacity from the plan. */
+import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
-const planFile = process.env.PERF_PLAN_FILE;
-const workDir = process.env.PERF_WORK_DIR;
-const workspaceRoot = process.env.PERF_WORKSPACE_ROOT;
-const resultsFile = process.env.PERF_RESULTS_FILE;
-const npxCommand = process.env.PERF_NPX_COMMAND || 'npx';
-
-function fail(message) {
-  process.stderr.write(`${message}\n`);
-  process.exit(78);
+const env = process.env;
+const work = env.PERF_WORK_DIR;
+const rendered = JSON.parse(fs.readFileSync(env.PERF_PLAN_FILE, 'utf8'));
+const canonical = typeof rendered.compiledPlan === 'string'
+  ? rendered.compiledPlan : JSON.stringify(rendered.compiledPlan);
+const digest = 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
+function fail(message) { throw new Error(message); }
+if (digest !== rendered.planDigest || (env.PERF_PLAN_DIGEST && digest !== env.PERF_PLAN_DIGEST)) {
+  fail('Plan digest mismatch; refusing to generate traffic.');
 }
-
-const rendered = JSON.parse(fs.readFileSync(planFile, 'utf8'));
-
-// The control plane writes the compiled plan as a JSON *string* field, so that the plan's own bytes
-// — the ones the digest was taken over — survive being embedded verbatim. Parsing it back here is
-// what makes it an object again.
-const plan = typeof rendered.compiledPlan === 'string'
-  ? JSON.parse(rendered.compiledPlan)
-  : rendered.compiledPlan;
-
-const workload = plan?.workloads?.[0];
-if (!workload) {
-  fail('The rendered plan carries no browser workload, so there is nothing to run.');
+const plan = JSON.parse(canonical);
+const workload = plan.workloads?.[0];
+if (!workload || plan.engine !== 'playwright') fail('No Playwright workload in this plan.');
+const sessions = Number(workload.browserUsers);
+const iterations = Number(workload.iterationsPerUser);
+if (!Number.isInteger(sessions) || sessions < 1 || sessions > 20 || !Number.isInteger(iterations) || iterations < 1 || iterations > 1000) {
+  fail('Browser count must be 1–20 and iterations 1–1000.');
 }
+if (!['none', 'slow-4g', 'fast-4g', 'wifi'].includes(workload.network)) fail('Unsupported network profile.');
+if (!Number.isFinite(Number(workload.cpuThrottle)) || Number(workload.cpuThrottle) < 1) fail('Invalid CPU profile.');
+const runtimeRoot = env.PERF_RUNTIME_ROOT || path.join(env.PERF_WORKSPACE_ROOT || '', 'runner-images/playwright-runner');
+let testFile;
+let projectDir;
 
-/*
- * Resolving the reviewed script.
- *
- * Only workspace:// is supported by this local adapter. git coordinates are the production path and
- * belong to the container runner, which fetches a pinned commit and verifies that what the remote
- * sent is what was asked for. Doing a half-version of that here — fetching without the verification
- * — would make pinning look implemented while it was a comment, so this refuses instead.
- */
-const sourceUri = workload.sourceUri || '';
-if (!sourceUri.startsWith('workspace://')) {
-  fail(workload.sourceGitRepository
-    ? 'This source is pinned to a git commit, which only the container runner fetches. '
-      + 'Use the Kubernetes provider, or point the source at workspace://<path> for local runs.'
-    : `Source '${sourceUri}' is not a workspace:// path, so the local runner cannot resolve it.`);
+function inside(root, relative) {
+  const base = fs.realpathSync(root);
+  const file = fs.realpathSync(path.resolve(root, relative));
+  if (!file.startsWith(base + path.sep)) fail('Source path escapes its allowed workspace.');
+  return file;
 }
-
-const relative = sourceUri.slice('workspace://'.length);
-const testFile = path.resolve(workspaceRoot, relative);
-
-// Checked against the resolved root rather than by inspecting the string, so a symlink or an
-// encoding trick cannot land outside the workspace the operator configured.
-const rootReal = fs.realpathSync(workspaceRoot);
-if (!fs.existsSync(testFile)) {
-  fail(`No Playwright test at ${relative} inside the configured workspace root.`);
-}
-if (!fs.realpathSync(testFile).startsWith(rootReal + path.sep)) {
-  fail(`Refusing to run ${relative}: it resolves outside the configured workspace root.`);
-}
-
-const projectDir = findProjectDir(path.dirname(testFile), rootReal);
-
-function findProjectDir(from, stopAt) {
-  // The nearest ancestor with a package.json owns the Playwright install and node_modules. Walking
-  // up rather than assuming the repository root matters here: this repository keeps its browser
-  // journeys in demo-student-ui, which has its own @playwright/test.
-  let dir = from;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (dir === parent || !dir.startsWith(stopAt)) {
-      return stopAt;
-    }
-    dir = parent;
+function findProject(from, root) {
+  for (let dir = from; dir.startsWith(root); dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    if (dir === path.dirname(dir)) break;
   }
+  return root;
 }
-
-const sessions = Math.max(1, Number(workload.browserUsers) || 1);
-const iterations = Math.max(1, Number(workload.iterationsPerUser) || 1);
-
-/*
- * The load model, and the one arithmetic mistake worth spelling out.
- *
- * `workers` is the browser cohort: how many real browser instances are open at once. `repeatEach`
- * is how many times Playwright runs *each test*, which is the total journey count — not the count
- * per worker. So a 5-user cohort doing 2 iterations each is 10 journeys, and `repeatEach: 2` would
- * schedule 2 journeys across 5 workers: three browsers would open, do nothing, and close, and the
- * run would report a cohort of five having measured two journeys.
- *
- * Hence sessions * iterations. There is no ramp: a browser cohort is a small fixed population, not
- * a curve (CLAUDE.md §21 — default 5, policy ceiling 20).
- */
-const totalJourneys = sessions * iterations;
-
-/*
- * Any playwright.config in the project is deliberately NOT extended. It would carry its own workers,
- * repeatEach and baseURL, and a run whose concurrency came from a file in the repository rather than
- * from the approved plan would make the plan's capacity figure — the one admission control reserved
- * slots against — a fiction.
- */
-/*
- * Refused here rather than at the first confusing stack trace. Playwright is resolved from the
- * project, not from this runner, so the journey executes under the version it was reviewed against.
- */
+if (workload.sourceUri?.startsWith('workspace://')) {
+  if (env.PERF_CONTAINER === 'true') fail('workspace:// sources are development only. Upload a reviewed script or pin a repository.');
+  const root = fs.realpathSync(env.PERF_WORKSPACE_ROOT);
+  testFile = inside(root, workload.sourceUri.slice('workspace://'.length));
+  projectDir = findProject(path.dirname(testFile), root);
+} else if (workload.sourceGitRepository) {
+  if (env.PERF_CONTAINER !== 'true') fail('Git sources require the isolated container runner.');
+  const { sourceGitRepository: repository, sourceGitRef: ref, sourceGitPath: relative } = workload;
+  if (!/^[a-f0-9]{40}$/i.test(ref)) fail('Use a complete immutable 40-character commit SHA.');
+  const url = new URL(repository);
+  if (url.username || url.password || !['https:'].includes(url.protocol)) fail('Use a credential-free HTTPS repository URL.');
+  projectDir = path.join(work, 'source');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/false', GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (...args) => execFileSync('git', ['-C', projectDir, ...args], { env: gitEnv, stdio: 'pipe', timeout: 120000 });
+  git('init', '--quiet'); git('remote', 'add', 'origin', repository);
+  git('fetch', '--quiet', '--depth', '1', 'origin', ref); git('checkout', '--quiet', '--detach', 'FETCH_HEAD');
+  if (git('rev-parse', 'HEAD').toString().trim() !== ref.toLowerCase()) fail('Fetched commit differs from the approved commit.');
+  testFile = inside(projectDir, relative);
+  projectDir = findProject(path.dirname(testFile), projectDir);
+  if (!fs.existsSync(path.join(projectDir, 'package-lock.json'))) fail('Git projects require package-lock.json for deterministic installation.');
+  execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: projectDir, stdio: 'pipe', timeout: 180000 });
+} else {
+  const expected = `artifact://teams/${env.PERF_TEAM_ID}/sources/playwright/${String(workload.sourceDigest).slice(7)}/journey.spec.ts`;
+  if (workload.sourceUri !== expected) fail('Browser source is not owned by this run’s team.');
+  testFile = env.PERF_SOURCE_FILE;
+  if (!testFile) fail('Uploaded browser source was not delivered.');
+  const actual = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(testFile)).digest('hex');
+  if (actual !== workload.sourceDigest) fail('Browser source digest mismatch.');
+  projectDir = runtimeRoot;
+  // Playwright resolves test imports beside the uploaded script. Only the pinned runtime is exposed.
+  const modules = path.join(path.dirname(testFile), 'node_modules');
+  if (!fs.existsSync(modules)) fs.symlinkSync(path.join(runtimeRoot, 'node_modules'), modules, 'dir');
+}
 const require = createRequire(path.join(projectDir, 'package.json'));
-try {
-  require.resolve('@playwright/test');
-} catch {
-  fail(`No @playwright/test install was found in ${projectDir}. `
-    + 'Run `npm install` there so the platform can start the journey with the same Playwright '
-    + 'version the project was reviewed against.');
+const cli = require.resolve('@playwright/test/cli');
+const version = require('@playwright/test/package.json').version;
+if (env.PERF_PLAYWRIGHT_VERSION && version !== env.PERF_PLAYWRIGHT_VERSION) {
+  fail(`The reviewed project uses Playwright ${version}; this image provides ${env.PERF_PLAYWRIGHT_VERSION}. Build a matching runner image.`);
 }
-
-/*
- * The config lives in the shard's work directory, not in the project, so a run leaves nothing behind
- * in somebody's checkout — a killed run cannot strand a scratch config that the next
- * `npx playwright test` silently picks up.
- *
- * It exports a plain object rather than calling defineConfig, which only exists to attach types.
- * Importing it would mean resolving a CommonJS module from an ESM file outside the project, and
- * paying that complexity for a type annotation nothing here checks.
- */
-const configFile = path.join(workDir, 'perf-playwright.config.mjs');
-fs.writeFileSync(configFile, `
-export default ({
-  testDir: ${JSON.stringify(path.dirname(testFile))},
-  testMatch: ${JSON.stringify(path.basename(testFile))},
-  fullyParallel: true,
-  workers: ${sessions},
-  repeatEach: ${totalJourneys},
-  retries: 0,
-  reporter: [
-    [${JSON.stringify(path.join(workDir, 'perf-reporter.mjs'))}],
-    ['json', { outputFile: ${JSON.stringify(path.join(workDir, 'playwright-report.json'))} }],
-  ],
-  outputDir: ${JSON.stringify(path.join(workDir, 'test-output'))},
-  use: {
-    baseURL: ${JSON.stringify(rendered.targetBaseUrl || '')},
-    headless: true,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    extraHTTPHeaders: {
-      ${JSON.stringify(rendered.correlationHeader || 'X-Performance-Test-Run-Id')}: ${JSON.stringify(rendered.correlationValue || rendered.runId || '')},
-    },
+// Browser projects use the platform's single Chromium project. Project selection is deliberately
+// refused rather than silently ignoring a repository config that could override quotas or retries.
+if (workload.sourceGitProject) fail('Named repository projects are not supported; provide a self-contained journey.');
+const mobile = workload.device === 'mobile';
+if (!['desktop', 'mobile'].includes(workload.device || 'desktop')) fail('Choose desktop or mobile emulation.');
+const originalTestFile = testFile;
+const fixtureFile = path.join(path.dirname(new URL(import.meta.url).pathname), 'perf-fixture.mjs');
+testFile = path.join(path.dirname(originalTestFile), `.perf-${crypto.randomUUID()}.spec.ts`);
+const harness = `import { test as _platformTest } from '@playwright/test';\nimport { beforeBrowserJourney, afterBrowserJourney } from ${JSON.stringify(fixtureFile)};\n_platformTest.beforeEach(beforeBrowserJourney);\n_platformTest.afterEach(afterBrowserJourney);\n`;
+fs.writeFileSync(testFile, harness + fs.readFileSync(originalTestFile, 'utf8'));
+const cleanup = () => { try { fs.unlinkSync(testFile); } catch {} };
+process.on('exit', cleanup);
+const config = path.join(work, 'perf-playwright.config.mjs');
+const output = path.join(work, 'test-output');
+const timeout = Math.min(300000, Math.max(1000, Number(env.PERF_JOURNEY_TIMEOUT_MS || 60000)));
+fs.writeFileSync(config, `export default ${JSON.stringify({
+  testDir: path.dirname(testFile), testMatch: path.basename(testFile), fullyParallel: true,
+  workers: sessions, repeatEach: sessions * iterations, retries: 0, forbidOnly: true,
+  timeout, globalTimeout: Math.max(1000, Number(env.PERF_DEADLINE_SECONDS || plan.durationSeconds || 300) * 1000),
+  reporter: [[path.join(path.dirname(new URL(import.meta.url).pathname), 'perf-reporter.mjs')]],
+  outputDir: output,
+  use: { browserName: 'chromium', baseURL: rendered.targetBaseUrl, headless: true,
+    viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 },
+    isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 3 : 1,
+    trace: 'retain-on-failure', screenshot: 'only-on-failure',
+    extraHTTPHeaders: { [rendered.correlationHeader || 'X-Performance-Test-Run-Id']: rendered.correlationValue || rendered.runId },
   },
+})};`, 'utf8');
+fs.writeFileSync(env.PERF_RESULTS_FILE, 'metric,operation,value,success,timestamp\n');
+const child = spawn(process.execPath, [cli, 'test', '--config', config], {
+  cwd: projectDir, stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...env, PERF_WORKLOAD_NAME: workload.name, PERF_BROWSER_PROFILE: JSON.stringify(workload), BASE_URL: rendered.targetBaseUrl,
+    PERF_RUN_ID: rendered.runId, PERF_CORRELATION_HEADER: rendered.correlationHeader,
+    PERF_CORRELATION_VALUE: rendered.correlationValue },
 });
-`, 'utf8');
-
-
-fs.writeFileSync(resultsFile, 'metric,operation,value,success,timestamp\n', 'utf8');
-
-// retries: 0 above and no retry here. CLAUDE.md §16: a replayed performance test is duplicate load
-// against a real system and invalid results on top of it.
-const child = spawn(npxCommand, ['playwright', 'test', '--config', configFile], {
-  cwd: projectDir,
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    PERF_RESULTS_FILE: resultsFile,
-    PERF_WORKLOAD_NAME: workload.name || 'browser',
-    BASE_URL: rendered.targetBaseUrl || '',
-    PERF_RUN_ID: rendered.runId || '',
-    PERF_CORRELATION_HEADER: rendered.correlationHeader || '',
-    PERF_CORRELATION_VALUE: rendered.correlationValue || '',
-  },
+// Test console output is not a durable artifact. The sanitized summary reports failures without
+// copying arbitrary response bodies or credentials out of an imported test.
+child.stdout.resume(); child.stderr.resume();
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal));
+child.on('error', () => { process.stderr.write('Could not launch the pinned Playwright runtime.\n'); process.exitCode = 78; });
+child.on('exit', (code, signal) => {
+  const measured = fs.readFileSync(env.PERF_RESULTS_FILE, 'utf8').split('\n').some(line => line.startsWith('browser.journey.duration,'));
+  process.exit(signal ? 143 : (!measured ? 78 : (code ?? 1)));
 });
-
-child.on('error', (error) => fail(`Could not start Playwright: ${error.message}`));
-child.on('exit', (code, signal) => process.exit(signal ? 143 : (code ?? 1)));

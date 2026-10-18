@@ -46,7 +46,7 @@ class PlaywrightEngineProviderTest {
         assertThat(provider.engineId()).isEqualTo("playwright");
         assertThat(provider.capabilities().supports(WorkloadKind.BROWSER)).isTrue();
         assertThat(provider.capabilities().requiredRunnerImage())
-                .isEqualTo("mcr.microsoft.com/playwright:v1.50.0-noble");
+                .isEqualTo("perfplatform/playwright-runner:1.62.1-1");
     }
 
     @Test
@@ -108,6 +108,8 @@ class PlaywrightEngineProviderTest {
                 TestRunId.generate(), 1, List.of(new RunnerOutput.ShardResult(0, csv))));
 
         assertThat(samples.unparsedRows()).isEqualTo(1);
+        assertThat(samples.samples()).extracting(sample -> sample.includeInAggregate())
+                .containsExactly(true, false, false, false);
         assertThat(samples.samples()).extracting(sample -> sample.operation())
                 .containsExactly(
                         "browser-experience",

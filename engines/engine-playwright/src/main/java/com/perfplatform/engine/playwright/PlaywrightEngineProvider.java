@@ -39,7 +39,7 @@ public final class PlaywrightEngineProvider implements ExecutionEngineProvider {
     public static final String ENGINE_ID = "playwright";
 
     /** Pinned browser runner image. The registry prefix becomes internal before production use. */
-    public static final String RUNNER_IMAGE = "mcr.microsoft.com/playwright:v1.50.0-noble";
+    public static final String RUNNER_IMAGE = "perfplatform/playwright-runner:1.62.1-1";
 
     private static final String PLAN_VERSION = "v1alpha1";
     private static final int DEFAULT_SHARD_COUNT = 1;

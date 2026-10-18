@@ -21,6 +21,9 @@ import com.perfplatform.domain.port.ResultCatalog;
 import com.perfplatform.domain.port.ProgressCatalog;
 import com.perfplatform.domain.port.RunAnalyzer;
 import com.perfplatform.domain.port.SecretResolver;
+import com.perfplatform.domain.port.BrowserSourceStore;
+import com.perfplatform.persistence.source.FileSystemBrowserSourceStore;
+import com.perfplatform.persistence.source.S3BrowserSourceStore;
 import com.perfplatform.domain.port.SessionAcquisitionProvider;
 import com.perfplatform.domain.port.SessionPoolProvider;
 import com.perfplatform.domain.port.TargetRegistry;
@@ -405,7 +408,7 @@ public class OrchestrationConfiguration {
                         + "Kubernetes Jobs using the pinned runner image.", root);
 
         ExecutionProvider playwrightProvider = new LocalPlaywrightExecutionProvider(
-                clock, artifacts, catalog, node, npx, root, Path.of(properties.getWorkDirectory()));
+                clock, artifacts, catalog, node, npx, root, Path.of(properties.getWorkDirectory()), browserSourceStore());
 
         return new EngineRoutingExecutionProvider(Map.of(
                 JmeterEngineProvider.ENGINE_ID, jmeterProvider,
@@ -541,6 +544,18 @@ public class OrchestrationConfiguration {
      * data it was supposed to send.
      */
     @Bean
+    public BrowserSourceStore browserSourceStore() {
+        var settings = properties.getArtifacts();
+        if ("s3".equalsIgnoreCase(settings.getStore())) {
+            return new S3BrowserSourceStore(s3Client(settings), settings.getBucket());
+        }
+        if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
+            throw new IllegalStateException("Browser sources require object storage in production.");
+        }
+        return new FileSystemBrowserSourceStore(Path.of(properties.getWorkDirectory(), "sources"));
+    }
+
+    @Bean
     public DatasetStore datasetStore() {
         OrchestrationProperties.Artifacts settings = properties.getArtifacts();
         boolean production = environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES));
@@ -638,6 +653,9 @@ public class OrchestrationConfiguration {
                 : settings.getProvider().trim().toLowerCase(Locale.ROOT);
         boolean production = environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES));
 
+        if ("disabled".equals(provider)) {
+            return request -> { throw new IllegalStateException("Application session acquisition is disabled on this deployment."); };
+        }
         if ("runtime-credential".equals(provider)) {
             if (production) {
                 throw new IllegalStateException("The runtime-credential session acquisition provider "
@@ -739,6 +757,15 @@ public class OrchestrationConfiguration {
     public CallerContextProvider callerContextProvider(TeamConfigLoader teamConfigs,
             TeamDirectory teams) {
 
+        if (environment.getProperty("platform.security.service-token-file", "").length() > 0) {
+            return () -> {
+                var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                if (auth == null || !(auth.getPrincipal() instanceof com.perfplatform.domain.security.CallerContext caller)) {
+                    throw new CallerContextProvider.UnauthenticatedException("A valid scoped service token is required.");
+                }
+                return caller;
+            };
+        }
         if (environment.acceptsProfiles(Profiles.of(PRODUCTION_PROFILES))) {
             throw new IllegalStateException(
                     "The development caller-identity provider derives identity from V1 API keys and "
@@ -786,8 +813,9 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
-    public ManageTargetsUseCase manageTargetsUseCase(TargetRegistry targets, TeamDirectory teams) {
-        return new ManageTargetsUseCase(targets, teams);
+    public ManageTargetsUseCase manageTargetsUseCase(TargetRegistry targets, TeamDirectory teams,
+            TeamProvisioning provisioning) {
+        return new ManageTargetsUseCase(targets, teams, provisioning);
     }
 
     /**

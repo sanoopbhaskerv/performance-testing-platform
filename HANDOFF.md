@@ -1,5 +1,68 @@
 # Handoff — live working state
 
+## Current verified state — 19 October 2026
+
+This section supersedes the historical increment notes below. The user's direction is now an open
+source, customizable, self-hosted product usable without performance engineering experience. This
+increment completes the browser wizard and production Playwright path and reviews the complete
+self-service journey. Default global admission is **five** material runs, one per team; browser
+capacity remains separate. The user's working preference explicitly authorizes commit/push and
+updating open PR #1 on `feature/platform-v2-foundation`; merge/deployment/image publication are not
+authorized or performed.
+
+**Delivered:** six browser steps (About/target, reviewed source, browsers, objectives, configuration
+check, save/run); immutable team-owned source upload and S3/filesystem ports; pinned Playwright
+1.62.1-1 production image sharing the local harness; deterministic import, bounded workers/deadline,
+correlation header, page/step evidence, final-page LCP/CLS/TTFB and failure traces; digest-bound
+results and uploads, real progress identities, no empty-test successes. A typed primary-sample flag
+keeps secondary scores/actions out of headline results. New application target registration now
+onboards its application after team authorization. Source Java packages named `target` are now
+explicitly included in Git; the old Maven-output ignore pattern had hidden these required files.
+
+**Self-hosting:** production UI/API image, Helm existing Secret support, expiring hashed scoped
+service identities, production legacy/dev identity restrictions, PostgreSQL driver auto-detection,
+disabled unused session acquisition, restricted runner egress declarations, optional Karpenter,
+MIT license, contribution guide, user/configuration/deployment/extension docs and portable
+`skills/performance-testing/SKILL.md` plus Python CLI. No provider-specific corporate IdP, cloud
+account or secret manager was selected.
+
+**Evidence:** UI-created run `36bf6494-bd51-40ad-b447-f9a30f2a9b13`, four primary journeys, real
+Kubernetes provider, complete evidence, three PASS objectives (journey p95 407 ms, error rate 0%,
+CLS score 0). Restart during ANALYZING completed that persisted run with unchanged Job UID
+`c37b5dd0-6c75-4d1f-8d25-ea07cc73ec3c`. The actual Job ran non-root/read-only root with no retries.
+Portable CLI/API proof: success `c2cd7b13-a652-466d-9fc0-298e7194b453`, assertion breach
+`35def99c-a4ea-4f5d-93b8-ccd990ae8513`, cancellation `6216106c-88f8-455a-9878-3dbbcf291399`;
+seven private digest-verified downloads, idempotent triggers/cancellation, cross-team and expired
+credentials denied. These local fixture timings do not establish application or generator capacity.
+
+**Checks:** full Maven verify with Docker: 1,366 tests, zero failures/errors, one opt-in live recorder
+skip; UI 193 tests/build/lint pass; six runner checks including real Chromium pass; both Docker
+images build; Helm lint and unrestricted-network rejection pass; Python helpers compile, token
+helper permissions/hash/no-output/overwrite checks pass; skill validator passes. Exact guides and
+review: `docs/reviews/browser-self-service-2026-10-19.md`, `docs/user-guide/`,
+`docs/deployment/standalone.md`, `docs/development/extending.md`.
+
+**Local inspection:** disposable kind cluster `perf-browser-verify`, namespaces `perf-browser-proof`
+and `perf-browser-proof-runners`, UI port-forward localhost:18080. Private short-lived credentials
+and proof JSON/screenshots are in ignored `.local/browser-proof/`; never commit them. Setup:
+`scripts/verify-browser-kubernetes.py` on a fresh cluster, verification:
+`scripts/check-browser-self-service.py`. The cluster is left for inspection; cleanup is
+`kind delete cluster --name perf-browser-verify`. No external cloud infrastructure was deployed and
+no container image was published.
+
+**Remaining product work:** operator verification of enforced CNI egress, cloud IAM/encryption,
+real five-team resource calibration, human OIDC, private repository credentials, named project
+configs, remote runner federation, BrowserStack, wizard hybrid authoring. INP/TBT/Lighthouse are
+unavailable rather than inferred. A reviewed browser script is still required; the platform does
+not autonomously generate one. The recommended next increment is release hardening on the target
+operator's infrastructure and a calibrated five-team acceptance test, followed by human SSO once
+the identity provider is selected. Do not revive the historical claim that all product phases are
+complete solely because modules or scaffolds compile.
+
+---
+
+## Historical handoff notes (prior to this verification)
+
 **Purpose:** If the current agent session ends, another agent picks up from here.
 **Read first:** `NEXT-SESSION.md` for the immediate task and how to run it, then this file for state,
 then `ROADMAP.md` for what is left and **where to stop**.

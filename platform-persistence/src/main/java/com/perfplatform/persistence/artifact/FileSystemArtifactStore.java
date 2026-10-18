@@ -239,7 +239,7 @@ public class FileSystemArtifactStore implements ArtifactStore {
         if (fileName.endsWith(".jmx")) {
             return Optional.of(ArtifactType.EXECUTION_PLAN);
         }
-        if (fileName.endsWith(".html") || fileName.endsWith(".html.gz")) {
+        if (fileName.endsWith(".html") || fileName.endsWith(".html.gz") || fileName.equals("playwright-report.json") || fileName.equals("browser-evidence.tar.gz")) {
             return Optional.of(ArtifactType.REPORT);
         }
         return Optional.empty();

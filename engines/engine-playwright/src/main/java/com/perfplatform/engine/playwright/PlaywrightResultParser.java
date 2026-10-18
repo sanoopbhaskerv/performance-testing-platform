@@ -58,7 +58,8 @@ final class PlaywrightResultParser {
                     unparsed++;
                     continue;
                 }
-                samples.add(new Sample(operationKey(metric, operation), value, success, timestamp));
+                samples.add(new Sample(operationKey(metric, operation), value, success, timestamp,
+                        "browser.journey.duration".equals(metric)));
             } catch (RuntimeException e) {
                 unparsed++;
             }

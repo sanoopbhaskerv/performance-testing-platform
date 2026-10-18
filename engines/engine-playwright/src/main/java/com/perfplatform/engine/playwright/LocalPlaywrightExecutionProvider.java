@@ -5,6 +5,7 @@ import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.execution.ProvisionRequest;
 import com.perfplatform.domain.execution.SecretFileDelivery;
 import com.perfplatform.domain.port.ArtifactStore;
+import com.perfplatform.domain.port.BrowserSourceStore;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactDescriptor;
 import com.perfplatform.domain.port.ArtifactStore.ArtifactType;
 import com.perfplatform.domain.port.ResultCatalog;
@@ -60,8 +61,9 @@ public final class LocalPlaywrightExecutionProvider implements ExecutionProvider
 
     /** The bootstrap and reporter, copied out of this jar into each shard's working directory. */
     private static final List<String> RUNNER_SCRIPTS =
-            List.of("perf-runner.mjs", "perf-reporter.mjs");
+            List.of("perf-runner.mjs", "perf-reporter.mjs", "perf-fixture.mjs");
 
+    private final BrowserSourceStore sources;
     private final Clock clock;
     private final ArtifactStore artifacts;
     private final ResultCatalog catalog;
@@ -83,6 +85,13 @@ public final class LocalPlaywrightExecutionProvider implements ExecutionProvider
     public LocalPlaywrightExecutionProvider(Clock clock, ArtifactStore artifacts,
             ResultCatalog catalog, Path nodeCommand, Path npxCommand, Path workspaceRoot,
             Path workDirectory) {
+        this(clock, artifacts, catalog, nodeCommand, npxCommand, workspaceRoot, workDirectory, null);
+    }
+
+    public LocalPlaywrightExecutionProvider(Clock clock, ArtifactStore artifacts,
+            ResultCatalog catalog, Path nodeCommand, Path npxCommand, Path workspaceRoot,
+            Path workDirectory, BrowserSourceStore sources) {
+        this.sources = sources;
         this.clock = clock;
         this.artifacts = artifacts;
         this.catalog = catalog;
@@ -185,7 +194,22 @@ public final class LocalPlaywrightExecutionProvider implements ExecutionProvider
                     workDirectory.resolve(request.runId().value().toString()).resolve(uid));
 
             Path plan = directory.resolve("playwright-plan.json");
-            Files.write(plan, workloadFor(request));
+            byte[] rendered = workloadFor(request);
+            Files.write(plan, rendered);
+            // Uploaded sources are fetched through the owning team's namespace and checked again
+            // before Node is started. No source is evaluated inside the control plane.
+            String document = new String(rendered, StandardCharsets.UTF_8);
+            var match = java.util.regex.Pattern.compile("artifact://teams/[a-f0-9-]+/sources/playwright/([a-f0-9]{64})/journey\\.spec\\.ts").matcher(document);
+            Path sourceFile = directory.resolve("journey.spec.ts");
+            if (match.find()) {
+                String digest = "sha256:" + match.group(1);
+                BrowserSourceStore.requireOwned(request.teamId(), match.group(), digest);
+                if (sources == null) throw new IllegalStateException("Browser source storage is unavailable");
+                byte[] script = sources.read(request.teamId(), digest)
+                        .orElseThrow(() -> new IllegalArgumentException("The uploaded browser source is missing"));
+                if (!BrowserSourceStore.digest(script).equals(digest)) throw new IllegalArgumentException("Browser source digest mismatch");
+                Files.write(sourceFile, script);
+            }
 
             copyRunnerScripts(directory);
             writeSecretFiles(request, directory);
@@ -208,6 +232,9 @@ public final class LocalPlaywrightExecutionProvider implements ExecutionProvider
             env.put("PERF_WORKSPACE_ROOT", workspaceRoot.toString());
             env.put("PERF_RESULTS_FILE", results.toString());
             env.put("PERF_NPX_COMMAND", npxCommand.toString());
+            env.put("PERF_RUNTIME_ROOT", workspaceRoot.resolve("runner-images/playwright-runner").toString());
+            env.put("PERF_TEAM_ID", request.teamId().toString());
+            if (Files.isRegularFile(sourceFile)) env.put("PERF_SOURCE_FILE", sourceFile.toString());
             // Run-scoped credentials reach the browser through the environment and are never written
             // to the plan, an artifact or a log.
             request.runtimeCredentials().forEach(credential ->
@@ -354,6 +381,19 @@ public final class LocalPlaywrightExecutionProvider implements ExecutionProvider
                 ArtifactType.RESULTS, "results.csv", "text/csv");
         storeIfPresent(request, run.directory().resolve("playwright-report.json"),
                 ArtifactType.REPORT, "playwright-report.json", "application/json");
+        storeIfPresent(request, run.directory().resolve("playwright-report.html"),
+                ArtifactType.REPORT, "playwright-report.html", "text/html");
+        Path evidence = run.directory().resolve("test-output");
+        if (Files.isDirectory(evidence)) {
+            try {
+                new ProcessBuilder("tar", "-czf", run.directory().resolve("browser-evidence.tar.gz").toString(),
+                        "-C", run.directory().toString(), "test-output").start().waitFor(15, TimeUnit.SECONDS);
+                storeIfPresent(request, run.directory().resolve("browser-evidence.tar.gz"),
+                        ArtifactType.REPORT, "browser-evidence.tar.gz", "application/gzip");
+            } catch (IOException | InterruptedException e) {
+                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            }
+        }
         storeIfPresent(request, run.directory().resolve("runner-stdout.log"),
                 ArtifactType.RUNNER_LOG, "runner-stdout.log", "text/plain");
 

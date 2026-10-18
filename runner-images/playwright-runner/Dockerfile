@@ -1,25 +1,20 @@
-FROM mcr.microsoft.com/playwright:v1.50.0-noble
-
-ARG LIGHTHOUSE_VERSION=12.4.0
-
-ENV NODE_ENV=production
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-# git is here for one job: fetching a Playwright test pinned to an immutable commit. The entrypoint
-# uses it non-interactively only — GIT_TERMINAL_PROMPT=0 — so a repository needing a credential the
-# platform did not supply fails fast instead of hanging until the Job's deadline.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends awscli ca-certificates git \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g lighthouse@${LIGHTHOUSE_VERSION}
-
-COPY entrypoint.sh /usr/local/bin/run-playwright-shard
-# The rolling progress reducer, in Node because that is what this image already runs.
-COPY progress.js /usr/local/bin/perf-progress
-RUN chmod 0555 /usr/local/bin/run-playwright-shard /usr/local/bin/perf-progress
-
-USER pwuser
+# Build from repository root: docker build -f runner-images/playwright-runner/Dockerfile .
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PERF_PLAYWRIGHT_VERSION=1.62.1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN apt-get update && apt-get install -y --no-install-recommends python3-venv ca-certificates git \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/aws-cli \
+    && /opt/aws-cli/bin/pip install --no-cache-dir awscli==1.36.22
+ENV PATH=/opt/aws-cli/bin:$PATH
+WORKDIR /opt/perf-runner
+COPY runner-images/playwright-runner/package*.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY engines/engine-playwright/src/main/resources/playwright-runner/*.mjs ./
+COPY runner-images/playwright-runner/progress.js ./
+COPY runner-images/playwright-runner/entrypoint.sh /usr/local/bin/run-playwright-shard
+RUN chmod 0555 /usr/local/bin/run-playwright-shard
+USER 10001:10001
 WORKDIR /workspace
-
 ENTRYPOINT ["/usr/local/bin/run-playwright-shard"]

@@ -493,6 +493,13 @@ public class V2ProblemHandler {
                 request, e);
     }
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ProblemDetail handleResponseStatus(org.springframework.web.server.ResponseStatusException e,
+            HttpServletRequest request) {
+        return problem(HttpStatus.valueOf(e.getStatusCode().value()), "request.rejected",
+                e.getReason() == null ? "The request was rejected." : e.getReason(), request, e);
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpected(Exception e, HttpServletRequest request) {
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "internal.error",

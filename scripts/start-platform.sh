@@ -128,6 +128,13 @@ if [ ! -d platform-ui/node_modules ]; then
   (cd platform-ui && npm ci)
 fi
 
+if [ ! -d runner-images/playwright-runner/node_modules ]; then
+  step "Installing the pinned browser runtime"
+  npm ci --prefix runner-images/playwright-runner
+fi
+step "Checking the Chromium browser runtime"
+(cd runner-images/playwright-runner && npx playwright install chromium)
+
 if [ ! -d demo-student-ui/node_modules ]; then
   step "Installing student app dependencies"
   (cd demo-student-ui && npm ci)

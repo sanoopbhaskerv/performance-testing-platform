@@ -1,90 +1,41 @@
-/*
- * Playwright reporter that writes the platform's engine-neutral result rows.
- *
- * Columns: metric,operation,value,success,timestamp — the same compact CSV the production browser
- * runner image emits and PlaywrightResultParser reads. Writing it from a reporter rather than
- * post-processing Playwright's JSON report is deliberate: the JSON report's shape is Playwright's
- * own and changes between versions, whereas the reporter API is the documented contract. A result
- * format that silently stopped parsing after a dependency bump would present as a run that measured
- * nothing, which is the failure mode this platform is built to avoid.
- *
- * Operation labels are what objectives are judged against, so they are not cosmetic:
- *
- *   <workload>              one row per completed journey  -> objective scope: <workload>
- *   <workload>/<step title> one row per step               -> objective scope: <workload>/<step>
- *
- * The exact-match rule in ObjectiveEvaluator means a journey objective scoped to the workload name
- * sees journey rows only; step rows sit underneath and are reachable by naming them. If both were
- * labelled the same, a journey threshold would silently be judged against a mixture of whole
- * journeys and individual clicks.
- *
- * Web vitals (web.lcp, web.cls, ...) are deliberately NOT emitted. Capturing them needs an observer
- * injected into the page before it loads, which a reporter cannot do without changing what the
- * reviewed test runs under. Emitting nothing makes those objectives INDETERMINATE, which is the
- * honest outcome: nothing measured them. Fabricating a value from step timings would produce a
- * number that looks like a web vital, passes a threshold, and means nothing.
- */
-
+/** Incremental, payload-free result reporter shared by local and Kubernetes runners. */
 import fs from 'node:fs';
-
-const RESULTS = process.env.PERF_RESULTS_FILE;
-const WORKLOAD = process.env.PERF_WORKLOAD_NAME || 'browser';
-
-/** A label safe to put in a CSV cell and to match an objective scope against. */
-function label(text) {
-  return String(text ?? '')
-    .replace(/[,\r\n]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function row(metric, operation, value, success, timestamp) {
-  return `${metric},${label(operation)},${Math.max(0, Math.round(value))},${success},${timestamp}\n`;
-}
-
+import path from 'node:path';
+const clean = text => String(text ?? '').replace(/[,\r\n<>]/g, ' ').slice(0, 200);
 export default class PerfReporter {
-  constructor() {
-    this.rows = [];
-  }
-
+  constructor() { this.tests = []; }
   onTestEnd(test, result) {
-    const finishedAt = result.startTime
-      ? new Date(result.startTime).getTime() + (result.duration ?? 0)
-      : Date.now();
-
-    // Only the outcomes that describe a journey that actually ran. A test Playwright skipped
-    // measured nothing, and recording a zero-duration success for it would pull a percentile down
-    // with journeys that never happened.
-    if (result.status === 'skipped') {
-      return;
-    }
-
-    const passed = result.status === 'passed';
-    this.rows.push(row('browser.journey.duration', WORKLOAD, result.duration ?? 0, passed, finishedAt));
-
+    if (result.status === 'skipped') return;
+    const workload = clean(process.env.PERF_WORKLOAD_NAME || 'browser');
+    const end = new Date(result.startTime).getTime() + result.duration;
+    const rows = [`browser.journey.duration,${workload},${Math.max(0, Math.round(result.duration))},${result.status === 'passed'},${new Date(result.startTime).getTime()}`];
+    let action = 0;
     for (const step of result.steps ?? []) {
-      // Playwright reports a step tree; the interesting level is the test's own actions rather
-      // than every internal expect. `pw:api` and `test.step` are what a journey author sees.
-      if (step.category !== 'pw:api' && step.category !== 'test.step') {
-        continue;
+      if (!['pw:api', 'test.step'].includes(step.category)) continue;
+      // Playwright API titles may include a filled value or a URL query. Preserve timing without
+      // copying those values into the broadly readable metrics table.
+      const label = step.category === 'test.step' ? clean(step.title) : `Browser action ${++action}`;
+      rows.push(`browser.step.duration,${workload}/${label},${Math.max(0, Math.round(step.duration))},${!step.error},${end}`);
+    }
+    for (const attachment of result.attachments ?? []) {
+      if (attachment.name !== 'platform.web-metrics' || !attachment.body) continue;
+      const metrics = JSON.parse(attachment.body.toString());
+      for (const [field, metric] of [['lcp', 'web.lcp'], ['cls', 'web.cls'], ['ttfb', 'web.ttfb']]) {
+        if (typeof metrics[field] !== 'number' || !Number.isFinite(metrics[field])) continue;
+        const value = Math.round(metrics[field] * (field === 'cls' ? 1000 : 1));
+        rows.push(`${metric},${workload},${Math.max(0, value)},true,${end}`);
       }
-      const stepFinishedAt = step.startTime
-        ? new Date(step.startTime).getTime() + (step.duration ?? 0)
-        : finishedAt;
-      this.rows.push(row(
-        'browser.step.duration',
-        `${WORKLOAD}/${step.title}`,
-        step.duration ?? 0,
-        !step.error,
-        stepFinishedAt));
     }
+    // A complete journey immediately becomes visible to the progress publisher.
+    fs.appendFileSync(process.env.PERF_RESULTS_FILE, rows.join('\n') + '\n');
+    this.tests.push({ name: clean(test.title), status: result.status, durationMs: result.duration,
+      error: result.error ? 'Journey failed. Inspect the restricted trace or screenshot for details.' : null });
   }
-
-  async onEnd() {
-    // Appended, because the bootstrap writes the header before the run starts: a results file that
-    // exists and is empty is distinguishable from one that was never created.
-    if (RESULTS && this.rows.length > 0) {
-      await fs.promises.appendFile(RESULTS, this.rows.join(''), 'utf8');
-    }
+  onEnd(result) {
+    const summary = { status: result.status, tests: this.tests };
+    const work = process.env.PERF_WORK_DIR;
+    fs.writeFileSync(path.join(work, 'playwright-report.json'), JSON.stringify(summary));
+    const escape = x => String(x).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+    fs.writeFileSync(path.join(work, 'playwright-report.html'), `<!doctype html><meta charset="utf-8"><title>Browser journey results</title><h1>Browser journey results</h1><p>${escape(result.status)}</p><table><tr><th>Journey</th><th>Result</th><th>Duration (ms)</th></tr>${this.tests.map(t => `<tr><td>${escape(t.name)}</td><td>${escape(t.status)}</td><td>${t.durationMs}</td></tr>`).join('')}</table>`);
   }
 }

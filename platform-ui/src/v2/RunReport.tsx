@@ -17,6 +17,7 @@ import type {
 import { V2Client, describeError } from './api';
 import { objectiveLabel } from './labels';
 import { summarize, METRIC_EXPLANATIONS } from './narrative';
+import WebMetricsTable from './WebMetricsTable';
 
 /**
  * One run's report.
@@ -158,7 +159,7 @@ function LatencyTable({ metrics }: { metrics: OperationMetrics[] }) {
               looking at one. `title` for the pointer, and the same text is available to a screen
               reader through the visually hidden note.
             */}
-            <Column label="Requests" explains="requests" />
+            <Column label="Samples" explains="requests" />
             <Column label="Failed" explains="failed" />
             <Column label="Median" explains="p50" />
             <Column label="90th" explains="p90" />
@@ -218,7 +219,9 @@ function StageProfile({ workload }: { workload: WorkloadProfile }) {
       <div className="workload-head">
         <strong>{workload.name}</strong>
         <span className="muted">
-          {count(workload.peakUsers)} expected users at peak · {humanDuration(workload.totalDurationSeconds)}
+          {workload.type === 'BROWSER'
+            ? `${count(workload.peakUsers)} browsers at once${workload.iterationsPerUser ? ` · ${workload.iterationsPerUser} journeys per browser` : ''}`
+            : `${count(workload.peakUsers)} expected users at peak · ${humanDuration(workload.totalDurationSeconds)}`}
         </span>
       </div>
 
@@ -410,7 +413,8 @@ export default function RunReport({
               </span>
             </div>
           )}
-          <LatencyTable metrics={[measurements.overall, ...measurements.operations]} />
+          <LatencyTable metrics={[measurements.overall, ...measurements.operations.filter(m => !m.name.startsWith('web.'))]} />
+          <WebMetricsTable metrics={measurements.operations.filter(m => m.name.startsWith('web.'))} />
         </>
       )}
 

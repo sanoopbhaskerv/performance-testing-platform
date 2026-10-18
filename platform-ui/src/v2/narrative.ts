@@ -54,7 +54,9 @@ function overall(report: RunReport): OperationMetrics | null {
 
 /** The journey with the worst 95th percentile, when there is more than one to compare. */
 function slowestJourney(report: RunReport): OperationMetrics | null {
-  const operations = (report.measurements?.operations ?? []).filter((o) => o.name !== '*');
+  const browserOnly = report.measurements?.engine === 'playwright';
+  const operations = (report.measurements?.operations ?? []).filter((o) => o.name !== '*'
+    && !o.name.startsWith('web.') && (!browserOnly || !o.name.includes('/')));
   if (operations.length < 2) return null;
   return operations.reduce((worst, o) => (o.p95Millis > worst.p95Millis ? o : worst));
 }
@@ -119,6 +121,7 @@ export function summarize(report: RunReport): Narrative {
   }
 
   if (totals) {
+    const browserOnly = measurements.engine === 'playwright';
     const peak = report.test?.workloads?.[0]?.peakUsers;
     // The latency clause is added only when no response-time objective carries one.
     //
@@ -127,10 +130,10 @@ export function summarize(report: RunReport): Narrative {
     // this is the aggregate over every sample. Printing "95% completed within 533 ms" directly above
     // "p95 was 584ms" is two right answers that read as a contradiction — and a reader who cannot
     // reconcile two numbers stops trusting both. So each number appears in exactly one place.
-    const latencyIsJudged = report.objectives.some((o) => o.metric === 'http.response.time');
+    const latencyIsJudged = report.objectives.some((o) => ['http.response.time', 'browser.journey.duration'].includes(o.metric));
     detail.push(
-      `${count(totals.sampleCount)} requests were sent` +
-        (peak ? `, reaching ${count(peak)} users at once` : '') +
+      `${count(totals.sampleCount)} ${browserOnly ? 'browser journeys were measured' : 'requests were sent'}` +
+        (peak ? `, configured for up to ${count(peak)} ${browserOnly ? 'browsers' : 'users'} at once` : '') +
         `. ${totals.errorRatePercent < 0.005 ? 'None failed' : `${totals.errorRatePercent.toFixed(2)}% failed`}` +
         (latencyIsJudged
           ? '.'
@@ -200,7 +203,7 @@ export const METRIC_EXPLANATIONS: Record<string, string> = {
     'system avoids entirely.',
   p99: 'Ninety-nine in a hundred requests were faster than this. It describes the worst experiences people actually had.',
   max: 'The single slowest request. One unlucky request can produce this, so it is a warning sign rather than a measurement to set targets against.',
-  requests: 'How many requests the test sent in total.',
+  requests: 'Recorded samples: requests for API tests, or completed journeys and actions for browser tests. Page metrics have their own table.',
   failed:
     'Requests the target rejected or did not answer. A rising error rate under load usually means ' +
     'the system is shedding work rather than slowing down.',

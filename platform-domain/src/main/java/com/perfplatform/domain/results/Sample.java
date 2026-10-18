@@ -17,8 +17,16 @@ import java.util.Objects;
  * @param timestampMillis when it started, epoch milliseconds. Used only to bound the run's window
  *                        for throughput; never compared against the control plane's clock, which
  *                        belongs to a different machine
+ * @param includeInAggregate whether this is a primary request/journey measurement. Secondary
+ *                           steps and scores remain scoped evidence without diluting the headline
  */
-public record Sample(String operation, long elapsedMillis, boolean success, long timestampMillis) {
+public record Sample(String operation, long elapsedMillis, boolean success, long timestampMillis,
+        boolean includeInAggregate) {
+
+    /** Ordinary request samples contribute to headline latency and error rates. */
+    public Sample(String operation, long elapsedMillis, boolean success, long timestampMillis) {
+        this(operation, elapsedMillis, success, timestampMillis, true);
+    }
 
     public Sample {
         Objects.requireNonNull(operation, "operation");

@@ -478,6 +478,14 @@ const METRICS: Array<{ metric: ObjectiveMetric; label: string; unit: string; hin
  */
 export function ObjectivesStep({ draft, onChange }: StepProps) {
   const journeys = includedJourneys(draft);
+  const browser = draft.testType === 'web-experience';
+  const metrics = browser ? [
+    { metric: 'browser.journey.duration', label: 'Whole journey duration', unit: 'ms', hint: 'Time to complete the reviewed browser journey, including its checks.' },
+    { metric: 'browser.error.rate', label: 'Failed journeys', unit: '%', hint: 'Share of browser journeys that failed. Start with zero tolerated failures.' },
+    { metric: 'web.lcp', label: 'Largest Contentful Paint', unit: 'ms', hint: 'When the largest visible content appeared on the final open page. An unavailable measurement remains inconclusive.' },
+    { metric: 'web.cls', label: 'Cumulative Layout Shift', unit: 'score', hint: 'Unexpected movement on the final open page. This is a score, not a duration; a common starting ceiling is 0.1.' },
+    { metric: 'web.ttfb', label: 'Time to First Byte', unit: 'ms', hint: 'Navigation time until the first response byte on the final open page.' },
+  ] : METRICS;
 
   const update = (position: number, patch: Partial<ObjectiveDraft>) =>
     onChange({
@@ -500,7 +508,7 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
       )}
 
       {draft.objectives.map((objective, position) => {
-        const metric = METRICS.find((m) => m.metric === objective.metric) ?? METRICS[0];
+        const metric = metrics.find((m) => m.metric === objective.metric) ?? metrics[0];
         return (
           <div className="studio-grid" key={position}>
             <div className="studio-field">
@@ -513,11 +521,12 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
                     metric: e.target.value as ObjectiveMetric,
                     // A percentile is meaningless on a rate, and leaving a stale one behind would
                     // emit a document whose objective reads as something nobody chose.
-                    percentile: e.target.value === 'http.response.time' ? 95 : null,
+                    percentile: ['http.response.time', 'browser.journey.duration', 'web.lcp', 'web.cls', 'web.ttfb'].includes(e.target.value) ? 95 : null,
+                    value: e.target.value === 'web.cls' ? 0.1 : e.target.value.endsWith('error.rate') ? 0 : e.target.value === 'browser.journey.duration' ? 8000 : 1000,
                   })
                 }
               >
-                {METRICS.map((m) => (
+                {metrics.map((m) => (
                   <option key={m.metric} value={m.metric}>
                     {m.label}
                   </option>
@@ -528,13 +537,13 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
 
             {objective.percentile !== null && (
               <div className="studio-field">
-                <label htmlFor={`percentile-${position}`}>For this share of requests</label>
+                <label htmlFor={`percentile-${position}`}>For this share of {browser ? 'journeys' : 'requests'}</label>
                 <select
                   id={`percentile-${position}`}
                   value={objective.percentile}
                   onChange={(e) => update(position, { percentile: Number(e.target.value) })}
                 >
-                  <option value={50}>50% — the typical request</option>
+                  <option value={50}>50% — the typical {browser ? 'journey' : 'request'}</option>
                   <option value={90}>90%</option>
                   <option value={95}>95% — the usual choice</option>
                   <option value={99}>99% — the worst experiences</option>
@@ -548,6 +557,7 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
                 id={`value-${position}`}
                 type="number"
                 min={0}
+                step={objective.metric === 'web.cls' ? 0.01 : 1}
                 value={objective.value}
                 onChange={(e) => update(position, { value: Number(e.target.value) })}
               />
@@ -584,7 +594,7 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
               ...draft,
               objectives: [
                 ...draft.objectives,
-                { metric: 'http.response.time', percentile: 95, journey: null, value: 1000 },
+                { metric: browser ? 'browser.journey.duration' : 'http.response.time', percentile: 95, journey: null, value: browser ? 8000 : 1000 },
               ],
             })
           }
@@ -878,17 +888,17 @@ export function ReviewStep({
   const validatorCurrent =
     draft.validator && draft.validator.forDocument === document.text ? draft.validator.result : null;
   const validatorPassed = validatorCurrent?.valid === true;
-  const ready = document.text !== null && errors.length === 0 && !checking && validatorPassed;
+  const ready = document.text !== null && findings !== null && !checkError && errors.length === 0 && !checking && validatorPassed;
 
 
   return (
     <>
 
       <p className="studio-summary">
-        {includedJourneys(draft).length} journey
+        {draft.testType === 'web-experience' ? <>{draft.browser.users} browsers × {draft.browser.iterations} iterations of each test. Stops within {draft.browser.maxMinutes} minutes.</> : <>{includedJourneys(draft).length} journey
         {includedJourneys(draft).length === 1 ? '' : 's'}, reaching{' '}
         <strong>{draft.load.peakUsers}</strong> at once, for about{' '}
-        <strong>{approximateDuration(totalDurationSeconds(draft))}</strong>.
+        <strong>{approximateDuration(totalDurationSeconds(draft))}</strong>.</>}
       </p>
 
       {document.problem && (
@@ -939,7 +949,7 @@ export function ReviewStep({
 
       {document.text && !validatorPassed && (
         <div className="banner banner-warn" role="status">
-          <AlertTriangle size={16} /> Run the Validator successfully for this version before saving.
+          <AlertTriangle size={16} /> {draft.testType === 'web-experience' ? 'Check this browser configuration before saving.' : 'Run the Validator successfully for this version before saving.'}
         </div>
       )}
 
@@ -1059,8 +1069,7 @@ export function AboutStep({
             ))}
           </datalist>
           <p className="studio-hint" id="team-hint">
-            The team your API key belongs to. Suggested rather than filled in: nothing yet reports
-            the caller&rsquo;s own team name, which is part of what S5&rsquo;s identity work fixes.
+            The team this access token may act for. A single team is filled in automatically; choose the owning team if you belong to several.
           </p>
         </div>
 

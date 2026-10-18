@@ -7,6 +7,7 @@ import { newDraft } from './draft';
 import type { StepId } from './steps';
 import { blockerFor, stepsFor } from './steps';
 import SourcesStep from './SourcesStep';
+import { BrowserSourceStep, BrowserCohortStep, BrowserCheckStep } from './BrowserSteps';
 import RefineStep from './RefineStep';
 import {
   AboutStep,
@@ -92,7 +93,10 @@ export default function Studio({
     client
       .listTeamNames()
       .then((teams) => {
-        if (!cancelled) setKnownTeams(teams);
+        if (!cancelled) {
+          setKnownTeams(teams);
+          if (teams.length === 1) setDraft(current => current && !current.team ? { ...current, team: teams[0] } : current);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -110,7 +114,7 @@ export default function Studio({
 
   function begin(testType: TestType) {
     setDraft(newDraft(testType, team));
-    setStepId('sources');
+    setStepId(testType === 'web-experience' ? 'about' : 'sources');
     setError(null);
   }
 
@@ -182,17 +186,23 @@ export default function Studio({
 
       <div className="studio-body">
         {step.id === 'sources' && (
-          <SourcesStep client={client} draft={draft} onChange={setDraft} />
+          draft.testType === 'web-experience'
+            ? <BrowserSourceStep client={client} draft={draft} onChange={setDraft} />
+            : <SourcesStep client={client} draft={draft} onChange={setDraft} />
         )}
         {step.id === 'about' && (
           <AboutStep client={client} draft={draft} onChange={setDraft} knownTeams={knownTeams} />
         )}
         {step.id === 'refine' && <RefineStep draft={draft} onChange={setDraft} />}
         {step.id === 'rules' && <RulesStep draft={draft} onChange={setDraft} />}
-        {step.id === 'load' && <LoadStep draft={draft} onChange={setDraft} />}
+        {step.id === 'load' && (draft.testType === 'web-experience'
+          ? <BrowserCohortStep draft={draft} onChange={setDraft} />
+          : <LoadStep draft={draft} onChange={setDraft} />)}
         {step.id === 'objectives' && <ObjectivesStep draft={draft} onChange={setDraft} />}
         {step.id === 'validate' && (
-          <ValidateStep client={client} draft={draft} onChange={setDraft} />
+          draft.testType === 'web-experience'
+            ? <BrowserCheckStep client={client} draft={draft} onChange={setDraft} />
+            : <ValidateStep client={client} draft={draft} onChange={setDraft} />
         )}
         {step.id === 'review' && (
           <ReviewStep client={client} draft={draft} onChange={setDraft} onSave={save} saving={saving} />
