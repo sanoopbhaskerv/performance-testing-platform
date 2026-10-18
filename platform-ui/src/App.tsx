@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import PerformanceConsole from './v2/PerformanceConsole';
+import BrandHeader from './BrandHeader';
 import {
   Activity,
   Play,
@@ -205,10 +206,7 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-        <div className="header-brand">
-          <Activity className="logo-icon" size={28} />
-          <span>Performance<span className="text-gradient"> Studio</span></span>
-        </div>
+        <BrandHeader />
         <nav className="surface-tabs" aria-label="Platform version">
           <button
             className={surface === 'v2' ? 'surface-tab active' : 'surface-tab'}
@@ -240,7 +238,7 @@ function App() {
                 <button className="btn btn-secondary" type="button" onClick={() => { setConnection(null); setApiKey(''); setAccessInput(''); }}>Change access token</button>
               </div> : <form onSubmit={event => { event.preventDefault(); const token = accessInput.trim().replace(/^Bearer\s+/, ''); setConnecting(true); setAuthAttempt(attempt => attempt + 1); setApiKey(token); }}>
                 <label className="form-label" htmlFor="v2-key">Team access token</label>
-                <div className="studio-button-row">
+                <div className="access-token-row">
                   <input id="v2-key" type="password" className="form-control" value={accessInput}
                     placeholder="Paste the token supplied by your platform operator" onChange={e => setAccessInput(e.target.value)} autoComplete="off" />
                   <button className="btn btn-primary" type="submit" disabled={connecting || !accessInput.trim()}>{connecting ? 'Connecting…' : 'Connect'}</button>

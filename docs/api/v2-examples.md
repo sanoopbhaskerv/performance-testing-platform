@@ -1,10 +1,11 @@
 # V2 API Examples
 
-**Status:** Increment 1B — validation only. Definition creation, versioning and run endpoints arrive in 1B/1C follow-ups.
+**Status:** Standalone V2 supports imports, validation, immutable definitions/versions, targets,
+browser-source upload, idempotent runs, progress, reports and authorized artifact downloads.
 **Schema:** [`specification/schema/v1alpha1/performance-test.schema.json`](../../specification/schema/v1alpha1/performance-test.schema.json)
 **Worked examples:** [`specification/examples/`](../../specification/examples/)
 
-`/api/v1/**` remains operational and unchanged. V2 is additive and never reuses a V1 path.
+`/api/v1/**` remains a local migration surface and is blocked by production profiles. V2 never reuses a V1 path.
 
 ---
 
@@ -27,18 +28,26 @@ GET  /api/v2/test-runs/{runId}/events
 POST /api/v2/test-runs/{runId}/cancel
 GET  /api/v2/test-runs/{runId}/report
 GET  /api/v2/test-runs/{runId}/artifacts
+GET  /api/v2/test-runs/{runId}/artifacts/{artifactId}/content
+POST /api/v2/browser-sources?team={team}&reviewed=true
+POST /api/v2/targets
+GET  /api/v2/platform/caller
+GET  /api/v2/platform/execution
+GET  /api/v2/platform/experience
 ```
 
-Validates a specification. **Creates nothing and executes nothing** — safe to call from a pull
-request as a status check.
+The `/test-definitions/validate` endpoint **creates nothing and executes nothing** — suitable for
+a pull-request configuration check. Creating a definition saves a version; triggering a run is a
+separate, load-generating action.
 
 Accepts `application/yaml`, `application/x-yaml`, `text/yaml`, `application/json` or
 `text/plain`. YAML and JSON are two serializations of the same canonical model, so an equivalent
 document in either form produces the same digest.
 
-Authentication is the existing `X-API-Key` header. (V1's known cross-team authorization gap
-applies here too until Increment 4 — see the register in
-[`../migration/baseline-report.md`](../migration/baseline-report.md).)
+Production authentication uses `Authorization: Bearer <team-scoped-token>`. Every V2 resource
+also enforces scope and team ownership. The local development adapter accepts its local API key;
+that adapter is rejected under production profiles. For credentials held in a private file prefer
+the [portable CLI](../user-guide/ai-editors.md) with `PERF_PLATFORM_TOKEN_FILE`.
 
 ---
 
@@ -55,7 +64,7 @@ placeholder values for them would produce a test that looks ready and means noth
 
 ```bash
 curl -X POST http://localhost:8080/api/v2/imports/openapi \
-  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @openapi.yaml
 ```
@@ -251,7 +260,7 @@ healthy-looking latency for a target that did no work.
 
 ```bash
 curl -X POST http://localhost:8080/api/v2/test-definitions/validate \
-  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @specification/examples/valid/api-only.yaml
 ```
@@ -461,7 +470,7 @@ draft came from, so the literals are available and each rule gets a verdict.
 
 ```bash
 curl -sS -X POST "$PERF_PLATFORM_URL/api/v2/recordings/$SESSION_ID/validator" \
-  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @draft.yaml
 ```
@@ -531,7 +540,7 @@ junk body a way to probe which session ids exist.
 
 ```bash
 response=$(curl -sS -X POST "$PERF_PLATFORM_URL/api/v2/test-definitions/validate" \
-  -H "X-API-Key: $PERF_API_KEY" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @perf/proposal-baseline.yaml)
 
@@ -548,8 +557,8 @@ fi
 ## Triggering a run
 
 ```bash
-curl -X POST https://performance.example.internal/api/v2/test-runs \
-  -H "X-API-Key: $PERF_API_KEY" \
+curl -X POST https://performance.example.com/api/v2/test-runs \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN" \
   -H "Idempotency-Key: nightly-baseline-2026-07-29" \
   -H "Content-Type: application/json" \
   -d '{"definitionVersionId":"3f2b1c8e-5d4a-4a1b-9c7e-2f6d8b0a1e33"}'
@@ -644,8 +653,8 @@ not runnable".
 ## Polling a run
 
 ```bash
-curl https://performance.example.internal/api/v2/test-runs/$RUN_ID \
-  -H "X-API-Key: $PERF_API_KEY"
+curl https://performance.example.com/api/v2/test-runs/$RUN_ID \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN"
 ```
 
 `status` moves `QUEUED → PROVISIONING → RUNNING → ANALYZING → COMPLETED`. Terminal states are
@@ -665,8 +674,8 @@ identifiers are real.
 ## Reading a run's history
 
 ```bash
-curl "https://performance.example.internal/api/v2/test-runs/$RUN_ID/events?afterSequence=12" \
-  -H "X-API-Key: $PERF_API_KEY"
+curl "https://performance.example.com/api/v2/test-runs/$RUN_ID/events?afterSequence=12" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN"
 ```
 
 ```json
@@ -695,8 +704,8 @@ values: run events are read by every member of a team and exported to operationa
 ## Watching a run while it executes
 
 ```bash
-curl "https://performance.example.internal/api/v2/test-runs/$RUN_ID/progress?limit=120" \
-  -H "X-API-Key: $PERF_API_KEY"
+curl "https://performance.example.com/api/v2/test-runs/$RUN_ID/progress?limit=120" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN"
 ```
 
 ```json
@@ -764,8 +773,8 @@ either way, so changing the transport changes nothing about what a client can as
 ## Cancelling a run
 
 ```bash
-curl -X POST "https://performance.example.internal/api/v2/test-runs/$RUN_ID/cancel?reason=Wrong+environment" \
-  -H "X-API-Key: $PERF_API_KEY"
+curl -X POST "https://performance.example.com/api/v2/test-runs/$RUN_ID/cancel?reason=Wrong+environment" \
+  -H "Authorization: Bearer $PERF_PLATFORM_TOKEN"
 ```
 
 ```json
@@ -792,18 +801,28 @@ See [cancellation-and-recovery.md](../operations/cancellation-and-recovery.md).
 
 ---
 
-## Planned endpoints
+## Reviewed browser source and private evidence
 
-Not yet implemented. Listed so integrations can be designed against the intended shape.
+Upload a reviewed self-contained script with
+`POST /api/v2/browser-sources?team=my-team&reviewed=true`, `Content-Type: text/plain`, and the UTF-8
+source body. The response contains an immutable team-owned `uri`, `digest` and `sizeBytes`; use
+those in the canonical browser specification. Uploading performs no execution. See the
+[browser guide](../user-guide/browser-testing.md) for the full consumer flow and Git-pinned imports.
 
-```text
-POST   /api/v2/imports/playwright                    # Increment 3
-```
+Read `/api/v2/test-runs/{runId}/report`, then download an owned artifact using
+`GET /api/v2/test-runs/{runId}/artifacts/{artifactId}/content`. The server authorizes the caller and
+verifies its recorded SHA-256 before serving it as an attachment. Store stable references, not
+temporary/public links. The plan, JTL/results, logs and manifest are evidence; the report is the
+normalized summary and objective verdicts.
 
-Importers are added as beans and discovered through the `SourceImporter` port, so a source type
-with no importer deployed is refused by name (`422`) listing the ones that are.
+## Rate-based report profiles
 
-Definition endpoints are the first thing Increment 1D needs: without them a definition version can
-only be created through the storage layer, so the run endpoints above are not yet reachable end to
-end by a consumer. Report and artifact endpoints arrive with results normalization (1D) and durable
-artifact storage (1E).
+Report workload profiles include additive fields `modelType` (`STAGES` or `ARRIVAL_RATE`),
+`maxConcurrency`, `peakArrivalRate` and stage-level `targetRate`. For an arrival-rate test, the
+legacy `peakUsers` field is the concurrency budget, not an observed fixed user count. Use the
+explicit rate and ceiling fields for display. Browser profiles use `type=BROWSER` and
+`iterationsPerUser`; browser concurrency is separate from protocol users.
+
+For example, [the 100-RPS specification](../../specification/examples/valid/api-100-rps.yaml) is
+reported with `modelType=ARRIVAL_RATE`, `maxConcurrency=20`, `peakArrivalRate=100`, and stage
+rates `100, 100, 0`. Achieved throughput is measured separately. A run's full average includes ramps.

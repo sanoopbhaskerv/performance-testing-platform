@@ -212,7 +212,9 @@ function LatencyTable({ metrics }: { metrics: OperationMetrics[] }) {
  * alone, and the row is a real table row, so the values are readable without the bars at all.
  */
 function StageProfile({ workload }: { workload: WorkloadProfile }) {
-  const peak = Math.max(1, ...workload.stages.map((stage) => stage.targetUsers));
+  const rate = workload.modelType === 'ARRIVAL_RATE';
+  const target = (stage: WorkloadProfile['stages'][number]) => rate ? stage.targetRate ?? 0 : stage.targetUsers;
+  const peak = Math.max(1, ...workload.stages.map(target));
 
   return (
     <div className="workload">
@@ -221,18 +223,20 @@ function StageProfile({ workload }: { workload: WorkloadProfile }) {
         <span className="muted">
           {workload.type === 'BROWSER'
             ? `${count(workload.peakUsers)} browsers at once${workload.iterationsPerUser ? ` · ${workload.iterationsPerUser} journeys per browser` : ''}`
-            : `${count(workload.peakUsers)} expected users at peak · ${humanDuration(workload.totalDurationSeconds)}`}
+            : rate
+              ? `${count(workload.peakArrivalRate ?? 0)} requests per second at peak · at most ${count(workload.maxConcurrency ?? workload.peakUsers)} requests in flight · ${humanDuration(workload.totalDurationSeconds)}`
+              : `${count(workload.peakUsers)} expected users at peak · ${humanDuration(workload.totalDurationSeconds)}`}
         </span>
       </div>
 
       {workload.stages.length > 0 && (
         <div className="table-scroll">
           <table className="stages">
-            <caption className="sr-only">Expected users at each stage of {workload.name}</caption>
+            <caption className="sr-only">{rate ? 'Requested rate' : 'Expected users'} at each stage of {workload.name}</caption>
             <thead>
               <tr>
                 <th scope="col">For</th>
-                <th scope="col">Expected users</th>
+                <th scope="col">{rate ? 'Requests per second' : 'Expected users'}</th>
               </tr>
             </thead>
             <tbody>
@@ -244,11 +248,11 @@ function StageProfile({ workload }: { workload: WorkloadProfile }) {
                       <span className="stage-track">
                         <span
                           className="stage-bar"
-                          style={{ width: `${(stage.targetUsers / peak) * 100}%` }}
+                          style={{ width: `${(target(stage) / peak) * 100}%` }}
                           aria-hidden
                         />
                       </span>
-                      <span className="stage-value">{count(stage.targetUsers)}</span>
+                      <span className="stage-value">{count(target(stage))}</span>
                     </span>
                   </td>
                 </tr>

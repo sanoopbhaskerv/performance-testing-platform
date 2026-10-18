@@ -55,7 +55,9 @@ export default function RunProgressBar({
           {progress.currentStage && !progress.overrunning && (
             <span className="muted">
               {' '}
-              — {progress.currentStage.targetUsers.toLocaleString()} users
+              — {progress.currentStage.targetRate != null
+                ? `${progress.currentStage.targetRate.toLocaleString()} requests/second`
+                : `${progress.currentStage.targetUsers.toLocaleString()} users`}
             </span>
           )}
         </span>

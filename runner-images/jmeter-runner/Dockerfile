@@ -19,6 +19,7 @@ FROM eclipse-temurin:17-jre-jammy@sha256:475d8e96b4b2bfe08999e5e854755c773af1581
 ARG JMETER_VERSION=5.6.3
 ARG JMETER_PLUGINS_MANAGER_VERSION=1.10
 ARG CMDRUNNER_VERSION=2.3
+ARG JMETER_DISTRIBUTION_BASE_URL=https://archive.apache.org/dist/jmeter/binaries
 
 # `latest` is never used, and every download is checksum-verified below: an image
 # build that silently accepted a corrupted or substituted archive would put an
@@ -31,9 +32,9 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends curl ca-certificates unzip; \
     rm -rf /var/lib/apt/lists/*; \
     \
-    curl -fsSL "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz" \
+    curl --connect-timeout 15 --max-time 300 -fsSL "${JMETER_DISTRIBUTION_BASE_URL}/apache-jmeter-${JMETER_VERSION}.tgz" \
         -o /tmp/jmeter.tgz; \
-    curl -fsSL "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz.sha512" \
+    curl --connect-timeout 15 --max-time 60 -fsSL "${JMETER_DISTRIBUTION_BASE_URL}/apache-jmeter-${JMETER_VERSION}.tgz.sha512" \
         -o /tmp/jmeter.tgz.sha512; \
     # The published checksum file names the archive; check the bytes we actually got.
     echo "$(cut -d' ' -f1 /tmp/jmeter.tgz.sha512)  /tmp/jmeter.tgz" | sha512sum -c -; \

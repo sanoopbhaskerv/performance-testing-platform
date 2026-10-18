@@ -38,11 +38,11 @@ kind create cluster --name perf-e2e --wait 120s
 JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -DskipTests package
 JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -f demo-service/pom.xml -DskipTests package
 
-docker build -t perfplatform/jmeter-runner:5.6.3-1 runner-images/jmeter-runner
+docker build -t perfplatform/jmeter-runner:5.6.3-3 runner-images/jmeter-runner
 docker build -t perfplatform/platform-core:1.0.0 platform-core
 docker build -t perfplatform/demo-service:1.0.0 demo-service
 
-for i in jmeter-runner:5.6.3-1 platform-core:1.0.0 demo-service:1.0.0; do
+for i in jmeter-runner:5.6.3-3 platform-core:1.0.0 demo-service:1.0.0; do
   kind load docker-image perfplatform/$i --name perf-e2e
 done
 ```
@@ -119,7 +119,7 @@ Key settings:
 PLATFORM_ORCHESTRATION_EXECUTIONPROVIDER: kubernetes
 PLATFORM_ORCHESTRATION_RUNNERCELL_NAMESPACE: perf-runners
 PLATFORM_ORCHESTRATION_RUNNERCELL_SERVICEACCOUNT: perf-runner
-PLATFORM_ORCHESTRATION_RUNNERCELL_IMAGES_JMETER: perfplatform/jmeter-runner:5.6.3-1
+PLATFORM_ORCHESTRATION_RUNNERCELL_IMAGES_JMETER: perfplatform/jmeter-runner:5.6.3-3
 PLATFORM_ORCHESTRATION_ARTIFACTS_STORE: s3
 PLATFORM_ORCHESTRATION_ARTIFACTS_BUCKET: perf-artifacts
 PLATFORM_ORCHESTRATION_ARTIFACTS_ENDPOINT: http://minio.perf-support.svc.cluster.local:9000

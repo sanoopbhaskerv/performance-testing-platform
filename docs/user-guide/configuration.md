@@ -25,6 +25,15 @@ this schema does not require Ameriprise infrastructure or accounts.
 | Authentication | Secret references, never inline credentials |
 | Stop limit | `governance.maxDuration`; enforced independently of the submitted script |
 
+## Example: 100 requests per second with a concurrency ceiling of 20
+
+Start with [`api-100-rps.yaml`](../../specification/examples/valid/api-100-rps.yaml). In the API wizard
+choose **A number of requests per second**, enter `100`, set **At most this many at once** to `20`,
+ramp up for 10 seconds, hold for 60, and ramp down for 10. The expected whole-run mean is 87.5/s
+because ramps are included. The example's throughput floor is 85/s; inspect the steady stage
+separately when judging the 100-RPS requirement. If you instead need twenty continuously looping
+virtual users, choose **A number of people** with `20`; achieved RPS is then a measured output.
+
 ## Browser example
 
 First upload the reviewed script using the wizard or `scripts/perf.py upload-browser`. Substitute

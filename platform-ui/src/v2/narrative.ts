@@ -123,6 +123,10 @@ export function summarize(report: RunReport): Narrative {
   if (totals) {
     const browserOnly = measurements.engine === 'playwright';
     const peak = report.test?.workloads?.[0]?.peakUsers;
+    const profile = report.test?.workloads?.[0];
+    const configuredLoad = profile?.modelType === 'ARRIVAL_RATE'
+      ? `, targeting up to ${count(profile.peakArrivalRate ?? 0)} requests per second with at most ${count(profile.maxConcurrency ?? profile.peakUsers)} requests in flight`
+      : peak ? `, configured for up to ${count(peak)} ${browserOnly ? 'browsers' : 'users'} at once` : '';
     // The latency clause is added only when no response-time objective carries one.
     //
     // Both figures are correct and they differ: a workload-scoped objective takes the *highest*
@@ -133,7 +137,7 @@ export function summarize(report: RunReport): Narrative {
     const latencyIsJudged = report.objectives.some((o) => ['http.response.time', 'browser.journey.duration'].includes(o.metric));
     detail.push(
       `${count(totals.sampleCount)} ${browserOnly ? 'browser journeys were measured' : 'requests were sent'}` +
-        (peak ? `, configured for up to ${count(peak)} ${browserOnly ? 'browsers' : 'users'} at once` : '') +
+        configuredLoad +
         `. ${totals.errorRatePercent < 0.005 ? 'None failed' : `${totals.errorRatePercent.toFixed(2)}% failed`}` +
         (latencyIsJudged
           ? '.'

@@ -1,5 +1,11 @@
 # Deploy a standalone installation in your infrastructure
 
+For a first company installation, use the complete [clone-to-first-run walkthrough](company-installation.md).
+This page retains the compact standalone reference and disposable local verification procedure.
+[Runtime branding](branding.md), [configuration keys](configuration-reference.md),
+[cloud profiles](cloud-profiles.md), and [architecture diagrams](../architecture/system-overview.md)
+cover customization and placement.
+
 Supported topology: one modular control-plane application with the current React console on the
 same origin, PostgreSQL, private S3-compatible storage, and isolated ephemeral runner Jobs.
 Use any Kubernetes cloud or on-premises distribution that supports the required security contexts
@@ -13,7 +19,7 @@ mvn clean package
 # Run these from the repository root. The browser image shares the exact local runner sources.
 docker build -f docker/Dockerfile.control-plane -t YOUR_REGISTRY/performance-control-plane:1.0.0 .
 docker build -f runner-images/playwright-runner/Dockerfile -t YOUR_REGISTRY/playwright-runner:1.62.1-1 .
-docker build -t YOUR_REGISTRY/jmeter-runner:5.6.3-1 runner-images/jmeter-runner
+docker build -t YOUR_REGISTRY/jmeter-runner:5.6.3-3 runner-images/jmeter-runner
 ```
 
 Publish those images to a registry your cluster can read, using your normal release process.
@@ -91,7 +97,7 @@ artifacts:
 runnerCell:
   namespace: perf-runners
   images:
-    jmeter: YOUR_REGISTRY/jmeter-runner:5.6.3-1
+    jmeter: YOUR_REGISTRY/jmeter-runner:5.6.3-3
     playwright: YOUR_REGISTRY/playwright-runner:1.62.1-1
   egress:
     allowedCidrs:

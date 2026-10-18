@@ -41,7 +41,8 @@ public class SecurityConfig {
                                                                 "/api/v1/tests/*/report", // Allow viewing HTML reports
                                                                                           // without API Key
                                                                 "/runs/**", // Allow direct access to report assets
-                                                                "/", "/index.html", "/ui/**" // Web UI
+                                                                "/", "/index.html", "/ui/**",
+                                                                "/platform-config.json", "/branding/**" // Public branding assets only
                                                 ).permitAll()
                                                 // Everything else requires API key
                                                 .anyRequest().authenticated();

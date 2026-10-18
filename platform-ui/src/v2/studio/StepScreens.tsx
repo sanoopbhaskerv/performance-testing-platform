@@ -552,7 +552,7 @@ export function ObjectivesStep({ draft, onChange }: StepProps) {
             )}
 
             <div className="studio-field">
-              <label htmlFor={`value-${position}`}>No worse than ({metric.unit})</label>
+              <label htmlFor={`value-${position}`}>{objective.metric === 'http.throughput' ? 'At least' : 'No worse than'} ({metric.unit})</label>
               <input
                 id={`value-${position}`}
                 type="number"
@@ -895,10 +895,18 @@ export function ReviewStep({
     <>
 
       <p className="studio-summary">
-        {draft.testType === 'web-experience' ? <>{draft.browser.users} browsers × {draft.browser.iterations} iterations of each test. Stops within {draft.browser.maxMinutes} minutes.</> : <>{includedJourneys(draft).length} journey
-        {includedJourneys(draft).length === 1 ? '' : 's'}, reaching{' '}
-        <strong>{draft.load.peakUsers}</strong> at once, for about{' '}
-        <strong>{approximateDuration(totalDurationSeconds(draft))}</strong>.</>}
+        {draft.testType === 'web-experience' ? (
+          <>{draft.browser.users} browsers × {draft.browser.iterations} iterations of each test.
+            Stops within {draft.browser.maxMinutes} minutes.</>
+        ) : draft.load.model === 'rate' ? (
+          <>{includedJourneys(draft).length} journey{includedJourneys(draft).length === 1 ? '' : 's'},
+            targeting {draft.load.peakRate} requests per second with at most {draft.load.maxConcurrency} requests in flight,
+            for about {approximateDuration(totalDurationSeconds(draft))}.</>
+        ) : (
+          <>{includedJourneys(draft).length} journey{includedJourneys(draft).length === 1 ? '' : 's'}, reaching{' '}
+            <strong>{draft.load.peakUsers}</strong> at once, for about{' '}
+            <strong>{approximateDuration(totalDurationSeconds(draft))}</strong>.</>
+        )}
       </p>
 
       {document.problem && (

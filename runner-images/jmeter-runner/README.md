@@ -10,7 +10,7 @@ produced, and stops.
 ## Build
 
 ```bash
-docker build -t perfplatform/jmeter-runner:5.6.3-1 runner-images/jmeter-runner
+docker build -t perfplatform/jmeter-runner:5.6.3-3 runner-images/jmeter-runner
 ```
 
 Then add it to the cell's allowlist in `helm/performance-platform/values.yaml`:
@@ -18,7 +18,7 @@ Then add it to the cell's allowlist in `helm/performance-platform/values.yaml`:
 ```yaml
 runnerCell:
   images:
-    jmeter: "perfplatform/jmeter-runner:5.6.3-1"
+    jmeter: "perfplatform/jmeter-runner:5.6.3-3"
 ```
 
 **Tags must be pinned.** Startup refuses `latest`, `main`, `master`, `edge` or an untagged image: a
@@ -52,6 +52,15 @@ It uploads to `PERF_ARTIFACT_PREFIX`:
 - `jmeter.log` — the runner's own log
 - `runner-manifest.json` — identity, timings, exit code, and the plan digest
 - `progress.json` — a rolling snapshot, overwritten every few seconds while it runs
+
+Version `5.6.3-3` uploads a SHA-256 fingerprint (`perf-digest` S3 metadata) and explicit content
+type for every durable evidence file. Authorized downloads verify that recorded fingerprint.
+Older uploads without metadata remain unverifiable; do not bypass the download check or assign
+an invented historical digest. The entrypoint upload contract is exercised in CI:
+
+```bash
+python3 -m unittest discover -s runner-images/jmeter-runner -p 'test_*.py'
+```
 
 ## Live progress
 
@@ -125,7 +134,7 @@ docker run --rm --network perf-e2e \
   -e PERF_ARTIFACT_ENDPOINT=http://perf-minio:9000 \
   -e PERF_ARTIFACT_REGION=us-east-1 \
   -e PERF_ARTIFACT_PREFIX=teams/t-1/runs/r-1/shards/s-1/ \
-  perfplatform/jmeter-runner:5.6.3-1
+  perfplatform/jmeter-runner:5.6.3-3
 ```
 
 The `--user`, `--read-only`, `--tmpfs` and `--cap-drop` flags mirror what the Job manifest enforces.
@@ -134,11 +143,20 @@ Run it without them and you are testing something the cluster will never run.
 > Docker's `--tmpfs` does not apply an `fsGroup`, so the `uid=10001` mount option stands in for what
 > Kubernetes does for an `emptyDir`. Without it the runner cannot write to its own workspace.
 
-## Still to do
+## Verified scope and remaining calibration
 
-- **Never run on a real cluster.** Verified with Docker against MinIO and the demo service, and via
-  the fabric8 mock API server. A kind or minikube run is the next honest step.
-- **Sharding is untested.** Everything so far is `PERF_SHARD_COUNT=1`. Dataset partitioning across
-  shards does not exist yet, so multiple shards would replay identical work.
-- **`ConcurrencyThreadGroup` is installed but unused.** The plan generator still emits stepwise
-  thread groups; using the plugin is a change to `JmeterWorkloadRenderer`.
+The single-shard arrival-rate path was exercised in kind on 19 October 2026 through the actual
+production-profile console, PostgreSQL and private S3-compatible store. Run
+`1ec111c4-b6da-4673-b6cf-38a393d355a0` produced 7,000 requests, zero errors, p95 2 ms and exactly
+100 RPS in a 50-second window inside the steady stage. The concurrency ceiling was 20; the highest
+reported thread count was 15. All four downloads (including the compiled plan) passed SHA-256
+verification. Live progress and its plan identity were also read by the platform.
+
+This verifies the bounded fixture flow, not an application's production capacity, five-team
+resource calibration, cloud IAM or CNI enforcement. Representative multi-shard/distributed tests
+and operator infrastructure verification remain necessary. The current renderer uses Ultimate
+Thread Groups for staged users and Free-Form Arrivals for rates; see
+[load models](../../docs/operations/load-models.md).
+
+For a reviewed archive mirror set Docker build argument `JMETER_DISTRIBUTION_BASE_URL`. It must
+serve `apache-jmeter-5.6.3.tgz` and its matching `.sha512`; downloads are bounded and checked.

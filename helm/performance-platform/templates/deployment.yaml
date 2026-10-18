@@ -18,6 +18,7 @@ spec:
       annotations:
         # Trigger rolling update when team configs or secrets change
         checksum/config: {{ toJson .Values.teamConfigs | sha256sum }}
+        checksum/platform-config: {{ printf "%s%s" (toJson .Values.branding) (toJson .Values.applicationConfig) | sha256sum }}
         checksum/secret: {{ toJson .Values.database | sha256sum }}
         # Prometheus scrape annotations — platform-core exposes /actuator/prometheus
         prometheus.io/scrape: "true"
@@ -34,6 +35,8 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "optional:file:/config/platform/"
             - name: SPRING_PROFILES_ACTIVE
               value: {{ .Values.deploymentProfile | quote }}
             - name: SERVICE_TOKEN_FILE
@@ -150,6 +153,18 @@ spec:
                 name: {{ .Values.artifacts.controlPlaneCredentialsSecret | quote }}
           {{- end }}
           volumeMounts:
+            - name: platform-config
+              mountPath: /config/platform
+              readOnly: true
+            - name: platform-config
+              mountPath: /app/ui/platform-config.json
+              subPath: platform-config.json
+              readOnly: true
+            {{- if .Values.branding.logoConfigMap }}
+            - name: branding-logo
+              mountPath: /app/ui/branding
+              readOnly: true
+            {{- end }}
             {{- if .Values.auth.serviceTokenSecret }}
             - name: service-identities
               mountPath: /var/run/perfplatform/auth
@@ -185,6 +200,14 @@ spec:
               cpu: {{ .Values.resources.platformCore.limits.cpu }}
               memory: {{ .Values.resources.platformCore.limits.memory }}
       volumes:
+        - name: platform-config
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-platform-config
+        {{- if .Values.branding.logoConfigMap }}
+        - name: branding-logo
+          configMap:
+            name: {{ .Values.branding.logoConfigMap | quote }}
+        {{- end }}
         {{- if .Values.auth.serviceTokenSecret }}
         - name: service-identities
           secret:

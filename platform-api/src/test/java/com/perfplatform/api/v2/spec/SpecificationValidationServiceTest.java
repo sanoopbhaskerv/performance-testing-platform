@@ -42,7 +42,7 @@ class SpecificationValidationServiceTest {
 
         @ParameterizedTest(name = "{0} parses and validates")
         @ValueSource(strings = {
-                "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml",
+                "api-only.yaml", "browser-only.yaml", "hybrid.yaml", "demo-service.yaml", "api-100-rps.yaml",
                 "session-broker-api.yaml", "arrival-rate.yaml"})
         @DisplayName("every shipped valid example is valid")
         void validExamplesValidate(String name) {

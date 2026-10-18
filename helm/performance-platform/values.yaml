@@ -9,7 +9,7 @@ legacyJobTemplate:
 
 # ─────────────────────────────────────────────────────────
 #  Performance Testing Platform — Helm values
-#  Customize for your EKS cluster.
+#  Customize for your Kubernetes cluster.
 # ─────────────────────────────────────────────────────────
 
 image:
@@ -19,6 +19,24 @@ image:
 
 replicaCount: 1
 
+# Runtime branding. A generated public JSON file is mounted over the bundled defaults.
+branding:
+  name: Performance Studio
+  logoUrl: ""
+  logoAlt: ""
+  logoConfigMap: "" # Optional existing ConfigMap containing logo.svg or logo.png.
+  theme: dark # dark or light
+  colors:
+    primary: "#4f46e5"
+    accent: "#c084fc"
+
+serviceAccount:
+  annotations: {} # Control-plane workload identity; separate from runnerCell's identity.
+imagePullSecrets: [] # Existing Secrets in the control-plane namespace: [{name: registry-access}].
+# Extra non-secret Spring configuration, mounted as application.yaml. Environment settings below
+# take precedence. Credentials belong in existing Secrets, never in this map.
+applicationConfig: {}
+
 service:
   type: ClusterIP
   port: 8080
@@ -26,19 +44,12 @@ service:
 ingress:
   enabled: true
   className: "nginx"
+  annotations: {} # Set the annotations required by your company's ingress controller.
   host: "perf-platform.internal.your-company.com"
   tls: []
 
-# Team config files — each key becomes a *.yml file in /config/teams/
-# Teams add their config here via a PR, and the platform auto-loads it.
-teamConfigs:
-  example-team: |
-    team: example-team
-    apiKey: "change-me"
-    targets:
-      - name: example-service
-        baseUrl: "http://example-service:8080"
-        jvmEnabled: false
+# Optional legacy V1 files. Production V2 uses scoped identities and persisted target onboarding.
+teamConfigs: {}
 
 # ─────────────────────────────────────────────────────────
 #  Runner cell — where production load is actually generated.
@@ -48,6 +59,7 @@ teamConfigs:
 # ─────────────────────────────────────────────────────────
 runnerCell:
   enabled: true
+  createNamespace: true # Set false when your operator pre-creates the dedicated runner namespace.
 
   # A namespace of its own. A runner executes a plan compiled from a user's
   # document and is the least trusted thing in the platform; it must not share a
@@ -66,6 +78,7 @@ runnerCell:
   # static key mounted into the Pod:
   #   eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
   serviceAccountAnnotations: {}
+  imagePullSecrets: [] # Existing registry Secrets in the runner namespace.
 
   # An allowlist of engine to pinned image, not a template. An engine with no
   # entry here cannot be provisioned at all — a fallback image would mean a
@@ -76,7 +89,7 @@ runnerCell:
   # version can execute on different runner builds, so the plan digest still
   # matches while the thing executing it has changed.
   images:
-    jmeter: "perfplatform/jmeter-runner:5.6.3-1"
+    jmeter: "perfplatform/jmeter-runner:5.6.3-3"
     playwright: "perfplatform/playwright-runner:1.62.1-1"
 
   # Sized so the generator is not the bottleneck. A throttled load generator

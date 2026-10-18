@@ -8,6 +8,72 @@ test, and read measured results with downloadable evidence. The web console, RES
 use the same immutable test specification. You can fork the code, change the UI, add integrations
 and deploy it in your own infrastructure. [MIT licensed](LICENSE).
 
+## Start with your goal
+
+| Goal | Guide |
+|---|---|
+| Clone and install in company infrastructure | [Step-by-step company installation](docs/deployment/company-installation.md) |
+| Add your name, logo, colors and theme | [Runtime branding](docs/deployment/branding.md) |
+| Understand what runs where | [Architecture and technology placement diagrams](docs/architecture/system-overview.md) |
+| Use AWS, Azure, Google Cloud or on premises | [Cloud mappings and supported adapters](docs/deployment/cloud-profiles.md) |
+| Look up a configuration key | [Configuration reference](docs/deployment/configuration-reference.md) |
+| Configure a test without performance-testing experience | [Consumer requirements guide](docs/user-guide/configuration.md) |
+| Find all documentation | [Documentation index](docs/README.md) |
+
+## How it fits into your infrastructure
+
+```mermaid
+flowchart LR
+  Consumer["Browser / CI / AI editor"] --> API["Your ingress + TLS<br/>React UI / Spring Boot control plane"]
+  API --> DB[("Your PostgreSQL")]
+  API --> Store[("Your private S3-compatible storage")]
+  API --> Jobs["Isolated JMeter / Playwright Jobs<br/>dedicated Kubernetes namespace"]
+  Jobs --> Store
+  Jobs --> Target["Your approved application under test"]
+```
+
+The control plane validates requirements, authorizes team access, queues runs, reconciles Jobs and
+evaluates stored evidence. Material load runs in the isolated Jobs. PostgreSQL owns definitions,
+versions, state and summaries; object storage owns plans, raw results and browser evidence. You
+supply the cluster, database, bucket, registry, network and certificates. There is no required
+vendor-hosted control plane or AI subscription. See the full
+[architecture, placement and sequence diagrams](docs/architecture/system-overview.md).
+
+## Customize without editing components
+
+Copy [company-values.yaml](helm/performance-platform/examples/company-values.yaml), replace its
+infrastructure coordinates, create the referenced Secrets, and set your branding:
+
+```yaml
+branding:
+  name: Acme Performance Lab
+  logoUrl: /branding/logo.svg
+  logoAlt: Acme
+  logoConfigMap: company-logo
+  theme: light
+  colors: {primary: "#0f766e", accent: "#0891b2"}
+capacity:
+  maxConcurrentRuns: 5
+```
+
+The same built UI supports runtime company name, tab title, local/HTTPS logo, light/dark theme and
+brand colors. For local development edit `platform-ui/public/platform-config.json`; on Kubernetes
+the chart mounts the configuration and your logo. Infrastructure settings include existing
+PostgreSQL, S3 endpoints, separate control-plane/runner identities, private image-pull Secrets,
+ingress-controller annotations, approved networks and extra non-secret Spring configuration.
+[Branding instructions](docs/deployment/branding.md) and the
+[configuration reference](docs/deployment/configuration-reference.md) show exact keys and paths.
+
+![Company branding and a real 100-RPS test report](docs/images/company-branded-report.png)
+
+This disposable local example measured 7,000 requests with no errors and 100 RPS in an interior
+steady window. The full-run average includes ramps. It demonstrates the flow and configuration;
+it is not a benchmark of your application or a five-team capacity certification.
+
+Provider-specific SSO, native non-S3 storage and remote runner federation need adapters; they are
+not enabled by a logo or a cloud-name setting. The [extension guide](docs/development/extending.md)
+explains where those implementations belong.
+
 ## Try it locally
 
 Prerequisites: JDK 21 (the application targets Java 17), Maven, Node.js 22.22.2 or newer, Python 3,
@@ -33,6 +99,7 @@ Choose **Performance tests → New test**:
 [Browser walkthrough](docs/user-guide/browser-testing.md) ·
 [Verified self-service review](docs/reviews/browser-self-service-2026-10-19.md) ·
 [Configuration from requirements](docs/user-guide/configuration.md) ·
+[100 RPS with a concurrency ceiling of 20](specification/examples/valid/api-100-rps.yaml) ·
 [API examples](docs/api/v2-examples.md) ·
 [Recording API traffic](docs/operations/recording-locally.md)
 
@@ -87,7 +154,9 @@ PostgreSQL, private S3-compatible object storage, and ephemeral JMeter/Playwrigh
 It does not require AWS, a corporate account, Dynatrace, or BrowserStack. Cloud-specific identity,
 storage endpoints and policies are operator configuration.
 
-[Standalone/cloud deployment](docs/deployment/standalone.md) covers image builds, existing Secrets,
+[Company installation](docs/deployment/company-installation.md) walks through clone, builds,
+registry publication, namespaces, managed dependencies, credentials, branding, Helm installation,
+target onboarding, verification and upgrades. [Standalone reference](docs/deployment/standalone.md) covers image builds, existing Secrets,
 scoped machine identities, Helm values, networking, storage, TLS, upgrades and verification. The
 production profile refuses local load generation, filesystem artifacts and development identity.
 Imported code must be reviewed and restricted by runner egress policy on a CNI that enforces it.
@@ -105,6 +174,7 @@ npm --prefix platform-ui ci
 npm --prefix platform-ui test
 npm --prefix platform-ui run build
 npm --prefix platform-ui run lint
+python3 -m unittest discover -s runner-images/jmeter-runner -p 'test_*.py'
 npm ci --prefix runner-images/playwright-runner
 (cd runner-images/playwright-runner && npx playwright install chromium && npm test)
 python3 scripts/perf.py --help

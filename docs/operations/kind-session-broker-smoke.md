@@ -149,7 +149,7 @@ runnerCell:
   namespace: perf-runners
   serviceAccount: perf-runner
   images:
-    jmeter: perfplatform/jmeter-runner:5.6.3-1
+    jmeter: perfplatform/jmeter-runner:5.6.3-3
 
 sessionAcquisition:
   provider: external-session-broker

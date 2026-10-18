@@ -61,6 +61,12 @@
       <groupId>software.amazon.awssdk</groupId>
       <artifactId>s3</artifactId>
     </dependency>
+    <!-- The default credential chain needs STS on the runtime classpath for projected
+         web-identity tokens (for example EKS IRSA). Reuses the existing AWS SDK version. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sts</artifactId>
+    </dependency>
 
     <!--
       PostgreSQL via Testcontainers is the authoritative integration-test database (CLAUDE.md §25):

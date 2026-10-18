@@ -28,6 +28,7 @@ jobs:
       - run: npm --prefix platform-ui test
       - run: npm --prefix platform-ui run lint
       - run: npm --prefix platform-ui run build
+      - run: python3 -m unittest discover -s runner-images/jmeter-runner -p 'test_*.py'
       - run: npm ci --prefix runner-images/playwright-runner
       - run: npx --prefix runner-images/playwright-runner playwright install --with-deps chromium
       - run: npm --prefix runner-images/playwright-runner test

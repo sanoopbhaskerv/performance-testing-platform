@@ -174,6 +174,8 @@ for, and the ceiling is what the platform reserved.
   measuring the experience; asking for a rate of browser journeys would be asking for a number of
   machines. The studio offers the choice only for protocol tests.
 - **Per-scenario rates.** A rate applies to the workload, and scenarios divide it by weight.
-- **Cluster verification.** The renderer was verified against a real JMeter with the plugin
-  installed, through the local provider, for both models. It has not been run in a runner pod —
-  `docs/operations/local-kubernetes-run.md` remains the outstanding procedure.
+- **Representative distributed calibration.** The single-shard arrival-rate path has now run in
+  kind through the production-profile console: 7,000 requests, zero errors, 100 RPS in a 50-second
+  steady window, concurrency ceiling 20, and four fingerprint-verified evidence downloads. This
+  fixture proof does not establish multi-shard capacity, cloud network enforcement or performance
+  against an operator's application. See `runner-images/jmeter-runner/README.md` for the run identity.

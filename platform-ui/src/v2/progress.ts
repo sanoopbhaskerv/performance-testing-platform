@@ -20,6 +20,7 @@ export interface StageProgress {
   index: number;
   /** Zero-based position within the plan, and what the stage asks for. */
   targetUsers: number;
+  targetRate?: number | null;
   durationSeconds: number;
   /** Seconds from the run's start at which this stage begins. */
   startsAtSeconds: number;
@@ -78,6 +79,7 @@ export function progressOf(
       currentStage = {
         index,
         targetUsers: stages[index].targetUsers,
+        targetRate: stages[index].targetRate,
         durationSeconds,
         startsAtSeconds,
       };
@@ -108,10 +110,11 @@ export function describeStage(stages: Stage[], index: number): string {
   const stage = stages[index];
   if (!stage) return 'Running';
 
-  if (stage.targetUsers === 0) return 'Winding down';
+  const target = stage.targetRate ?? stage.targetUsers;
+  if (target === 0) return 'Winding down';
 
-  const previous = index === 0 ? 0 : stages[index - 1].targetUsers;
-  if (stage.targetUsers > previous) return 'Building up';
-  if (stage.targetUsers < previous) return 'Easing off';
+  const previous = index === 0 ? 0 : stages[index - 1].targetRate ?? stages[index - 1].targetUsers;
+  if (target > previous) return 'Building up';
+  if (target < previous) return 'Easing off';
   return 'Holding steady';
 }

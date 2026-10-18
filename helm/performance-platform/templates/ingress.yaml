@@ -7,10 +7,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "performance-platform.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # Long timeout for streaming test logs
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"      # Allow large heap dump HPROF uploads
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   {{- if .Values.ingress.tls }}

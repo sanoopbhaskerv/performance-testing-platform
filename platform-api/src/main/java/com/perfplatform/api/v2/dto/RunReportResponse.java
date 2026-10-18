@@ -79,8 +79,8 @@ public record RunReportResponse(
     /**
      * One workload's shape over time.
      *
-     * @param stages    the staged profile: hold or ramp toward {@code targetUsers} over a duration.
-     *                  A final stage targeting zero is ramp-down
+     * @param stages    hold or ramp toward {@code targetUsers} for STAGES or {@code targetRate}
+     *                  for ARRIVAL_RATE. A final stage targeting zero is ramp-down
      * @param scenarios the journey mix, with each journey's share of iterations
      */
     @Schema(description = "How one workload's load is shaped over time")
@@ -90,6 +90,10 @@ public record RunReportResponse(
             String type,
             int peakUsers,
             Integer iterationsPerUser,
+            @Schema(description = "STAGES for concurrent users, ARRIVAL_RATE for requests per second; null for browsers")
+            String modelType,
+            Integer maxConcurrency,
+            int peakArrivalRate,
             long totalDurationSeconds,
             List<StageResponse> stages,
             List<ScenarioResponse> scenarios) {
@@ -97,7 +101,7 @@ public record RunReportResponse(
 
     /** One stage of a load profile. */
     @Schema(description = "One stage of a load profile")
-    public record StageResponse(long durationSeconds, int targetUsers) {
+    public record StageResponse(long durationSeconds, int targetUsers, Integer targetRate) {
     }
 
     /** One journey in the mix, and its share. */
@@ -244,7 +248,7 @@ public record RunReportResponse(
                     : workload.model().stages().stream()
                             .map(stage -> new StageResponse(
                                     stage.duration() == null ? 0 : stage.duration().toSeconds(),
-                                    stage.targetUsers()))
+                                    stage.targetUsers(), stage.targetRate()))
                             .toList();
 
             List<ScenarioResponse> scenarios = workload.scenarios().stream()
@@ -257,6 +261,10 @@ public record RunReportResponse(
                     workload.type() == null ? null : workload.type().name(),
                     workload.peakUsers(),
                     workload.iterationsPerUser(),
+                    workload.model() == null || workload.model().type() == null
+                            ? null : workload.model().type().name(),
+                    workload.model() == null ? null : workload.model().maxConcurrency(),
+                    workload.peakArrivalRate(),
                     workload.totalDuration().toSeconds(),
                     stages,
                     scenarios));

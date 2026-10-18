@@ -283,6 +283,9 @@ export interface WorkloadProfile {
   type: string | null;
   peakUsers: number;
   iterationsPerUser?: number | null;
+  modelType?: 'STAGES' | 'ARRIVAL_RATE' | null;
+  maxConcurrency?: number | null;
+  peakArrivalRate?: number;
   totalDurationSeconds: number;
   stages: Stage[];
   scenarios: Scenario[];
@@ -291,6 +294,7 @@ export interface WorkloadProfile {
 export interface Stage {
   durationSeconds: number;
   targetUsers: number;
+  targetRate?: number | null;
 }
 
 export interface Scenario {

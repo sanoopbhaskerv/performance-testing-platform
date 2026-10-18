@@ -528,6 +528,42 @@ class TestRunControllerTest {
     class Report {
 
         @Test
+        @DisplayName("an arrival-rate report preserves its rate separately from its concurrency ceiling")
+        void reportPreservesArrivalRate() throws Exception {
+            var specification = new com.perfplatform.api.v2.spec.SpecificationParser().parse("""
+                    apiVersion: performance.ameriprise.com/v1alpha1
+                    kind: PerformanceTest
+                    metadata: {name: rate-demo, team: demo, application: demo}
+                    spec:
+                      environment: {name: performance, runnerCell: local, targetClass: non-production}
+                      workloads:
+                        - name: api-load
+                          type: protocol
+                          engine: jmeter
+                          model:
+                            type: arrival-rate
+                            maxConcurrency: 20
+                            stages:
+                              - {duration: 10s, targetRate: 100}
+                              - {duration: 1m, targetRate: 100}
+                              - {duration: 10s, targetRate: 0}
+                    """).specification().orElseThrow();
+            when(readReport.report(any(), any())).thenReturn(new RunReport(
+                    run, Optional.of(new RunReport.TestedDefinition(1,
+                            com.perfplatform.domain.spec.SpecificationDigest.of(specification), specification)),
+                    Optional.empty(), List.of(), Optional.empty(), List.of(), List.of()));
+
+            mockMvc.perform(get("/api/v2/test-runs/" + run.id() + "/report"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.test.workloads[0].modelType").value("ARRIVAL_RATE"))
+                    .andExpect(jsonPath("$.test.workloads[0].maxConcurrency").value(20))
+                    .andExpect(jsonPath("$.test.workloads[0].peakArrivalRate").value(100))
+                    .andExpect(jsonPath("$.test.workloads[0].stages[0].targetRate").value(100))
+                    .andExpect(jsonPath("$.test.workloads[0].stages[2].targetRate").value(0))
+                    .andExpect(jsonPath("$.test.workloads[0].peakUsers").value(20));
+        }
+
+        @Test
         @DisplayName("a run with no analysis reports null measurements, never zeros")
         void unanalysedRunReportsNothingMeasured() throws Exception {
             when(readReport.report(any(), any())).thenReturn(new RunReport(

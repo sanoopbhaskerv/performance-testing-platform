@@ -79,10 +79,17 @@ JSON
     # Uploaded individually rather than by syncing the directory: only these are
     # the run's evidence, and a sync would also ship the plan back and whatever
     # else JMeter happened to leave behind.
-    local uploaded=0 failed=0
+    local uploaded=0 failed=0 digest content_type
     for file in "${RESULTS}" "${JMETER_LOG}" "${MANIFEST}"; do
         [[ -f "${file}" ]] || continue
+        digest="sha256:$(sha256sum "${file}" | cut -d' ' -f1)"
+        case "${file}" in
+            *.json) content_type=application/json ;;
+            *.jtl) content_type=text/csv ;;
+            *) content_type=text/plain ;;
+        esac
         if s3 cp "${file}" "s3://${PERF_ARTIFACT_BUCKET}/${PERF_ARTIFACT_PREFIX}$(basename "${file}")" \
+                --metadata "perf-digest=${digest}" --content-type "${content_type}" \
                 --only-show-errors; then
             uploaded=$((uploaded + 1))
         else

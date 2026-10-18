@@ -2,6 +2,50 @@
 
 ## Current verified state — 19 October 2026
 
+**Company configuration and request-rate follow-up (supersedes older counts/image pins):**
+Runtime branding now sets product/tab name, local/HTTPS logo, light/dark theme and validated brand
+colors using public JSON or Helm values, without rebuilding the deploying company's UI. The same
+image was verified with baked Performance Studio/dark defaults and mounted Acme/light branding.
+The logo and configuration return 200 before login; a run report still returns 401 without a token.
+Extra non-secret Spring configuration was mounted and its application name observed in startup logs.
+Visual verification covered sign-in and the persisted report; light-theme sign-in fields were corrected.
+
+Helm now supports control-plane cloud annotations, separate registry pull Secrets in both
+namespaces, configurable ingress annotations, operator-owned runner namespaces, branding/logo
+ConfigMaps and additional application configuration. Legacy sample YAML API keys are no longer
+created by default. The AWS SDK STS module reuses the existing SDK version and its projected-token
+exchange is tested against a local STS fixture; no cloud account was used.
+
+Documentation now includes the 15-step company installation, cloud mappings, exact configuration
+reference, branding, troubleshooting, architecture/technology placement/run-sequence diagrams,
+expanded README, corrected current API authentication/status and a repeatable extension workflow.
+Start at `docs/README.md`; copy `helm/performance-platform/examples/company-values.yaml`.
+
+Chrome browser demo `cbeeefa0-19fe-4fa2-8f3b-0bbcd9e79b2c` completed four journeys with two browsers,
+zero failures and three met objectives (journey p95 1,318 ms). Chrome-authored API scenario
+`demo-20-concurrent-100-rps-214629` targets 100 RPS with concurrency ceiling 20, a 10s ramp, 60s
+hold and 10s ramp-down. Final run `1ec111c4-b6da-4673-b6cf-38a393d355a0`: 7,000 requests,
+zero errors, p95 2 ms, 5,000 requests in a 50s interior steady window = 100 RPS. Maximum reported
+thread count was 15, not a claim of twenty constantly active users. Four evidence downloads were
+SHA-256 verified. Runner `5.6.3-3` now supplies upload fingerprints/content types; older missing
+fingerprints remain unverifiable. Rate-based report/progress/review screens now preserve rates
+and ceilings, and throughput objectives say "At least".
+
+Checks: full Maven verify with Docker **1,369 tests, zero failures/errors, one opt-in recorder
+skip**; **205 UI tests**, lint and production build; runner upload contract test; full control-plane
+and JMeter Docker builds; company Helm lint/template, invalid branding rejection, namespace/mount/
+identity/pull-secret assertions and documentation link checks. The Apache CDN mirror argument was
+used for a slow archive download; SHA-512 verification remained enabled. Private proof JSON,
+credentials, raw results and extra screenshots stay in ignored `.local/browser-proof/`.
+
+Local inspection uses the existing disposable kind cluster/namespaces and localhost:18080.
+Control-plane image: `perfplatform/platform-core:company-verify-2`; reviewed runner images remain
+pinned. The branded 7,000-request report is left open in Chrome. No external cloud deployment,
+image publication or merge was performed. Current work is published through the existing PR #1.
+Next: validate the company installation on an operator's infrastructure and calibrate five-team
+resources. Human OIDC, native Blob/GCS adapters, private Git credentials, remote federation and
+BrowserStack remain extensions, not configuration switches or certified integrations.
+
 **Recorder replay follow-up:** the fresh Linux backend build passed in full. Its slower UI run
 exposed duplicate evidence when a recorder poll replayed the same sequence. The recorder now
 ignores older/repeated frames, refusals and captures, preserving monotonic cursors and one visible

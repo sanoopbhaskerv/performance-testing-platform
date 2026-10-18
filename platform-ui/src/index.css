@@ -12,6 +12,7 @@
   
   --brand-primary: #6366f1;
   --brand-secondary: #818cf8;
+  --brand-accent-rgb: 192 132 252;
   --brand-gradient: linear-gradient(135deg, #4f46e5, #ec4899);
   
   --success: #10b981;
@@ -21,7 +22,32 @@
   --glass-bg: rgba(15, 23, 42, 0.6);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --header-bg: rgba(2, 6, 23, 0.8);
+  --field-bg: rgba(15, 23, 42, 0.5);
+  --field-focus-bg: rgba(30, 41, 59, 0.8);
 }
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --border-color: #cbd5e1;
+  --border-light: rgba(15, 23, 42, 0.15);
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --glass-border: rgba(15, 23, 42, 0.12);
+  --glass-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.08);
+  --header-bg: rgba(255, 255, 255, 0.9);
+  --field-bg: #ffffff;
+  --field-focus-bg: #f8fafc;
+}
+
+.brand-logo { max-height: 36px; max-width: 160px; object-fit: contain; }
+.access-token-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.access-token-row input { flex: 1 1 16rem; min-width: 0; }
 
 * {
   box-sizing: border-box;
@@ -37,8 +63,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.08), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.08), transparent 25%);
+    radial-gradient(circle at 15% 50%, rgb(var(--pf-brand-rgb, 79 70 229) / 8%), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgb(var(--brand-accent-rgb) / 8%), transparent 25%);
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -79,8 +105,10 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border-light);
-  background: rgba(2, 6, 23, 0.8);
+  background: var(--header-bg);
   backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
@@ -94,6 +122,15 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.025em;
+  min-width: 0;
+}
+
+.header-brand span { overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .header { padding: 1rem; }
+  .header-brand { max-width: 100%; font-size: 1.1rem; }
+  .header .surface-tabs { order: 3; width: 100%; margin: 0; }
 }
 
 .logo-icon {
@@ -146,7 +183,7 @@ h1, h2, h3, h4, h5, h6 {
 .form-control {
   width: 100%;
   padding: 0.75rem 1rem;
-  background-color: rgba(15, 23, 42, 0.5);
+  background-color: var(--field-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -158,8 +195,8 @@ h1, h2, h3, h4, h5, h6 {
 .form-control:focus {
   outline: none;
   border-color: var(--brand-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-  background-color: rgba(30, 41, 59, 0.8);
+  box-shadow: 0 0 0 3px rgb(var(--pf-brand-rgb, 79 70 229) / 20%);
+  background-color: var(--field-focus-bg);
 }
 
 .form-control::placeholder {
@@ -199,14 +236,14 @@ select.form-control {
 }
 
 .btn-primary {
-  background: var(--brand-gradient);
-  color: white;
-  box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.39);
+  background: var(--brand-primary);
+  color: var(--pf-text-on-action, white);
+  box-shadow: 0 4px 14px 0 rgb(var(--pf-brand-rgb, 79 70 229) / 39%);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 6px 20px rgb(var(--pf-brand-rgb, 79 70 229) / 45%);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -416,13 +453,13 @@ select.form-control {
 }
 
 .surface-tab:focus-visible {
-  outline: 2px solid #818cf8;
+  outline: 2px solid var(--brand-secondary);
   outline-offset: 2px;
 }
 
 .surface-tab.active {
-  background: rgba(99, 102, 241, 0.22);
-  border-color: rgba(129, 140, 248, 0.65);
+  background: rgb(var(--pf-brand-rgb) / 16%);
+  border-color: var(--brand-secondary);
   opacity: 1;
   font-weight: 600;
 }

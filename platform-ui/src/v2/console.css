@@ -81,6 +81,7 @@
 
 .v2 .btn-quiet {
   background: transparent;
+  color: var(--pf-text-strong);
 }
 
 .v2 .btn-small {
