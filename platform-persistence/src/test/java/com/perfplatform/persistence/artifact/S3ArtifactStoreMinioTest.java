@@ -10,7 +10,9 @@ import com.perfplatform.domain.port.ArtifactStore.ArtifactType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.images.builder.ImageFromDockerfile;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -49,7 +51,14 @@ class S3ArtifactStoreMinioTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MinIOContainer MINIO = new MinIOContainer("minio/minio:RELEASE.2024-11-07T00-52-20Z");
+    static final GenericContainer<?> MINIO = new GenericContainer<>(
+            new ImageFromDockerfile("perfplatform/minio-test:2024-11-07-1", false)
+                    .withFileFromClasspath("Dockerfile", "minio/Dockerfile"))
+            .withEnv("MINIO_ROOT_USER", "minioadmin")
+            .withEnv("MINIO_ROOT_PASSWORD", "minioadmin")
+            .withExposedPorts(9000)
+            .withCommand("server", "/data")
+            .waitingFor(Wait.forHttp("/minio/health/live").forPort(9000));
 
     private static S3Client s3;
     private static S3ArtifactStore store;
@@ -57,9 +66,9 @@ class S3ArtifactStoreMinioTest {
     @BeforeAll
     static void createBucket() {
         s3 = S3Client.builder()
-                .endpointOverride(URI.create(MINIO.getS3URL()))
+                .endpointOverride(URI.create("http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000)))
                 .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(MINIO.getUserName(), MINIO.getPassword())))
+                        AwsBasicCredentials.create("minioadmin", "minioadmin")))
                 .region(Region.US_EAST_1)
                 // MinIO addresses buckets by path, not by virtual host. The same setting is what a
                 // deployment behind an S3-compatible appliance needs, so it is configuration in

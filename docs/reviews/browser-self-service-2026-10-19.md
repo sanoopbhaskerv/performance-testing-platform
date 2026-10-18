@@ -53,6 +53,12 @@ digest refusal before traffic, empty/all-skipped tests, failure evidence and sna
 Both container images built; Helm lint and refusal of unrestricted egress passed. A clean export
 of the staged repository also packages successfully, including the formerly ignored Java target packages.
 
+The first fresh Linux CI run additionally found an upstream distribution failure: the pinned
+MinIO prebuilt image had been withdrawn from Docker Hub and Quay. The optional fixture now builds
+the same release from an immutable official source commit with archive-checksum verification.
+Its S3 integration checks pass with the source-built image; the proof bootstrap uses a scoped
+CLI pod for bucket creation. First build takes a few minutes and needs GitHub/Go proxy access.
+
 ## Reproduction and remaining work
 
 Follow [the deployment guide](../deployment/standalone.md#reproduce-the-disposable-local-browser-proof)

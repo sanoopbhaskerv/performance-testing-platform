@@ -110,6 +110,11 @@ npm ci --prefix runner-images/playwright-runner
 python3 scripts/perf.py --help
 ```
 
+The first S3 integration test builds its optional MinIO fixture from the pinned official source
+commit, verified by archive SHA-256, because upstream withdrew its old prebuilt images. Docker
+needs access to GitHub and the Go module proxy for that build; Go is not required on the host.
+The fixture retains MinIO's upstream license and is separate from your production object store.
+
 The optional live Chrome-recorder test uses `-Drecorder.live=true`. PostgreSQL and MinIO tests
 must actually run; skipped container tests do not prove integration. UI lint is part of verification alongside tests and the production build.
 

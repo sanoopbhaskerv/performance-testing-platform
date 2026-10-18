@@ -2,6 +2,16 @@
 
 ## Current verified state — 19 October 2026
 
+**Fresh-install portability follow-up:** the first GitHub Linux run exposed that the old MinIO
+prebuilt image had been withdrawn from both upstream registries; cached local images hid this. The
+optional S3 fixture now builds the same 2024 release from official commit
+`cefc43e4daa4cbb490ef6726ea374e26a93eb85e`, with a verified archive SHA-256 and pinned Go toolchain.
+Its real S3 integration tests pass from that source build (first build about 3m25s locally). The
+proof bootstrap creates buckets using a temporary scoped AWS CLI pod, independently smoke-tested.
+The CI runner is pinned to Ubuntu 24.04 and current setup actions. Production still uses the
+operator's own S3-compatible storage; no storage product upgrade or external image publication was
+introduced. See the updated deployment guide for building/loading this optional fixture.
+
 This section supersedes the historical increment notes below. The user's direction is now an open
 source, customizable, self-hosted product usable without performance engineering experience. This
 increment completes the browser wizard and production Playwright path and reviews the complete

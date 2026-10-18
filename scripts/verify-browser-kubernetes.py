@@ -67,14 +67,19 @@ for namespace in [ns, runner_ns]:
 
 deployment('postgres', 'postgres:16.2-alpine', 5432,
            [from_secret(k,'proof-postgres') for k in ['POSTGRES_USER','POSTGRES_PASSWORD','POSTGRES_DB']])
-deployment('minio', 'minio/minio:RELEASE.2024-11-07T00-52-20Z', 9000,
+deployment('minio', 'perfplatform/minio-test:2024-11-07-1', 9000,
            [from_secret(k,'proof-minio') for k in ['MINIO_ROOT_USER','MINIO_ROOT_PASSWORD']], ['minio','server','/data'])
 program = '''const http=require('http');http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(req.url==='/finish'?'<h1>Journey complete</h1>':'<h1>Performance proof</h1><a href="/finish">Continue</a>')}).listen(8081,'0.0.0.0');'''
 deployment('browser-target', 'perfplatform/playwright-runner:1.62.1-1', 8081, command_args=['node','-e',program])
 for name in ['postgres','minio','browser-target']:
     kubectl('-n', ns, 'rollout', 'status', f'deployment/{name}', '--timeout=120s')
-kubectl('-n', ns, 'exec', 'deployment/minio', '--', 'sh', '-c',
-        'export MC_HOST_local="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@localhost:9000"; mc mb --ignore-existing local/perf-artifacts >/dev/null')
+apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'proof-bucket','namespace':ns},'spec':{
+    'restartPolicy':'Never','containers':[{'name':'create-bucket','image':'perfplatform/playwright-runner:1.62.1-1',
+    'imagePullPolicy':'IfNotPresent','envFrom':[{'secretRef':{'name':'storage-access'}}],
+    'env':[{'name':'AWS_DEFAULT_REGION','value':'us-east-1'},{'name':'AWS_EC2_METADATA_DISABLED','value':'true'}],
+    'command':['aws','--endpoint-url',f'http://minio.{ns}.svc.cluster.local:9000','s3','mb','s3://perf-artifacts']}]}})
+kubectl('-n',ns,'wait','--for=jsonpath={.status.phase}=Succeeded','pod/proof-bucket','--timeout=60s')
+kubectl('-n',ns,'delete','pod/proof-bucket')
 values = {
     'deploymentProfile':'production','image':{'repository':'perfplatform/platform-core','tag':'browser-verify'},
     'auth':{'serviceTokenSecret':'platform-auth'},'database':{'existingSecret':'platform-db'},

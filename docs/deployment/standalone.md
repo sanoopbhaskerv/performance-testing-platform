@@ -180,7 +180,11 @@ using the commands above with tags `perfplatform/platform-core:browser-verify` a
 kind create cluster --name perf-browser-verify
 kind load docker-image perfplatform/platform-core:browser-verify --name perf-browser-verify
 kind load docker-image perfplatform/playwright-runner:1.62.1-1 --name perf-browser-verify
-# Load or permit pulling postgres:16.2-alpine and minio/minio:RELEASE.2024-11-07T00-52-20Z too.
+# Optional local S3 fixture; the pinned upstream prebuilt image was withdrawn.
+docker build -f platform-persistence/src/test/resources/minio/Dockerfile \
+  -t perfplatform/minio-test:2024-11-07-1 .
+kind load docker-image perfplatform/minio-test:2024-11-07-1 --name perf-browser-verify
+# Load or permit pulling postgres:16.2-alpine too.
 python3 scripts/verify-browser-kubernetes.py
 kubectl --context kind-perf-browser-verify -n perf-browser-proof \
   port-forward service/proof-performance-platform 18080:8080

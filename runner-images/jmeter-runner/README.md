@@ -97,10 +97,12 @@ parser's expectations are the older contract.
 To reproduce that fixture, or to check a change by hand:
 
 ```bash
+docker build -f platform-persistence/src/test/resources/minio/Dockerfile \
+  -t perfplatform/minio-test:2024-11-07-1 .
 docker network create perf-e2e
 docker run -d --rm --name perf-minio --network perf-e2e \
   -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 -p 19000:9000 \
-  minio/minio:RELEASE.2024-11-07T00-52-20Z server /data
+  perfplatform/minio-test:2024-11-07-1 server /data
 docker run -d --rm --name perf-demo --network perf-e2e \
   -v "$PWD/demo-service/target:/app:ro" eclipse-temurin:17-jre-jammy \
   java -jar /app/demo-service-1.0.0.jar
