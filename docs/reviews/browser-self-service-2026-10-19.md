@@ -59,6 +59,11 @@ the same release from an immutable official source commit with archive-checksum 
 Its S3 integration checks pass with the source-built image; the proof bootstrap uses a scoped
 CLI pod for bucket creation. First build takes a few minutes and needs GitHub/Go proxy access.
 
+A subsequent fresh Linux run passed the full backend and exposed duplicate recorder evidence
+when polling replayed the same sequence. Monotonic cursors now ignore replayed/older frames,
+refusals and captures; a regression check waits for repeated polls before asserting one entry.
+All 193 UI tests, build and lint pass after that correction.
+
 ## Reproduction and remaining work
 
 Follow [the deployment guide](../deployment/standalone.md#reproduce-the-disposable-local-browser-proof)

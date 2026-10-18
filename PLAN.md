@@ -2,6 +2,12 @@
 
 ## Current verified state — 19 October 2026
 
+**Recorder replay follow-up:** the fresh Linux backend build passed in full. Its slower UI run
+exposed duplicate evidence when a recorder poll replayed the same sequence. The recorder now
+ignores older/repeated frames, refusals and captures, preserving monotonic cursors and one visible
+entry per event. The regression test explicitly waits for repeated polls and checks both evidence
+lists. All 193 UI tests, production build and lint pass locally after this correction.
+
 **Fresh-install portability follow-up:** the first GitHub Linux run exposed that the old MinIO
 prebuilt image had been withdrawn from both upstream registries; cached local images hid this. The
 optional S3 fixture now builds the same 2024 release from official commit

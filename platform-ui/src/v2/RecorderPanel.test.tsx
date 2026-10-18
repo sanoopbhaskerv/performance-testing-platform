@@ -108,7 +108,7 @@ describe('RecorderPanel', () => {
     });
   });
 
-  it('shows a refused destination with its reason rather than dropping it silently', async () => {
+  it('shows refused destinations and captured requests once when polls replay evidence', async () => {
     const client = stubClient({
       pollRecording: vi.fn().mockResolvedValue(
         emptyUpdate({
@@ -122,14 +122,17 @@ describe('RecorderPanel', () => {
               blockedAt: '2026-08-05T10:00:00Z',
             },
           ],
+          captures: [CAPTURE],
         }),
       ) as V2Client['pollRecording'],
     });
 
     renderPanel(client);
 
+    await waitFor(() => expect(vi.mocked(client.pollRecording).mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
     expect(await screen.findByText('https://ads.example/pixel')).toBeInTheDocument();
     expect(await screen.findByText(/is not in this allowlist/)).toBeInTheDocument();
+    expect(screen.getAllByText(`${CAPTURE.method} ${CAPTURE.url}`)).toHaveLength(1);
   });
 
   it('scales pointer coordinates into the browser viewport, not the rendered image', async () => {

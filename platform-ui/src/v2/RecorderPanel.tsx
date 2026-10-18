@@ -163,18 +163,22 @@ export function RecorderPanel({
         }
         failures = 0;
         setStatus(update.status);
-        if (update.frame) {
+        if (update.frame && update.frame.sequence > cursors.current.frame) {
           cursors.current.frame = update.frame.sequence;
           setFrame(update.frame.imageBase64);
           setFrameSize({ width: update.frame.width, height: update.frame.height });
         }
-        if (update.blocked.length > 0) {
-          cursors.current.blocked = update.blocked[update.blocked.length - 1].sequence;
-          setBlocked((current) => [...update.blocked, ...current].slice(0, 25));
+        // A long poll can replay evidence after a retry or reconnect. Sequence identity keeps
+        // the visible lists and cursors monotonic rather than duplicating the same refusal.
+        const freshBlocked = update.blocked.filter(entry => entry.sequence > cursors.current.blocked);
+        if (freshBlocked.length > 0) {
+          cursors.current.blocked = Math.max(...freshBlocked.map(entry => entry.sequence));
+          setBlocked((current) => [...freshBlocked, ...current].slice(0, 25));
         }
-        if (update.captures.length > 0) {
-          cursors.current.capture = update.captures[update.captures.length - 1].sequence;
-          setCaptures((current) => [...update.captures, ...current].slice(0, 50));
+        const freshCaptures = update.captures.filter(entry => entry.sequence > cursors.current.capture);
+        if (freshCaptures.length > 0) {
+          cursors.current.capture = Math.max(...freshCaptures.map(entry => entry.sequence));
+          setCaptures((current) => [...freshCaptures, ...current].slice(0, 50));
         }
         if (update.failureReason) {
           setFailure(update.failureReason);
