@@ -3,6 +3,10 @@
 ## Current verified state — 19 October 2026
 
 **Company configuration and request-rate follow-up (supersedes older counts/image pins):**
+Standalone SVG architecture, technology placement and sequence diagrams are included and visually
+verified in Chrome, with editable Mermaid text and a dependency-free regeneration script. They
+remain viewable offline when GitHub rich rendering is unavailable. XML/idempotent regeneration pass.
+
 Runtime branding now sets product/tab name, local/HTTPS logo, light/dark theme and validated brand
 colors using public JSON or Helm values, without rebuilding the deploying company's UI. The same
 image was verified with baked Performance Studio/dark defaults and mounted Acme/light branding.

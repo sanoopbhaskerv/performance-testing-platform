@@ -22,7 +22,12 @@ and deploy it in your own infrastructure. [MIT licensed](LICENSE).
 
 ## How it fits into your infrastructure
 
-```mermaid
+![Standalone system architecture](docs/images/system-architecture.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+```text
 flowchart LR
   Consumer["Browser / CI / AI editor"] --> API["Your ingress + TLS<br/>React UI / Spring Boot control plane"]
   API --> DB[("Your PostgreSQL")]
@@ -31,6 +36,8 @@ flowchart LR
   Jobs --> Store
   Jobs --> Target["Your approved application under test"]
 ```
+
+</details>
 
 The control plane validates requirements, authorizes team access, queues runs, reconciles Jobs and
 evaluates stored evidence. Material load runs in the isolated Jobs. PostgreSQL owns definitions,

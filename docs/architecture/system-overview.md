@@ -3,9 +3,17 @@
 This describes the implemented standalone V2 product. The longer target architecture includes
 future enterprise capabilities; it is not a declaration that those capabilities are shipped.
 
+The SVG diagrams below work offline and without a rich-preview service. Regenerate them using
+`python3 scripts/render-architecture-diagrams.py`; keep the editable Mermaid source and labels in sync.
+
 ## System architecture
 
-```mermaid
+![system architecture](../images/system-architecture.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+```text
 flowchart LR
   User["Consumer in a browser"]
   CLI["CI or AI editor<br/>Python CLI / REST / YAML"]
@@ -37,6 +45,8 @@ flowchart LR
   Browser -->|"bounded browser cohort · run correlation header"| Target
 ```
 
+</details>
+
 The control plane is a modular monolith. Its HTTP validator may send one iteration before a run;
 material performance load runs in Jobs. PostgreSQL is the authority for execution state. Runner
 workspaces are temporary. Every run points to an immutable definition version and compiled-plan
@@ -45,7 +55,12 @@ state and Kubernetes handles after a restart.
 
 ## Technology placement
 
-```mermaid
+![technology placement](../images/technology-placement.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+```text
 flowchart TB
   subgraph Client["Consumer workstation"]
     Web["Chrome / Edge<br/>React 19 · TypeScript · Vite-built static assets"]
@@ -71,6 +86,8 @@ flowchart TB
   Adapters --> Execution
 ```
 
+</details>
+
 Java source targets Java 17; the verified build toolchain uses JDK 21. Build the complete console/API
 image from `docker/Dockerfile.control-plane`. Each runner has a separate Dockerfile and version.
 Kubernetes, PostgreSQL, storage, registry, TLS, DNS and network enforcement belong to the operator.
@@ -78,7 +95,12 @@ No external AI service is required to run the platform or its portable editor sk
 
 ## One run, end to end
 
-```mermaid
+![run sequence](../images/run-sequence.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+```text
 sequenceDiagram
   actor Consumer
   participant API as UI / REST API
@@ -104,6 +126,8 @@ sequenceDiagram
   Consumer->>API: Read report / authorized artifact download
   API-->>Consumer: Measured results and verified evidence
 ```
+
+</details>
 
 ## Deployment boundaries and present limits
 
