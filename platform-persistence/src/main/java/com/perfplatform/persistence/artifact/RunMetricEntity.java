@@ -77,6 +77,9 @@ public class RunMetricEntity {
     @Column(name = "p50_millis", nullable = false)
     private long p50Millis;
 
+    @Column(name = "p75_millis")
+    private Long p75Millis;
+
     @Column(name = "p90_millis", nullable = false)
     private long p90Millis;
 
@@ -184,6 +187,9 @@ public class RunMetricEntity {
     public long getP50Millis() {
         return p50Millis;
     }
+
+    public Long getP75Millis() { return p75Millis; }
+    void setP75Millis(Long value) { p75Millis = value; }
 
     public long getP90Millis() {
         return p90Millis;

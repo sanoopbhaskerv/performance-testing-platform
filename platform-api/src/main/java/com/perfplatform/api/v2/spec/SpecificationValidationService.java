@@ -1,6 +1,7 @@
 package com.perfplatform.api.v2.spec;
 
 import com.perfplatform.domain.port.EngineCatalog;
+import com.perfplatform.domain.admission.ExecutionLimits;
 import com.perfplatform.domain.spec.GitSourceAllowlist;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
 import com.perfplatform.domain.spec.SpecificationDigest;
@@ -29,9 +30,8 @@ import java.util.Optional;
  * problem in one response rather than fixing one field per round trip. It is skipped only when
  * the document could not be mapped at all, since there would be nothing to inspect.
  *
- * <p>Two later layers are intentionally absent here. <b>Policy</b> validation — team quotas,
- * target allowlists, duration ceilings — is enforced server-side by admission control at trigger
- * time, against configured limits rather than against values the document supplies about itself.
+ * <p>Per-run user/duration policy is applied using operator-owned limits and rechecked at trigger
+ * and provisioning. Live queue capacity and team concurrency are enforced by admission control.
  * <b>Connectivity preflight</b> — DNS, TLS, target health — requires the network and runs from
  * the runner cell that will execute the test; folding it in here would make validation slow,
  * flaky and unusable in a pull request.
@@ -59,6 +59,7 @@ public class SpecificationValidationService {
      * invalid in another without a finding that says which.
      */
     private final GitSourceAllowlist gitSources;
+    private final ExecutionLimits executionLimits;
 
     public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines) {
         this(parser, engines, GitSourceAllowlist.none());
@@ -66,9 +67,15 @@ public class SpecificationValidationService {
 
     public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines,
             GitSourceAllowlist gitSources) {
+        this(parser, engines, gitSources, ExecutionLimits.DEFAULTS);
+    }
+
+    public SpecificationValidationService(SpecificationParser parser, EngineCatalog engines,
+            GitSourceAllowlist gitSources, ExecutionLimits executionLimits) {
         this.parser = parser;
         this.engines = engines;
         this.gitSources = gitSources == null ? GitSourceAllowlist.none() : gitSources;
+        this.executionLimits = java.util.Objects.requireNonNull(executionLimits);
     }
 
     /**
@@ -99,6 +106,7 @@ public class SpecificationValidationService {
         PerformanceTestSpecification specification = parsed.specification().orElseThrow();
         ValidationResult combined = parsed.findings()
                 .merge(SemanticValidator.validate(specification))
+                .merge(executionLimits.validate(specification))
                 .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()))
                 .merge(GitSourceValidator.validate(specification, gitSources));
 
@@ -118,6 +126,7 @@ public class SpecificationValidationService {
      */
     public ValidationOutcome validateSpecification(PerformanceTestSpecification specification) {
         ValidationResult findings = SemanticValidator.validate(specification)
+                .merge(executionLimits.validate(specification))
                 .merge(EngineCapabilityValidator.validate(specification, engines.engineIds()))
                 .merge(GitSourceValidator.validate(specification, gitSources));
         Optional<SpecificationDigest> digest = findings.isValid()

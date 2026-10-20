@@ -36,6 +36,18 @@ class SpecificationValidationServiceTest {
     private final SpecificationValidationService service =
             new SpecificationValidationService(new SpecificationParser(), ENGINES);
 
+    @Test
+    void configuredExecutionLimitsRejectBothDocumentAndMappedSpecifications() {
+        var restricted = new SpecificationValidationService(new SpecificationParser(), ENGINES,
+                com.perfplatform.domain.spec.GitSourceAllowlist.none(),
+                new com.perfplatform.domain.admission.ExecutionLimits(10, Duration.ofSeconds(30)));
+        var outcome = restricted.validate(ExampleFixtures.valid("api-100-rps.yaml"));
+        assertThat(outcome.findings().codes()).contains("policy.protocolUsers.exceeded", "policy.duration.exceeded");
+        assertThat(outcome.digest()).isEmpty();
+        assertThat(restricted.validateSpecification(outcome.specification().orElseThrow()).findings().codes())
+                .contains("policy.protocolUsers.exceeded", "policy.duration.exceeded");
+    }
+
     @Nested
     @DisplayName("published valid examples")
     class ValidExamples {

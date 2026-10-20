@@ -333,6 +333,8 @@ export interface Measurements {
 }
 
 export interface OperationMetrics {
+  /** Null/absent on summaries created before exact p75 was stored. */
+  p75Millis?: number | null;
   name: string;
   sampleCount: number;
   errorCount: number;

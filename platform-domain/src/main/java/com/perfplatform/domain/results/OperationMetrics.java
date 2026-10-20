@@ -43,7 +43,16 @@ public record OperationMetrics(
         long p90Millis,
         long p95Millis,
         long p99Millis,
-        long throughputPerSecondMilli) {
+        long throughputPerSecondMilli,
+        Long p75Millis) {
+
+    /** Older summaries did not store p75. Null means unavailable, never an estimated p90. */
+    public OperationMetrics(String name, long sampleCount, long errorCount, long unparsedCount,
+            long minMillis, long maxMillis, long meanMillis, long p50Millis, long p90Millis,
+            long p95Millis, long p99Millis, long throughputPerSecondMilli) {
+        this(name, sampleCount, errorCount, unparsedCount, minMillis, maxMillis, meanMillis,
+                p50Millis, p90Millis, p95Millis, p99Millis, throughputPerSecondMilli, null);
+    }
 
     /** The name used for the aggregate across every operation in a workload. */
     public static final String ALL = "*";

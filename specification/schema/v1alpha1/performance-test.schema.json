@@ -761,8 +761,8 @@
         },
         "percentile": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 100
+          "enum": [50, 75, 90, 95, 99, 100],
+          "description": "An explicitly measured percentile; 100 is the maximum. Other percentiles are rejected."
         },
         "threshold": {
           "$ref": "#/$defs/threshold"

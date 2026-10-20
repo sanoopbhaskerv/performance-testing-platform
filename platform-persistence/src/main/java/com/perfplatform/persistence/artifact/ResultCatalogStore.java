@@ -162,7 +162,7 @@ public class ResultCatalogStore implements ResultCatalog {
     private static RunMetricEntity toEntity(TestRunId runId, NormalizedRunResult result,
             OperationMetrics operation, Instant recordedAt) {
 
-        return new RunMetricEntity(
+        RunMetricEntity entity = new RunMetricEntity(
                 UUID.randomUUID(),
                 runId.value(),
                 operation.name(),
@@ -183,6 +183,8 @@ public class ResultCatalogStore implements ResultCatalog {
                 result.startedAt().orElse(null),
                 result.completedAt().orElse(null),
                 recordedAt);
+        entity.setP75Millis(operation.p75Millis());
+        return entity;
     }
 
     private static OperationMetrics toMetrics(RunMetricEntity row) {
@@ -198,7 +200,7 @@ public class ResultCatalogStore implements ResultCatalog {
                 row.getP90Millis(),
                 row.getP95Millis(),
                 row.getP99Millis(),
-                row.getThroughputPerSecondMilli());
+                row.getThroughputPerSecondMilli(), row.getP75Millis());
     }
 
     @Override

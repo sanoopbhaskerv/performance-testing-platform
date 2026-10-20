@@ -43,6 +43,10 @@ spec:
               value: {{ if .Values.auth.serviceTokenSecret }}"/var/run/perfplatform/auth/identities.json"{{ else }}""{{ end }}
             - name: MAX_CONCURRENT_RUNS
               value: {{ .Values.capacity.maxConcurrentRuns | quote }}
+            - name: MAX_PROTOCOL_USERS_PER_RUN
+              value: {{ .Values.capacity.maxProtocolUsersPerRun | quote }}
+            - name: MAX_TEST_DURATION
+              value: {{ .Values.capacity.maxDuration | quote }}
             - name: SPRING_DATASOURCE_URL
               value: {{ include "performance-platform.databaseUrl" . | quote }}
             - name: SPRING_DATASOURCE_USERNAME

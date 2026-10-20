@@ -1441,12 +1441,7 @@ public final class SemanticValidator {
                         "Scope an objective to a declared workload, to one scenario within it as "
                                 + "'workload/scenario', or omit scope to apply it to the whole test."));
             }
-            if (objective.percentile() != null
-                    && (objective.percentile() < 1 || objective.percentile() > 100)) {
-                findings.add(ValidationFinding.error("spec.objective.percentile.invalid",
-                        path + "/percentile",
-                        "A percentile must be between 1 and 100.", null));
-            }
+            findings.addAll(ObjectiveContract.validate(objective, path).findings());
         }
     }
 

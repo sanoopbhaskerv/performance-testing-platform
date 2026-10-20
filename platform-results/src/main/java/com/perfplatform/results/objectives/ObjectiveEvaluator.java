@@ -6,6 +6,7 @@ import com.perfplatform.domain.results.ObjectiveOutcome.Verdict;
 import com.perfplatform.domain.results.OperationMetrics;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.ObjectiveSpec;
 import com.perfplatform.domain.spec.Threshold;
+import com.perfplatform.domain.validation.ObjectiveContract;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -87,6 +88,12 @@ public final class ObjectiveEvaluator {
         }
 
         long thresholdValue = thresholdAsLong(threshold);
+        // Stored pre-upgrade specifications must not bypass the authoring contract at analysis.
+        var contract = ObjectiveContract.validate(objective, "/spec/objectives");
+        if (!contract.isValid()) {
+            return indeterminate(objectiveId, objective.metric(), scope, thresholdValue,
+                    contract.errors().get(0).message());
+        }
 
         // Incompleteness is checked before the numbers, because no measurement is trustworthy when
         // part of the load never ran.
@@ -126,6 +133,10 @@ public final class ObjectiveEvaluator {
             String scope, OperationMetrics metrics, long thresholdValue, String unit) {
 
         int percentile = objective.percentile() == null ? 95 : objective.percentile();
+        if (percentile == 75 && metrics.p75Millis() == null) {
+            return indeterminate(objectiveId, objective.metric(), scope, thresholdValue,
+                    "This older summary has no p75 measurement. Reanalyze the original evidence.");
+        }
         long observed = percentileOf(metrics, percentile);
 
         boolean met = observed <= thresholdValue;
@@ -178,6 +189,10 @@ public final class ObjectiveEvaluator {
             String scope, OperationMetrics metrics, long thresholdValue) {
 
         int percentile = objective.percentile() == null ? 50 : objective.percentile();
+        if (percentile == 75 && metrics.p75Millis() == null) {
+            return indeterminate(objectiveId, objective.metric(), scope, thresholdValue,
+                    "This older summary has no p75 measurement. Reanalyze the original evidence.");
+        }
         long observed = percentileOf(metrics, percentile);
         boolean met = observed >= thresholdValue;
         return new ObjectiveOutcome(objectiveId, objective.metric(), scope,
@@ -282,6 +297,7 @@ public final class ObjectiveEvaluator {
         long p95 = 0;
         long p99 = 0;
         long throughput = 0;
+        Long p75 = 0L;
 
         for (OperationMetrics part : parts) {
             samples += part.sampleCount();
@@ -295,32 +311,31 @@ public final class ObjectiveEvaluator {
             p95 = Math.max(p95, part.p95Millis());
             p99 = Math.max(p99, part.p99Millis());
             throughput += part.throughputPerSecondMilli();
+            p75 = p75 == null || part.p75Millis() == null ? null : Math.max(p75, part.p75Millis());
         }
 
         return new OperationMetrics(scope, samples, errors, unparsed,
                 min == Long.MAX_VALUE ? 0 : min, max,
                 samples == 0 ? 0 : weightedMean / samples,
-                p50, p90, p95, p99, throughput);
+                p50, p90, p95, p99, throughput, p75);
     }
 
     /**
      * The requested percentile.
      *
-     * <p>Only the percentiles the normalized model carries are answerable. An objective asking for
-     * p99.9 gets p99 rather than a fabricated number, and says so — inventing a percentile from
-     * summary statistics would produce a verdict the samples do not support.
+     * <p>Only percentiles the normalized model actually carries are answerable. Other authored
+     * percentiles are rejected, and older specifications remain indeterminate.
      */
     private static long percentileOf(OperationMetrics metrics, int percentile) {
-        if (percentile <= 50) {
-            return metrics.p50Millis();
-        }
-        if (percentile <= 90) {
-            return metrics.p90Millis();
-        }
-        if (percentile <= 95) {
-            return metrics.p95Millis();
-        }
-        return metrics.p99Millis();
+        return switch (percentile) {
+            case 50 -> metrics.p50Millis();
+            case 75 -> metrics.p75Millis();
+            case 90 -> metrics.p90Millis();
+            case 95 -> metrics.p95Millis();
+            case 99 -> metrics.p99Millis();
+            case 100 -> metrics.maxMillis();
+            default -> throw new IllegalArgumentException("Unsupported percentile");
+        };
     }
 
     private static long thresholdAsLong(Threshold threshold) {

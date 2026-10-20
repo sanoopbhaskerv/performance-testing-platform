@@ -501,6 +501,20 @@ class SemanticValidatorTest {
         }
 
         @Test
+        void rejectsUnitsThatDoNotMatchTheMetric() {
+            var objective = new ObjectiveSpec("http.error.rate", null, null, Threshold.parse("1s"));
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .contains("spec.objective.threshold.unit");
+        }
+
+        @Test
+        void rejectsPercentilesThatCannotBeMeasuredFromTheSummary() {
+            var objective = new ObjectiveSpec("http.response.time", null, 98, Threshold.parse("200ms"));
+            assertThat(SemanticValidator.validate(withObjectives(List.of(objective))).codes())
+                    .contains("spec.objective.percentile.invalid");
+        }
+
+        @Test
         @DisplayName("declaring no objectives warns, because the test cannot pass or fail")
         void warnsOnNoObjectives() {
             ValidationResult result = SemanticValidator.validate(withObjectives(List.of()));

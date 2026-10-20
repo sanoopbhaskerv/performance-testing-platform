@@ -198,6 +198,22 @@ class TestRunStorePostgresTest {
         return store.apply(run.transitionTo(RunState.QUEUED, "alice@example.com", "Validated", NOW));
     }
 
+    @Test
+    void pendingFailureIsDurableWithoutReleasingCapacityOrCompletingTheRun() {
+        TestRun queued = queue(createRun("pending-failure"));
+        TestRun active = store.apply(queued.transitionTo(RunState.PROVISIONING, "system", null, NOW));
+        store.apply(active.failureRequested(com.perfplatform.domain.run.RunFailureCode.PROVISIONING_FAILED,
+                "Stop all remaining runners", NOW));
+        TestRun recovered = store.find(active.id()).orElseThrow();
+        assertThat(recovered.state()).isEqualTo(RunState.PROVISIONING);
+        assertThat(recovered.failure().orElseThrow().code())
+                .isEqualTo(com.perfplatform.domain.run.RunFailureCode.PROVISIONING_FAILED);
+        assertThat(recovered.timeline().completedAt()).isEmpty();
+        assertThat(recovered.holdsCapacity()).isTrue();
+        assertThat(store.events(active.id(), 0, 100)).extracting(com.perfplatform.domain.run.RunEvent::type)
+                .contains(com.perfplatform.domain.run.RunEventType.FAILURE_REQUESTED);
+    }
+
     private ClaimRequest claimRequest(String owner, Instant now) {
         return new ClaimRequest(owner, now, LEASE, 20);
     }

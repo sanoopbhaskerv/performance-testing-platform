@@ -27,6 +27,24 @@ this schema does not require Ameriprise infrastructure or accounts.
 
 ## Example: 100 requests per second with a concurrency ceiling of 20
 
+Operators can cap protocol users and duration separately from the number of simultaneous runs.
+Defaults are 1,000 protocol users across a run's workloads and one hour. Arrival-rate concurrency
+ceilings count toward that user budget. A specification cannot increase an operator's ceiling.
+See the [configuration reference](../deployment/configuration-reference.md).
+
+Objective thresholds must use the metric's units: durations use `ms`/`s`, error rates and Lighthouse
+use `%`, throughput uses `/s`, and CLS uses `score`. Supported percentiles are 50, 75, 90, 95, 99
+and 100 (the maximum). Other percentiles are rejected rather than approximated. New summaries
+store exact p75; historical summaries without it remain unavailable until reanalyzed from evidence.
+Existing historical verdicts are not rewritten by the upgrade. Use a fresh run for corrected
+objective evaluation, or an operator's reanalysis of retained evidence; there is no public reanalysis
+endpoint in this release.
+
+The API Validator follows up to five redirects within the registered origin. A redirect to another
+scheme, host or port is refused before sending a request there. Register the final origin as your
+target when an application redirects to a different service. Destination DNS policy is checked
+before each request; company network controls remain necessary for network isolation.
+
 Start with [`api-100-rps.yaml`](../../specification/examples/valid/api-100-rps.yaml). In the API wizard
 choose **A number of requests per second**, enter `100`, set **At most this many at once** to `20`,
 ramp up for 10 seconds, hold for 60, and ramp down for 10. The expected whole-run mean is 87.5/s

@@ -171,6 +171,8 @@ platform:
     capacity:
       global-max-runs: ${MAX_CONCURRENT_RUNS:5}
       default-team-max-runs: ${MAX_CONCURRENT_RUNS_PER_TEAM:1}
+      max-protocol-users-per-run: ${MAX_PROTOCOL_USERS_PER_RUN:1000}
+      max-duration: ${MAX_TEST_DURATION:1h}
       # Raise a specific team to the policy-approved maximum of 2 by name, e.g.
       # team-overrides:
       #   advice-implementation: 2

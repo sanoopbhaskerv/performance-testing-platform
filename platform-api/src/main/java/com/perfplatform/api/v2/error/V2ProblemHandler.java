@@ -187,6 +187,16 @@ public class V2ProblemHandler {
 
     // ── Runs ─────────────────────────────────────────────────────────────
 
+    @ExceptionHandler(com.perfplatform.domain.admission.ExecutionLimits.ExceededException.class)
+    public ProblemDetail handleExecutionLimit(
+            com.perfplatform.domain.admission.ExecutionLimits.ExceededException e,
+            HttpServletRequest request) {
+        ProblemDetail detail = problem(HttpStatus.UNPROCESSABLE_ENTITY, "run.policy.exceeded",
+                e.getMessage(), request, e);
+        detail.setProperty("findings", e.findings().findings());
+        return detail;
+    }
+
     @ExceptionHandler(TriggerTestRunUseCase.UnknownDefinitionVersionException.class)
     public ProblemDetail handleUnknownVersion(
             TriggerTestRunUseCase.UnknownDefinitionVersionException e, HttpServletRequest request) {

@@ -134,13 +134,14 @@ public final class RunResultReducer {
                 PercentileCalculator.fromSorted(latencies, 90),
                 PercentileCalculator.fromSorted(latencies, 95),
                 PercentileCalculator.fromSorted(latencies, 99),
-                throughputPerSecondMilli);
+                throughputPerSecondMilli,
+                PercentileCalculator.fromSorted(latencies, 75));
     }
 
     private static OperationMetrics withUnparsed(OperationMetrics metrics, long unparsedRows) {
         return new OperationMetrics(metrics.name(), metrics.sampleCount(), metrics.errorCount(),
                 unparsedRows, metrics.minMillis(), metrics.maxMillis(), metrics.meanMillis(),
                 metrics.p50Millis(), metrics.p90Millis(), metrics.p95Millis(), metrics.p99Millis(),
-                metrics.throughputPerSecondMilli());
+                metrics.throughputPerSecondMilli(), metrics.p75Millis());
     }
 }

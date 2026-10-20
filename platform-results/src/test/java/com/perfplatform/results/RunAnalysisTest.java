@@ -53,6 +53,45 @@ class RunAnalysisTest {
         return new ObjectiveSpec("http.error.rate", scope, null, Threshold.parse(threshold));
     }
 
+    @Test
+    void maximumObjectiveCannotSubstituteP99() {
+        long[] latencies = new long[100];
+        java.util.Arrays.fill(latencies, 10);
+        latencies[99] = 10_000;
+        var result = RunResultReducer.reduce(RUN, ENGINE, 1, 1, samples("api", latencies));
+        var outcome = ObjectiveEvaluator.evaluate(result, List.of(responseTime(null, 100, "200ms"))).get(0);
+        assertThat(outcome.observed()).isEqualTo(10_000);
+        assertThat(outcome.verdict()).isEqualTo(Verdict.BREACH);
+    }
+
+    @Test
+    void p75IsComputedFromSamplesRatherThanP90() {
+        var result = RunResultReducer.reduce(RUN, ENGINE, 1, 1, samples("api", 10, 20, 30, 400));
+        var outcome = ObjectiveEvaluator.evaluate(result, List.of(responseTime(null, 75, "50ms"))).get(0);
+        assertThat(result.overall().p75Millis()).isEqualTo(30);
+        assertThat(outcome.observed()).isEqualTo(30);
+        assertThat(outcome.verdict()).isEqualTo(Verdict.PASS);
+    }
+
+    @Test
+    void olderInvalidUnitsAndUnsupportedPercentilesRemainIndeterminate() {
+        var result = RunResultReducer.reduce(RUN, ENGINE, 1, 1,
+                new SampleSet(List.of(new Sample("api", 10, false, START)), 0));
+        assertThat(ObjectiveEvaluator.evaluate(result, List.of(errorRate(null, "1s"))).get(0).verdict())
+                .isEqualTo(Verdict.INDETERMINATE);
+        assertThat(ObjectiveEvaluator.evaluate(result, List.of(responseTime(null, 98, "200ms"))).get(0).verdict())
+                .isEqualTo(Verdict.INDETERMINATE);
+    }
+
+    @Test
+    void olderSummariesCannotInventP75() {
+        var old = new OperationMetrics("*", 1, 0, 0, 10, 10, 10, 10, 10, 10, 10, 1_000);
+        var result = new NormalizedRunResult(RUN, ENGINE, java.util.Optional.empty(),
+                java.util.Optional.empty(), 1, 1, old, java.util.Map.of());
+        assertThat(ObjectiveEvaluator.evaluate(result, List.of(responseTime(null, 75, "200ms"))).get(0).verdict())
+                .isEqualTo(Verdict.INDETERMINATE);
+    }
+
     @Nested
     @DisplayName("summarizing")
     class Summarizing {

@@ -185,7 +185,8 @@ public record RunReportResponse(
             long p90Millis,
             long p95Millis,
             long p99Millis,
-            double throughputPerSecond) {
+            double throughputPerSecond,
+            Long p75Millis) {
 
         static OperationMetricsResponse from(OperationMetrics metrics) {
             return new OperationMetricsResponse(
@@ -201,7 +202,7 @@ public record RunReportResponse(
                     metrics.p90Millis(),
                     metrics.p95Millis(),
                     metrics.p99Millis(),
-                    metrics.throughputPerSecond());
+                    metrics.throughputPerSecond(), metrics.p75Millis());
         }
     }
 

@@ -19,6 +19,7 @@ import com.perfplatform.domain.spec.PerformanceTestSpecification.ScenarioSpec;
 import com.perfplatform.domain.spec.PerformanceTestSpecification.StepSpec;
 import com.perfplatform.domain.spec.WorkloadType;
 import com.perfplatform.domain.target.TargetAddress;
+import com.perfplatform.domain.target.TargetPolicy;
 import com.perfplatform.domain.validation.SecretValueDetector;
 import com.perfplatform.domain.validation.Severity;
 import com.perfplatform.domain.validation.ValidationFinding;
@@ -70,6 +71,9 @@ public class SpecificationDryRunService {
         this.teams = teams;
         this.targets = targets;
         this.http = http;
+        if (http.followRedirects() != HttpClient.Redirect.NEVER) {
+            throw new IllegalArgumentException("Validator HTTP clients must disable automatic redirects");
+        }
         this.json = json;
         this.clock = clock;
     }
@@ -207,8 +211,7 @@ public class SpecificationDryRunService {
 
         long started = System.nanoTime();
         try {
-            HttpResponse<String> response = http.send(builder.build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = sendWithinTarget(builder.build(), target);
             long durationMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
 
             Map<String, String> responseHeaders = firstHeaders(response);
@@ -236,6 +239,47 @@ public class SpecificationDryRunService {
         } catch (RuntimeException e) {
             return failedTransportStep(step, method, path, request,
                     "The request could not be prepared: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Follow ordinary application redirects only within the registered origin. Automatic HTTP
+     * redirects bypass target checks, so no connection is made to a new origin, even when the
+     * redirect was returned by a permitted target. Revalidate DNS policy before every hop.
+     */
+    private HttpResponse<String> sendWithinTarget(HttpRequest request, TargetAddress target)
+            throws IOException, InterruptedException {
+        for (int redirects = 0; ; redirects++) {
+            TargetAddress destination = TargetAddress.parse(request.uri().toString());
+            if (!target.scheme().equals(destination.scheme()) || !target.host().equalsIgnoreCase(destination.host())
+                    || target.port() != destination.port()) {
+                throw new IllegalArgumentException("The target redirected outside its registered origin. "
+                        + "Register the final origin explicitly before validating it.");
+            }
+            TargetPolicy.require(destination);
+            HttpResponse<String> response = http.send(request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            Optional<String> location = response.headers().firstValue("Location");
+            if (!(status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+                    || location.isEmpty()) return response;
+            if (redirects >= 5) throw new IllegalArgumentException("The target exceeded five redirects.");
+            URI next = request.uri().resolve(location.orElseThrow());
+            // Reject active/user-info URL forms before the next iteration can send headers/body.
+            if (next.getUserInfo() != null || next.getFragment() != null) {
+                throw new IllegalArgumentException("The redirect URL contains unsupported user information or a fragment.");
+            }
+            boolean get = status == 303 && !request.method().equals("HEAD")
+                    || (status == 301 || status == 302) && request.method().equals("POST");
+            HttpRequest.Builder redirected = HttpRequest.newBuilder(next).timeout(REQUEST_TIMEOUT);
+            request.headers().map().forEach((name, values) -> {
+                if (!get || !name.equalsIgnoreCase("Content-Type") && !name.equalsIgnoreCase("Content-Length")) {
+                    values.forEach(value -> redirected.header(name, value));
+                }
+            });
+            request = redirected.method(get ? "GET" : request.method(), get
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody())).build();
         }
     }
 

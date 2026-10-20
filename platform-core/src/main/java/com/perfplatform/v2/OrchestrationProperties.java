@@ -710,6 +710,13 @@ public class OrchestrationProperties {
         private int globalMaxRuns = 5;
         private int defaultTeamMaxRuns = 1;
         private int maxBrowserSessionsPerRun = 20;
+        private int maxProtocolUsersPerRun = 1_000;
+        private Duration maxDuration = Duration.ofHours(1);
+
+        public int getMaxProtocolUsersPerRun() { return maxProtocolUsersPerRun; }
+        public void setMaxProtocolUsersPerRun(int value) { maxProtocolUsersPerRun = value; }
+        public Duration getMaxDuration() { return maxDuration; }
+        public void setMaxDuration(Duration value) { maxDuration = value; }
 
         /** Per-team ceilings by team name, for teams policy has granted more than the default. */
         private Map<String, Integer> teamOverrides = new LinkedHashMap<>();

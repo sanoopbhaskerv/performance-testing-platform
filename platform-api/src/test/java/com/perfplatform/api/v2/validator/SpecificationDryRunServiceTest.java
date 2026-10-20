@@ -214,6 +214,60 @@ class SpecificationDryRunServiceTest {
         return specification(extraction, expectedStatus, Map.of("session", "${session}"));
     }
 
+    @Test
+    void redirectsCannotReachAnUnregisteredOrigin() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer other = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        other.createContext("/", exchange -> {
+            calls.incrementAndGet(); respond(exchange, 200, "application/json", "{\"token\":\"abc123\"}");
+        });
+        other.start();
+        try {
+            server.removeContext("/login");
+            server.createContext("/login", exchange -> {
+                exchange.getResponseHeaders().add("Location", "http://127.0.0.1:" + other.getAddress().getPort() + "/");
+                exchange.sendResponseHeaders(302, -1); exchange.close();
+            });
+            var response = service.validate(specification("$.token", 201), ValidationResult.valid(), CALLER);
+            assertThat(response.valid()).isFalse();
+            assertThat(response.journeys().get(0).steps().get(0).error()).contains("registered origin");
+            assertThat(calls.get()).isZero();
+        } finally { other.stop(0); }
+    }
+
+    @Test
+    void relativeSameOriginRedirectsStillValidate() throws Exception {
+        server.removeContext("/login");
+        server.createContext("/login", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/actual-login");
+            exchange.sendResponseHeaders(302, -1); exchange.close();
+        });
+        server.createContext("/actual-login", exchange -> respond(exchange, 200, "application/json", "{\"token\":\"abc123\"}"));
+        assertThat(service.validate(specification("$.token", 201), ValidationResult.valid(), CALLER).valid()).isTrue();
+    }
+
+    @Test
+    void redirectLoopsAreBoundedAndCannotBeReportedAsSuccessful() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        server.removeContext("/login");
+        server.createContext("/login", exchange -> {
+            calls.incrementAndGet(); exchange.getResponseHeaders().add("Location", "/login");
+            exchange.sendResponseHeaders(302, -1); exchange.close();
+        });
+        var response = service.validate(specification("$.token", 201), ValidationResult.valid(), CALLER);
+        assertThat(response.valid()).isFalse();
+        assertThat(calls.get()).isEqualTo(6);
+        assertThat(response.journeys().get(0).steps().get(0).error()).contains("five redirects");
+    }
+
+    @Test
+    void refusesHttpClientsThatWouldFollowRedirectsWithoutPolicyChecks() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new SpecificationDryRunService(
+                teamDirectory(), (t, a, e) -> Optional.empty(),
+                HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build(), new ObjectMapper(), Clock.systemUTC()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private PerformanceTestSpecification specification(String extraction, int expectedStatus,
             Map<String, String> orderQuery) {
         StepSpec login = new StepSpec("login", "GET", "/login", Map.of(), Map.of(), null,

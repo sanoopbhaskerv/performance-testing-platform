@@ -2,6 +2,7 @@ package com.perfplatform.orchestration.run;
 
 import com.perfplatform.domain.admission.AdmissionPolicy;
 import com.perfplatform.domain.admission.CapacityLimits;
+import com.perfplatform.domain.admission.ExecutionLimits;
 import com.perfplatform.domain.execution.ExecutionPhase;
 import com.perfplatform.domain.execution.ExecutionProvider;
 import com.perfplatform.domain.execution.ProvisionRequest;
@@ -89,6 +90,7 @@ public final class RunReconciler {
     private final ExecutionProvider provider;
     private final AdmissionPolicy admissionPolicy;
     private final CapacityLimits limits;
+    private final ExecutionLimits executionLimits;
     private final OrchestrationSettings settings;
     private final RuntimeCredentialStore runtimeCredentials;
     private final Clock clock;
@@ -118,6 +120,15 @@ public final class RunReconciler {
             RunWorkloadService workloads,
             Clock clock,
             String owner) {
+        this(runs, shards, plans, versions, compiler, provider, admissionPolicy, limits, settings,
+                runtimeCredentials, workloads, ExecutionLimits.DEFAULTS, clock, owner);
+    }
+
+    public RunReconciler(TestRunRepository runs, RunnerShardRepository shards,
+            ExecutionPlanRepository plans, DefinitionVersionCatalog versions, ExecutionPlanCompiler compiler,
+            ExecutionProvider provider, AdmissionPolicy admissionPolicy, CapacityLimits limits,
+            OrchestrationSettings settings, RuntimeCredentialStore runtimeCredentials,
+            RunWorkloadService workloads, ExecutionLimits executionLimits, Clock clock, String owner) {
         this.runs = Objects.requireNonNull(runs, "runs");
         this.shards = Objects.requireNonNull(shards, "shards");
         this.plans = Objects.requireNonNull(plans, "plans");
@@ -126,6 +137,7 @@ public final class RunReconciler {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.admissionPolicy = Objects.requireNonNull(admissionPolicy, "admissionPolicy");
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.runtimeCredentials = Objects.requireNonNull(runtimeCredentials, "runtimeCredentials");
         this.workloads = Objects.requireNonNull(workloads, "workloads");
@@ -202,6 +214,11 @@ public final class RunReconciler {
     }
 
     private void advance(TestRun run, Instant now, ReconciliationReport.Builder report) {
+        if (run.failure().isPresent() && run.state().mayHaveRunner()) {
+            TestRun.Failure failure = run.failure().orElseThrow();
+            fail(run, failure.code(), failure.sanitizedReason(), now, report);
+            return;
+        }
         if (run.isCancellationRequested() && run.state() != RunState.ANALYZING) {
             terminate(run, now, report);
             return;
@@ -232,6 +249,13 @@ public final class RunReconciler {
             return;
         }
         DefinitionVersion version = found.get();
+        try {
+            // Recheck after queueing/restart: an operator may have reduced the limits meanwhile.
+            executionLimits.require(version.specification());
+        } catch (ExecutionLimits.ExceededException e) {
+            fail(run, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+            return;
+        }
         List<RuntimeCredential> material = runtimeCredentials.find(run.id());
         if (missingRuntimeCredential(version.specification(), material).isPresent()) {
             fail(run, RunFailureCode.PROVISIONING_FAILED,
@@ -241,6 +265,14 @@ public final class RunReconciler {
         }
 
         List<ExecutionPlan> runPlans = resolvePlans(run, version, now);
+        try {
+            for (ExecutionPlan plan : runPlans) {
+                executionLimits.requireDuration(Duration.ofSeconds(plan.capacity().estimatedDurationSeconds()));
+            }
+        } catch (ExecutionLimits.ExceededException e) {
+            fail(run, RunFailureCode.PROVISIONING_FAILED, e.getMessage(), now, report);
+            return;
+        }
 
         // The run keeps a pointer to its first plan. Not the authority on what it executes — the
         // store is, and asking it is what the rest of this class does — but the V2 API has always
@@ -505,7 +537,6 @@ public final class RunReconciler {
         recordProgress(run, now);
 
         if (exceededDeadline(run, now)) {
-            current.forEach(this::terminateShard);
             fail(run, RunFailureCode.DURATION_EXCEEDED,
                     "The run exceeded the wall-clock time its plan allows and was stopped",
                     now, report);
@@ -781,10 +812,6 @@ public final class RunReconciler {
         report.cancelled();
     }
 
-    private void terminateShard(RunnerShard shard) {
-        shard.handle().ifPresent(provider::cancel);
-    }
-
     // ── Stage 3: admission ───────────────────────────────────────────────
 
     /**
@@ -821,6 +848,31 @@ public final class RunReconciler {
 
     private void fail(TestRun run, RunFailureCode code, String sanitizedReason, Instant now,
             ReconciliationReport.Builder report) {
+        if (run.state().mayHaveRunner()) {
+            run = run.failure().isPresent() ? run : runs.apply(run.failureRequested(code, sanitizedReason, now));
+            // Inspect/cancel ALL handles, including a shard declared FAILED after a stale heartbeat:
+            // losing contact is not proof that the underlying load generator has stopped.
+            boolean allStopped = true;
+            for (RunnerShard shard : shards.findByRun(run.id())) {
+                try {
+                    if (shard.handle().isPresent()
+                            && !provider.cancel(shard.handle().orElseThrow()).terminated()) {
+                        allStopped = false;
+                    } else if (!shard.state().isTerminal()) {
+                        shards.save(shard.finished(ShardState.CANCELLED, null, null, now));
+                    }
+                } catch (RuntimeException e) {
+                    allStopped = false;
+                    log.warn("Failure cleanup pending runId={} shardId={}", run.id(), shard.id(), e);
+                }
+            }
+            if (!allStopped) return;
+            runs.appendEvent(RunEvent.of(run.id(), RunEventType.EXECUTION_TERMINATED,
+                    RunEvent.SYSTEM_ACTOR, RunEvent.detail("reason", "Failure cleanup confirmed"), now));
+            TestRun.Failure failure = run.failure().orElseThrow();
+            code = failure.code();
+            sanitizedReason = failure.sanitizedReason();
+        }
         runs.apply(run.failed(code, sanitizedReason, RunEvent.SYSTEM_ACTOR, now));
         runtimeCredentials.clear(run.id());
         log.warn("Run failed runId={} teamId={} failureCode={}", run.id(), run.teamId(), code);

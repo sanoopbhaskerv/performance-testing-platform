@@ -51,6 +51,9 @@ public enum RunEventType {
     /** Someone asked for the run to stop. Recorded when requested, not when it takes effect. */
     CANCELLATION_REQUESTED,
 
+    /** Failure was decided; capacity remains reserved until every runner is confirmed stopped. */
+    FAILURE_REQUESTED,
+
     /** The runner provider confirmed the workload is no longer executing. */
     EXECUTION_TERMINATED;
 

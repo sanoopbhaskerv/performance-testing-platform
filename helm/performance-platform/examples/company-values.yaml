@@ -37,6 +37,8 @@ branding:
   colors: {primary: "#0f766e", accent: "#0891b2"}
 capacity:
   maxConcurrentRuns: 5
+  maxProtocolUsersPerRun: 1000
+  maxDuration: 1h
 applicationConfig:
   spring:
     application:

@@ -15,6 +15,7 @@ import com.perfplatform.domain.run.TestRun;
 import com.perfplatform.domain.security.CallerContext;
 import com.perfplatform.domain.security.Scope;
 import com.perfplatform.domain.spec.PerformanceTestSpecification;
+import com.perfplatform.domain.admission.ExecutionLimits;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +56,7 @@ public final class TriggerTestRunUseCase {
     private final DefinitionVersionCatalog versions;
     private final RuntimeCredentialStore runtimeCredentials;
     private final int maxBrowserSessionsPerRun;
+    private final ExecutionLimits executionLimits;
     private final Clock clock;
 
     public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
@@ -64,9 +66,16 @@ public final class TriggerTestRunUseCase {
 
     public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
             RuntimeCredentialStore runtimeCredentials, int maxBrowserSessionsPerRun, Clock clock) {
+        this(runs, versions, runtimeCredentials, maxBrowserSessionsPerRun, ExecutionLimits.DEFAULTS, clock);
+    }
+
+    public TriggerTestRunUseCase(TestRunRepository runs, DefinitionVersionCatalog versions,
+            RuntimeCredentialStore runtimeCredentials, int maxBrowserSessionsPerRun,
+            ExecutionLimits executionLimits, Clock clock) {
         this.runs = Objects.requireNonNull(runs, "runs");
         this.versions = Objects.requireNonNull(versions, "versions");
         this.runtimeCredentials = Objects.requireNonNull(runtimeCredentials, "runtimeCredentials");
+        this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         if (maxBrowserSessionsPerRun < 1) {
             throw new IllegalArgumentException("maxBrowserSessionsPerRun must be at least 1");
         }
@@ -203,6 +212,8 @@ public final class TriggerTestRunUseCase {
 
     private TriggerResult create(TriggerCommand command, DefinitionVersion version,
             String fingerprint, List<RuntimeCredential> material, CallerContext caller, Instant now) {
+
+        executionLimits.require(version.specification());
 
         RunTransition requested = TestRun.request(
                 TestRunId.generate(),

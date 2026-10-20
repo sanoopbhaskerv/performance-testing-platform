@@ -31,6 +31,8 @@ Check the rendered Deployment and configuration file when diagnosing conflicting
 | Key | Meaning |
 |---|---|
 | `deploymentProfile` | Keep `production` for hosted operation; local/development adapters are rejected there |
+| `capacity.maxProtocolUsersPerRun` | Operator ceiling across all protocol workloads in one run; default 1,000. Arrival-rate workloads reserve their `maxConcurrency`, not their RPS |
+| `capacity.maxDuration` | Maximum workload duration/declaration, default `1h`; compiled engine estimates are checked before provisioning |
 | `fullnameOverride` | Stable Kubernetes resource prefix, useful for identity trust policies |
 | `image.repository`, `image.tag` | Your combined control-plane/UI image in your registry |
 | `auth.serviceTokenSecret` | Existing Secret with `identities.json`; hashed scoped machine identities |
@@ -90,6 +92,16 @@ are in `platform-core/src/main/resources/application.yml` and `application-produ
 global material runs and one per team are initial defaults. Browser admission is a separate budget.
 The wizard's browser default remains one browser/iteration. A capacity value controls admission;
 it does not create nodes, prove generator capacity or raise a test's validated engine limit.
+
+Per-run load limits are independent of the five-run queue limit. Configure the two Helm values
+above, or `platform.orchestration.capacity.max-protocol-users-per-run` and `max-duration` in external
+Spring configuration. The packaged environment defaults are `MAX_PROTOCOL_USERS_PER_RUN=1000` and
+`MAX_TEST_DURATION=1h`. Invalid/non-positive operator values fail startup. A specification cannot
+raise these limits using its own `governance.maxDuration`. Checks run during authoring, before a
+new trigger is persisted, and again before provisioning to cover policy changes while queued.
+Engine-derived duration estimates are checked as well; startup/upload grace is additional to the
+workload ceiling. Existing idempotent triggers still resolve to their original run. A policy
+refusal returns actionable `policy.protocolUsers.exceeded` / `policy.duration.exceeded` findings.
 
 For a directly run Java application use an external Spring configuration file or Spring's normal
 environment binding, for example `SPRING_DATASOURCE_URL`, `SERVICE_TOKEN_FILE`, and

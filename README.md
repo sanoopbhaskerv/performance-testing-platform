@@ -132,6 +132,10 @@ data and business assertions. Start small, inspect the results, then increase tr
 Browser scripts use relative URLs, reviewed sources, and a separate browser budget. API users
 and browsers are not interchangeable. Five concurrent material runs and one run per team are the
 initial admission defaults. These limits are configurable; they are not a verified capacity claim.
+Per-run defaults separately cap protocol users at 1,000 and workload duration at one hour. A test
+cannot raise those operator settings. Failed runs retain their slot until runner termination is
+confirmed, including after a restart. Objective units and supported percentiles are validated;
+the maximum is evaluated as p100, and p75 is stored explicitly.
 [Calibrate your generators](docs/operations/runner-calibration.md) before trusting large-load results.
 
 ## Invoke it from an AI editor or CI

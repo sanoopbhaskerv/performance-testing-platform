@@ -199,6 +199,12 @@ public class OrchestrationConfiguration {
         return new ConcurrencyAdmissionPolicy();
     }
 
+    @Bean
+    public com.perfplatform.domain.admission.ExecutionLimits executionLimits() {
+        return new com.perfplatform.domain.admission.ExecutionLimits(
+                properties.getCapacity().getMaxProtocolUsersPerRun(), properties.getCapacity().getMaxDuration());
+    }
+
     /**
      * The engines this deployment has.
      *
@@ -933,9 +939,9 @@ public class OrchestrationConfiguration {
     @Bean
     public TriggerTestRunUseCase triggerTestRunUseCase(TestRunRepository runs,
             DefinitionVersionCatalog versions, RuntimeCredentialStore runtimeCredentials,
-            Clock clock) {
+            com.perfplatform.domain.admission.ExecutionLimits executionLimits, Clock clock) {
         return new TriggerTestRunUseCase(runs, versions, runtimeCredentials,
-                properties.getCapacity().getMaxBrowserSessionsPerRun(), clock);
+                properties.getCapacity().getMaxBrowserSessionsPerRun(), executionLimits, clock);
     }
 
     @Bean
@@ -1000,7 +1006,7 @@ public class OrchestrationConfiguration {
         return HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(properties.getExecutionGrace())
-                .followRedirects(HttpClient.Redirect.NORMAL)
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 
@@ -1031,12 +1037,13 @@ public class OrchestrationConfiguration {
             OrchestrationSettings settings,
             RuntimeCredentialStore runtimeCredentials,
             RunWorkloadService workloads,
+            com.perfplatform.domain.admission.ExecutionLimits executionLimits,
             Clock clock) {
 
         String owner = "reconciler-" + UUID.randomUUID().toString().substring(0, 8);
         log.info("Reconciler owner identity for this instance: {}", owner);
 
         return new RunReconciler(runs, shards, plans, versions, compiler, provider,
-                admissionPolicy, limits, settings, runtimeCredentials, workloads, clock, owner);
+                admissionPolicy, limits, settings, runtimeCredentials, workloads, executionLimits, clock, owner);
     }
 }

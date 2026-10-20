@@ -62,6 +62,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class TestRunControllerTest {
 
+    @Test
+    void executionPolicyFailuresReturnActionable422Findings() throws Exception {
+        var finding = com.perfplatform.domain.validation.ValidationFinding.error(
+                "policy.protocolUsers.exceeded", "/spec/workloads", "Maximum 1000 protocol users", "Reduce users");
+        when(triggerRun.trigger(any(), any())).thenThrow(new com.perfplatform.domain.admission.ExecutionLimits.ExceededException(
+                com.perfplatform.domain.validation.ValidationResult.of(finding)));
+        mockMvc.perform(post("/api/v2/test-runs").header("Idempotency-Key", "policy-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"definitionVersionId\":\"" + VERSION + "\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("run.policy.exceeded"))
+                .andExpect(jsonPath("$.findings[0].code").value("policy.protocolUsers.exceeded"));
+    }
+
     private static final Instant NOW = Instant.parse("2026-07-29T10:00:00Z");
     private static final TeamId TEAM = TeamId.generate();
     private static final TestDefinitionVersionId VERSION = TestDefinitionVersionId.generate();

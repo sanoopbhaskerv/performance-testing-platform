@@ -121,6 +121,7 @@ public record ProgressMetrics(
                 latency.percentileMillis(90, maxMillis),
                 latency.percentileMillis(95, maxMillis),
                 latency.percentileMillis(99, maxMillis),
-                throughputPerSecondMilli);
+                throughputPerSecondMilli,
+                latency.percentileMillis(75, maxMillis));
     }
 }

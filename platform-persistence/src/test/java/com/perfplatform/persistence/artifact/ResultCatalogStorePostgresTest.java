@@ -141,7 +141,7 @@ class ResultCatalogStorePostgresTest {
 
     private static OperationMetrics metrics(String name, long samples, long errors, long p95) {
         return new OperationMetrics(name, samples, errors, 3,
-                12, 940, 180, 150, 400, p95, 900, 41_500);
+                12, 940, 180, 150, 400, p95, 900, 41_500, 250L);
     }
 
     private NormalizedRunResult result(int shardsReported, long overallP95) {

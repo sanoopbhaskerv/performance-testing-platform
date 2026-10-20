@@ -1,5 +1,38 @@
 # Plan — the Performance Studio
 
+## Review fixes — 20 October 2026
+
+All five findings from the current-code review are fixed. Failure intent is persisted in the
+existing failure fields with a `FAILURE_REQUESTED` event before stopping runner handles. Active
+failures retain capacity/completion timestamps until termination is confirmed; restart resumes
+cleanup, including provisioning refusals after another runner started and lost-contact shards.
+
+Operator-owned limits default to 1,000 protocol users across workloads and one hour. Configure
+`capacity.maxProtocolUsersPerRun` / `capacity.maxDuration` in Helm or the corresponding
+`platform.orchestration.capacity` properties. Authoring, new triggers and provisioning recheck
+policy, including compiled engine duration estimates. Existing idempotent retries retain their
+original identity; a queued run cannot bypass newly lowered limits.
+
+The Validator disables automatic redirects, checks DNS policy before each hop, permits at most
+five same-origin redirects and refuses a different scheme/host/port before connecting to it.
+Objective validation binds units to metrics. Supported percentiles are 50/75/90/95/99/100; p100 is
+the maximum. Exact p75 is computed, persisted through additive nullable V11 migrations and exposed
+as an optional report field. Missing historical p75 and invalid old objective contracts remain
+indeterminate when evaluated, never substituted. Historical stored verdicts are not rewritten.
+
+Verification: `mvn -q clean verify` with Docker: **1,392 tests, zero failures/errors, one opt-in
+live-recorder skip** (23 added tests). **205 UI tests**, lint and production build pass. JMeter
+upload contract test, company Helm lint/template, limit environment assertions, documentation
+links/fences and `git diff --check` pass. PostgreSQL covers pending failure persistence and p75
+round trips; controlled providers/HTTP servers reproduce the five defects without material load.
+
+Operational limits: unavailable termination confirmation deliberately keeps capacity reserved.
+Operators upgrading older installations should inspect already-failed runs for surviving Jobs;
+terminal history is not reopened automatically. A fresh run or operator reanalysis is required to
+correct historical objective outcomes; there is no public reanalysis endpoint. No dependency
+upgrade, external deployment, image publication or merge is included. Update the existing PR #1.
+Next recommended increment: operator-owned infrastructure acceptance and five-team calibration.
+
 ## Current verified state — 19 October 2026
 
 **Company configuration and request-rate follow-up (supersedes older counts/image pins):**

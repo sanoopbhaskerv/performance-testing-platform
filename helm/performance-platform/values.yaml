@@ -4,6 +4,8 @@ auth:
   serviceTokenSecret: ""
 capacity:
   maxConcurrentRuns: 5
+  maxProtocolUsersPerRun: 1000
+  maxDuration: 1h
 legacyJobTemplate:
   enabled: false
 

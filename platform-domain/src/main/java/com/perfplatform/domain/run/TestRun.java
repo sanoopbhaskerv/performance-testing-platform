@@ -39,7 +39,8 @@ import java.util.Optional;
  * @param timeline            when each phase began
  * @param cancellation        the cancellation request, if one was made; present before the run
  *                            actually reaches {@link RunState#CANCELLED}
- * @param failure             why the run failed, if it did
+ * @param failure             desired failure outcome, persisted before stopping active runners;
+ *                            an active run keeps its capacity until termination is observed
  * @param claim               the reconciler lease, if the run is currently owned
  * @param synthetic           whether the provider that executed this run generates no load, making
  *                            every measurement it produced invented. Carried on the run rather than
@@ -255,6 +256,16 @@ public record TestRun(
         detail.put("failureCode", code.name());
         return new RunTransition(withFailure,
                 RunEvent.stateChanged(id, state, RunState.FAILED, actor, detail, now));
+    }
+
+    /** Persist the failure before stopping runners so a restart cannot resume provisioning/load. */
+    public RunTransition failureRequested(RunFailureCode code, String reason, Instant now) {
+        if (!state.mayHaveRunner()) {
+            throw new IllegalStateException("Failure cleanup is only requested for active execution");
+        }
+        return new RunTransition(withFailure(new Failure(code, reason)),
+                RunEvent.of(id, RunEventType.FAILURE_REQUESTED, RunEvent.SYSTEM_ACTOR,
+                        Map.of("failureCode", code.name(), "reason", new Failure(code, reason).sanitizedReason()), now));
     }
 
     /**

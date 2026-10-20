@@ -90,6 +90,7 @@ plane that has just restarted is precisely the one holding runs whose leases lap
 | After provisioning, before recording `RUNNING` | The shard already carries its handle, so it is **not** provisioned again; the pass records `RUNNING` |
 | While a run was executing | The lease lapses; another reconciler observes the shards and drives the run to a terminal state |
 | After a cancellation was requested | The request is durable; the next pass terminates the runner and finishes the job |
+| After one shard failed but others are running | The persisted failure intent is recovered; all runner handles are stopped before the run becomes `FAILED` or releases its slot |
 
 The third row is the important one. Provisioning is the only step that creates load, so it is the
 only step that must never be repeated. A shard with a handle is skipped, however many times a pass
@@ -105,6 +106,20 @@ Failures are recorded and surfaced; replaying one is an explicit human decision.
 nothing about the workload, which may well still be generating load. The heartbeat tolerance is what
 eventually declares a shard lost — guessing a terminal phase would free a capacity slot while the
 traffic continued.
+
+### Failure cleanup also waits for confirmed termination
+
+A failed shard, provisioning refusal after another shard started, stale heartbeat, or deadline
+records `FAILURE_REQUESTED` and the intended failure code/reason on the active run. The state stays
+`PROVISIONING`/`RUNNING`, with capacity reserved and no completion timestamp, while termination is
+pending. Reconciliation cancels every known handle, including a shard labelled failed because
+contact was lost. Once every provider confirms termination, it appends `EXECUTION_TERMINATED` and
+moves to `FAILED`. A restart resumes cleanup; it never resumes provisioning that failed run.
+
+An unavailable provider keeps the slot occupied until termination can be confirmed. Restore
+provider connectivity or verify/terminate the managed Jobs through your operator process. When
+upgrading from an older release, inspect already-terminal failed runs for surviving Jobs before
+resuming admission; terminal history is not automatically reopened or rewritten.
 
 ---
 
@@ -154,8 +169,6 @@ serializes every admission decision.
 
 ### "A run completed but I do not believe it ran"
 
-Check the execution provider. Under `platform.orchestration.execution-provider: fake` runs progress
-through their entire lifecycle and report `COMPLETED` while generating **no load at all**. The
-application refuses to start with the fake provider under a production profile, and logs a warning at
-startup everywhere else — but a non-production environment configured by hand can absolutely produce
-convincing, meaningless results. The Kubernetes provider arrives in Increment 1E.
+Check the execution provider and `synthetic` flag. The `fake` provider generates no traffic: its
+runs finish with `NO_LOAD_GENERATED` and indeterminate objectives. Production refuses this adapter.
+Hosted material execution uses the Kubernetes provider and stored runner evidence.

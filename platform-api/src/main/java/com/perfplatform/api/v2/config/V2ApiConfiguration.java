@@ -31,8 +31,10 @@ public class V2ApiConfiguration {
     @Bean
     public SpecificationValidationService specificationValidationService(SpecificationParser parser,
             com.perfplatform.domain.port.EngineCatalog engines,
-            com.perfplatform.domain.spec.GitSourceAllowlist gitSources) {
-        return new SpecificationValidationService(parser, engines, gitSources);
+            com.perfplatform.domain.spec.GitSourceAllowlist gitSources,
+            org.springframework.beans.factory.ObjectProvider<com.perfplatform.domain.admission.ExecutionLimits> limits) {
+        return new SpecificationValidationService(parser, engines, gitSources,
+                limits.getIfAvailable(() -> com.perfplatform.domain.admission.ExecutionLimits.DEFAULTS));
     }
 
     /**

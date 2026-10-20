@@ -41,6 +41,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ProductionSafetyGuardTest {
 
+    @Test
+    void operatorExecutionLimitsArePositiveAndConfigurable() {
+        var properties = new OrchestrationProperties();
+        properties.getCapacity().setMaxProtocolUsersPerRun(25);
+        properties.getCapacity().setMaxDuration(java.time.Duration.ofMinutes(2));
+        var limits = configurationFor(properties, "production").executionLimits();
+        assertThat(limits.maxProtocolUsersPerRun()).isEqualTo(25);
+        assertThat(limits.maxDuration()).isEqualTo(java.time.Duration.ofMinutes(2));
+        properties.getCapacity().setMaxProtocolUsersPerRun(0);
+        assertThatThrownBy(() -> configurationFor(properties).executionLimits())
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void validatorNeverFollowsRedirectsWithoutCheckingTheirDestinations() {
+        assertThat(configurationFor("production").validatorHttpClient().followRedirects())
+                .isEqualTo(java.net.http.HttpClient.Redirect.NEVER);
+    }
+
     /** A directory in which every name resolves. */
     private static final TeamDirectory TEAMS = resolvingEverything();
     private static final TargetRegistry TARGETS = noTargets();
