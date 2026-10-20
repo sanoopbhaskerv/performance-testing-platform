@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>runner-kubernetes</artifactId>
+  <packaging>jar</packaging>
+  <name>Runner — Kubernetes</name>
+  <description>
+    Production execution provider: runs a workload as an isolated, ephemeral Kubernetes Job.
+
+    Engine-neutral by design. It knows how to start, observe and stop a runner; it knows nothing
+    about JMeter, Playwright or what the runner does once it starts. That is why it sits beside
+    engines/ rather than inside one — a second engine reuses this module unchanged.
+
+    Allowed dependencies are platform-domain and the Kubernetes client. This module must not
+    authorize callers, select teams, override quotas or mutate run state, and it must never
+    automatically replay a failed material run. See CLAUDE.md §16 and docs/adr/003-engine-spi.md.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>kubernetes-client</artifactId>
+    </dependency>
+
+    <!--
+      The facade only, no binding — the composition root still chooses one. An operator needs to be
+      able to tie a Job back to the run that created it when one has to be stopped by hand.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      An in-process API server. The Job manifest and the observe/cancel behaviour are contract-tested
+      against it, so the guarantees hold without a cluster in ordinary CI (CLAUDE.md §25).
+    -->
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>kubernetes-server-mock</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

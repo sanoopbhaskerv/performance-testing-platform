@@ -1,0 +1,58 @@
+# Copy and replace the example coordinates before installing. Never add credentials here.
+fullnameOverride: performance
+deploymentProfile: production
+image:
+  repository: registry.example.com/performance/control-plane
+  tag: "1.0.0-company.1"
+imagePullSecrets: [{name: registry-access}]
+auth:
+  serviceTokenSecret: platform-auth
+database:
+  existingSecret: platform-db
+postgres:
+  enabled: false
+  externalUrl: jdbc:postgresql://postgres.example.com:5432/perfplatform?sslmode=verify-full
+artifacts:
+  bucket: company-performance-artifacts
+  region: us-east-1
+  endpoint: https://s3.example.com
+  pathStyleAccess: true
+  controlPlaneCredentialsSecret: storage-access
+  runnerCredentialsSecret: storage-access
+runnerCell:
+  createNamespace: false
+  namespace: perf-runners
+  imagePullSecrets: [{name: registry-access}]
+  images:
+    jmeter: registry.example.com/performance/jmeter-runner:5.6.3-3
+    playwright: registry.example.com/performance/playwright-runner:1.62.1-1
+  egress:
+    allowedCidrs: [10.80.0.0/16, 10.90.0.0/16] # Replace with approved target and storage networks.
+branding:
+  name: Acme Performance Lab
+  logoUrl: /branding/logo.svg
+  logoAlt: Acme
+  logoConfigMap: company-logo
+  theme: light
+  colors: {primary: "#0f766e", accent: "#0891b2"}
+capacity:
+  maxConcurrentRuns: 5
+  maxProtocolUsersPerRun: 1000
+  maxDuration: 1h
+applicationConfig:
+  spring:
+    application:
+      name: acme-performance-lab
+  platform:
+    orchestration:
+      capacity:
+        default-team-max-runs: 1
+        max-browser-sessions-per-run: 5
+teamConfigs: {}
+ingress:
+  host: performance.example.com
+  tls:
+    - hosts: [performance.example.com]
+      secretName: performance-tls
+prometheus: {enabled: false}
+grafana: {enabled: false}

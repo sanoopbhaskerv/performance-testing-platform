@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>importer-postman</artifactId>
+  <packaging>jar</packaging>
+  <name>Importer — Postman</name>
+  <description>
+    Turns a Postman Collection (v2.0 or v2.1) into draft scenarios grouped by folder.
+
+    A collection is the source closest to a test that already exists: somebody curated these
+    requests, gave them names, put them in folders and made them work. That is exactly what an
+    importer wants and cannot otherwise get.
+
+    It is also a source that carries executable code. Collections hold pre-request and test scripts,
+    and CLAUDE.md §23 is explicit that they are flagged and never evaluated: the control plane does
+    not run code that arrived in a document. They are reported, with the requests they belong to,
+    and left for a person.
+
+    Collections also carry credentials — an auth block, a variable named token holding a working
+    value, a saved sign-in body with a real password. All are refused and reported, on the same
+    rules the cURL, OpenAPI and HAR importers use.
+
+    Depends on platform-domain, plus Jackson for reading the collection — the same reasoning as
+    importer-openapi and importer-har. No Spring, persistence, engine or Kubernetes types;
+    ModuleDependencyRulesTest enforces that.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <!-- A collection is JSON by definition, so databind alone. It instantiates no application types. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

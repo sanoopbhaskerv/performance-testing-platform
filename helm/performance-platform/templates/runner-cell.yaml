@@ -1,0 +1,108 @@
+{{- if .Values.runnerCell.enabled }}
+# ─────────────────────────────────────────────────────────────────────────────
+#  The runner cell.
+#
+#  Runner Jobs live in their own namespace, with their own identity, and the
+#  control plane is granted only what it needs there. Three separations, each
+#  for a reason:
+#
+#  1. A separate namespace. A runner executes a plan compiled from a user's
+#     document — it is the least trusted thing in the platform. Sharing a
+#     namespace with the control plane would put the platform's own Secrets,
+#     ConfigMaps and ServiceAccounts within reach of it.
+#
+#  2. A separate ServiceAccount for the runner. It uploads its own artifacts and
+#     does nothing else. It is emphatically not the control plane's account,
+#     which can create Jobs; a runner that could create Jobs could create load
+#     nobody asked for.
+#
+#  3. A Role, not a ClusterRole. The control plane can manage Jobs in this one
+#     namespace. Cluster-wide Job permission is not needed and would make a
+#     compromise of the control plane a compromise of every workload.
+# ─────────────────────────────────────────────────────────────────────────────
+{{- if .Values.runnerCell.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.runnerCell.namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+    # Runner Pods run non-root with a read-only root filesystem and all
+    # capabilities dropped, so the restricted standard is enforceable.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+{{- end }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.runnerCell.serviceAccount }}
+  namespace: {{ .Values.runnerCell.namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+  {{- with .Values.runnerCell.serviceAccountAnnotations }}
+  # Where an IRSA role ARN goes, so a runner uploads artifacts with its own
+  # short-lived credentials rather than a static key mounted into the Pod.
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- with .Values.runnerCell.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-runner-manager
+  namespace: {{ .Values.runnerCell.namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+rules:
+  # Create, observe and stop runner Jobs. Deliberately no "update" or "patch":
+  # the platform creates a Job or deletes it, and never edits one in flight —
+  # an edited Job is a test whose plan digest no longer describes what ran.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Read-only on Pods, for diagnosing why a runner did not start. Logs are read
+  # for operator diagnosis; a runner's results reach the platform through object
+  # storage, never by scraping stdout.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Ephemeral runner Secrets: runtime credentials and mounted session-partition
+  # files. The control plane creates them, runner Pods mount them, and lifecycle
+  # cleanup deletes them after their explicit delete-after timestamp. Namespace
+  # scoped; the runner ServiceAccount is deliberately not granted this Role.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  # Per-session recorder egress policies. A recording browser is user-driven,
+  # so it gets a generated allowlist rather than open namespace egress.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-runner-manager-binding
+  namespace: {{ .Values.runnerCell.namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+subjects:
+  # The control plane, reaching into the runner namespace. The runner's own
+  # ServiceAccount is deliberately absent from this binding.
+  - kind: ServiceAccount
+    name: {{ include "performance-platform.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "performance-platform.fullname" . }}-runner-manager
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>platform-results</artifactId>
+  <packaging>jar</packaging>
+  <name>Platform Results</name>
+  <description>
+    Result normalization, objective evaluation and run comparison. Allowed dependencies are
+    platform-domain and result parsing libraries. Objective evaluation must stay deterministic
+    and re-runnable from stored artifacts, so Spring, JPA and Kubernetes types are forbidden.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,38 @@
+# INVALID FIXTURE — expected finding: spec.source.git.ref.mutable
+#
+# The Playwright source is pinned to a branch. A branch moves, so the code that
+# actually ran could not be recovered from the stored version and the review that
+# approved it would be meaningless.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: mutable-ref
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-browser
+      type: playwright
+      git:
+        repository: ssh://bitbucket/proposal-e2e.git
+        ref: main
+        path: tests/performance/proposal-journey.spec.ts
+
+  workloads:
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: proposal-browser
+      browserUsers: 5
+
+  objectives:
+    - metric: browser.journey.duration
+      percentile: 95
+      threshold: 8s

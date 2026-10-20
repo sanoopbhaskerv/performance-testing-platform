@@ -1,0 +1,504 @@
+# Start here
+
+## Review fixes — 20 October 2026
+
+All five findings from the current-code review are fixed. Failure intent is persisted in the
+existing failure fields with a `FAILURE_REQUESTED` event before stopping runner handles. Active
+failures retain capacity/completion timestamps until termination is confirmed; restart resumes
+cleanup, including provisioning refusals after another runner started and lost-contact shards.
+
+Operator-owned limits default to 1,000 protocol users across workloads and one hour. Configure
+`capacity.maxProtocolUsersPerRun` / `capacity.maxDuration` in Helm or the corresponding
+`platform.orchestration.capacity` properties. Authoring, new triggers and provisioning recheck
+policy, including compiled engine duration estimates. Existing idempotent retries retain their
+original identity; a queued run cannot bypass newly lowered limits.
+
+The Validator disables automatic redirects, checks DNS policy before each hop, permits at most
+five same-origin redirects and refuses a different scheme/host/port before connecting to it.
+Objective validation binds units to metrics. Supported percentiles are 50/75/90/95/99/100; p100 is
+the maximum. Exact p75 is computed, persisted through additive nullable V11 migrations and exposed
+as an optional report field. Missing historical p75 and invalid old objective contracts remain
+indeterminate when evaluated, never substituted. Historical stored verdicts are not rewritten.
+
+Verification: `mvn -q clean verify` with Docker: **1,392 tests, zero failures/errors, one opt-in
+live-recorder skip** (23 added tests). **205 UI tests**, lint and production build pass. JMeter
+upload contract test, company Helm lint/template, limit environment assertions, documentation
+links/fences and `git diff --check` pass. PostgreSQL covers pending failure persistence and p75
+round trips; controlled providers/HTTP servers reproduce the five defects without material load.
+
+Operational limits: unavailable termination confirmation deliberately keeps capacity reserved.
+Operators upgrading older installations should inspect already-failed runs for surviving Jobs;
+terminal history is not reopened automatically. A fresh run or operator reanalysis is required to
+correct historical objective outcomes; there is no public reanalysis endpoint. No dependency
+upgrade, external deployment, image publication or merge is included. Update the existing PR #1.
+Next recommended increment: operator-owned infrastructure acceptance and five-team calibration.
+
+## Current verified state — 19 October 2026
+
+**Company configuration and request-rate follow-up (supersedes older counts/image pins):**
+Standalone SVG architecture, technology placement and sequence diagrams are included and visually
+verified in Chrome, with editable Mermaid text and a dependency-free regeneration script. They
+remain viewable offline when GitHub rich rendering is unavailable. XML/idempotent regeneration pass.
+
+Runtime branding now sets product/tab name, local/HTTPS logo, light/dark theme and validated brand
+colors using public JSON or Helm values, without rebuilding the deploying company's UI. The same
+image was verified with baked Performance Studio/dark defaults and mounted Acme/light branding.
+The logo and configuration return 200 before login; a run report still returns 401 without a token.
+Extra non-secret Spring configuration was mounted and its application name observed in startup logs.
+Visual verification covered sign-in and the persisted report; light-theme sign-in fields were corrected.
+
+Helm now supports control-plane cloud annotations, separate registry pull Secrets in both
+namespaces, configurable ingress annotations, operator-owned runner namespaces, branding/logo
+ConfigMaps and additional application configuration. Legacy sample YAML API keys are no longer
+created by default. The AWS SDK STS module reuses the existing SDK version and its projected-token
+exchange is tested against a local STS fixture; no cloud account was used.
+
+Documentation now includes the 15-step company installation, cloud mappings, exact configuration
+reference, branding, troubleshooting, architecture/technology placement/run-sequence diagrams,
+expanded README, corrected current API authentication/status and a repeatable extension workflow.
+Start at `docs/README.md`; copy `helm/performance-platform/examples/company-values.yaml`.
+
+Chrome browser demo `cbeeefa0-19fe-4fa2-8f3b-0bbcd9e79b2c` completed four journeys with two browsers,
+zero failures and three met objectives (journey p95 1,318 ms). Chrome-authored API scenario
+`demo-20-concurrent-100-rps-214629` targets 100 RPS with concurrency ceiling 20, a 10s ramp, 60s
+hold and 10s ramp-down. Final run `1ec111c4-b6da-4673-b6cf-38a393d355a0`: 7,000 requests,
+zero errors, p95 2 ms, 5,000 requests in a 50s interior steady window = 100 RPS. Maximum reported
+thread count was 15, not a claim of twenty constantly active users. Four evidence downloads were
+SHA-256 verified. Runner `5.6.3-3` now supplies upload fingerprints/content types; older missing
+fingerprints remain unverifiable. Rate-based report/progress/review screens now preserve rates
+and ceilings, and throughput objectives say "At least".
+
+Checks: full Maven verify with Docker **1,369 tests, zero failures/errors, one opt-in recorder
+skip**; **205 UI tests**, lint and production build; runner upload contract test; full control-plane
+and JMeter Docker builds; company Helm lint/template, invalid branding rejection, namespace/mount/
+identity/pull-secret assertions and documentation link checks. The Apache CDN mirror argument was
+used for a slow archive download; SHA-512 verification remained enabled. Private proof JSON,
+credentials, raw results and extra screenshots stay in ignored `.local/browser-proof/`.
+
+Local inspection uses the existing disposable kind cluster/namespaces and localhost:18080.
+Control-plane image: `perfplatform/platform-core:company-verify-2`; reviewed runner images remain
+pinned. The branded 7,000-request report is left open in Chrome. No external cloud deployment,
+image publication or merge was performed. Current work is published through the existing PR #1.
+Next: validate the company installation on an operator's infrastructure and calibrate five-team
+resources. Human OIDC, native Blob/GCS adapters, private Git credentials, remote federation and
+BrowserStack remain extensions, not configuration switches or certified integrations.
+
+**Recorder replay follow-up:** the fresh Linux backend build passed in full. Its slower UI run
+exposed duplicate evidence when a recorder poll replayed the same sequence. The recorder now
+ignores older/repeated frames, refusals and captures, preserving monotonic cursors and one visible
+entry per event. The regression test explicitly waits for repeated polls and checks both evidence
+lists. All 193 UI tests, production build and lint pass locally after this correction.
+
+**Fresh-install portability follow-up:** the first GitHub Linux run exposed that the old MinIO
+prebuilt image had been withdrawn from both upstream registries; cached local images hid this. The
+optional S3 fixture now builds the same 2024 release from official commit
+`cefc43e4daa4cbb490ef6726ea374e26a93eb85e`, with a verified archive SHA-256 and pinned Go toolchain.
+Its real S3 integration tests pass from that source build (first build about 3m25s locally). The
+proof bootstrap creates buckets using a temporary scoped AWS CLI pod, independently smoke-tested.
+The CI runner is pinned to Ubuntu 24.04 and current setup actions. Production still uses the
+operator's own S3-compatible storage; no storage product upgrade or external image publication was
+introduced. See the updated deployment guide for building/loading this optional fixture.
+
+This section supersedes the historical increment notes below. The user's direction is now an open
+source, customizable, self-hosted product usable without performance engineering experience. This
+increment completes the browser wizard and production Playwright path and reviews the complete
+self-service journey. Default global admission is **five** material runs, one per team; browser
+capacity remains separate. The user's working preference explicitly authorizes commit/push and
+updating open PR #1 on `feature/platform-v2-foundation`; merge/deployment/image publication are not
+authorized or performed.
+
+**Delivered:** six browser steps (About/target, reviewed source, browsers, objectives, configuration
+check, save/run); immutable team-owned source upload and S3/filesystem ports; pinned Playwright
+1.62.1-1 production image sharing the local harness; deterministic import, bounded workers/deadline,
+correlation header, page/step evidence, final-page LCP/CLS/TTFB and failure traces; digest-bound
+results and uploads, real progress identities, no empty-test successes. A typed primary-sample flag
+keeps secondary scores/actions out of headline results. New application target registration now
+onboards its application after team authorization. Source Java packages named `target` are now
+explicitly included in Git; the old Maven-output ignore pattern had hidden these required files.
+
+**Self-hosting:** production UI/API image, Helm existing Secret support, expiring hashed scoped
+service identities, production legacy/dev identity restrictions, PostgreSQL driver auto-detection,
+disabled unused session acquisition, restricted runner egress declarations, optional Karpenter,
+MIT license, contribution guide, user/configuration/deployment/extension docs and portable
+`skills/performance-testing/SKILL.md` plus Python CLI. No provider-specific corporate IdP, cloud
+account or secret manager was selected.
+
+**Evidence:** UI-created run `36bf6494-bd51-40ad-b447-f9a30f2a9b13`, four primary journeys, real
+Kubernetes provider, complete evidence, three PASS objectives (journey p95 407 ms, error rate 0%,
+CLS score 0). Restart during ANALYZING completed that persisted run with unchanged Job UID
+`c37b5dd0-6c75-4d1f-8d25-ea07cc73ec3c`. The actual Job ran non-root/read-only root with no retries.
+Portable CLI/API proof: success `c2cd7b13-a652-466d-9fc0-298e7194b453`, assertion breach
+`35def99c-a4ea-4f5d-93b8-ccd990ae8513`, cancellation `6216106c-88f8-455a-9878-3dbbcf291399`;
+seven private digest-verified downloads, idempotent triggers/cancellation, cross-team and expired
+credentials denied. These local fixture timings do not establish application or generator capacity.
+
+**Checks:** full Maven verify with Docker: 1,366 tests, zero failures/errors, one opt-in live recorder
+skip; UI 193 tests/build/lint pass; six runner checks including real Chromium pass; both Docker
+images build; Helm lint and unrestricted-network rejection pass; Python helpers compile, token
+helper permissions/hash/no-output/overwrite checks pass; skill validator passes. Exact guides and
+review: `docs/reviews/browser-self-service-2026-10-19.md`, `docs/user-guide/`,
+`docs/deployment/standalone.md`, `docs/development/extending.md`.
+
+**Local inspection:** disposable kind cluster `perf-browser-verify`, namespaces `perf-browser-proof`
+and `perf-browser-proof-runners`, UI port-forward localhost:18080. Private short-lived credentials
+and proof JSON/screenshots are in ignored `.local/browser-proof/`; never commit them. Setup:
+`scripts/verify-browser-kubernetes.py` on a fresh cluster, verification:
+`scripts/check-browser-self-service.py`. The cluster is left for inspection; cleanup is
+`kind delete cluster --name perf-browser-verify`. No external cloud infrastructure was deployed and
+no container image was published.
+
+**Remaining product work:** operator verification of enforced CNI egress, cloud IAM/encryption,
+real five-team resource calibration, human OIDC, private repository credentials, named project
+configs, remote runner federation, BrowserStack, wizard hybrid authoring. INP/TBT/Lighthouse are
+unavailable rather than inferred. A reviewed browser script is still required; the platform does
+not autonomously generate one. The recommended next increment is release hardening on the target
+operator's infrastructure and a calibrated five-team acceptance test, followed by human SSO once
+the identity provider is selected. Do not revive the historical claim that all product phases are
+complete solely because modules or scaffolds compile.
+
+---
+
+## Historical handoff notes (prior to this verification)
+
+**Read `HANDOFF.md` first** (state, decisions, gotchas), then this. `CLAUDE.md` is the contract.
+
+Branch `feature/platform-v2-foundation`. **Nothing is pushed** — pushing, tagging and opening a PR
+each need explicit authorization (CLAUDE.md §6). Every increment now ends with updated handoff
+documents and a commit unless the user explicitly says not to commit.
+
+---
+
+## 1. Run it
+
+```bash
+./scripts/start-platform.sh
+```
+
+One command. It starts the **demo service** (:8081), the **control plane** (:8080), the
+**console** (:5173) and the **student app** (:5174), clears stale ports first, waits for each to
+answer, and prints the API key and what to click. The student app is a real browser client for the
+demo service and is the thing worth recording — the demo service itself is API-only. Ctrl-C stops all three; `--stop` cleans up after a run that was killed.
+
+- `--build` rebuilds the Java modules first. Without it, existing jars are reused.
+- It installs JMeter's **Custom Thread Groups plugin** (`jpgc-casutg`) if your JMeter lacks it. Every
+  plan needs it now, and the control plane refuses to start without it — JMeter would otherwise skip
+  the thread group it cannot resolve and report a successful run that generated no load.
+- `--fake` forces the non-load-generating provider.
+- It picks **local-jmeter** automatically when `jmeter` is on PATH, and says which it chose. With
+  the fake provider a run ends in **`Failed` / `NO_LOAD_GENERATED`** — correct, not broken: the run
+  measured nothing, so nothing can pass (`HANDOFF.md` §3b). `brew install jmeter` for real load.
+
+The start script also enables the **recorder bridge** — `local-browser.enabled`,
+`allow-loopback-target` and a disabled network-enforcement floor. All three are refused under a
+production profile; the loopback allowance is what lets a recording browser reach the demo service on
+this machine, and it relaxes *only* loopback. Press **Start guarded recording**, use the page, then
+**Turn this into a test** and the studio opens with the recorded journeys loaded.
+**[`docs/operations/recording-locally.md`](docs/operations/recording-locally.md) is the whole
+procedure**, including what the flags mean and what to do when a session stays
+`PENDING_BROWSER_BRIDGE`.
+
+Open <http://localhost:5173>, **Performance tests** tab, key `local-dev-key-not-a-secret`.
+**New test** opens the **studio**: choose *Test an API*, bring a source (a cURL command, an OpenAPI
+document, a HAR or a Postman collection), review the journeys, set the load and the objectives, and
+save. **Write it as YAML** is the expert path and still carries the Demo service template, which
+runs unedited.
+
+### Verifying a change
+
+```bash
+# JAVA_HOME is NOT set in the shell profile. Every mvn call must supply it.
+# Only JDK 21 is installed; the project targets Java 17. Do not change java.version.
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -f pom.xml clean verify
+```
+
+S10i ran this to completion: **1,331 tests, 0 failures** across all 16 modules. **One skip is
+expected here and is not a false green**: `LocalChromeRecorderBrowserLiveTest` drives a real Chrome
+and is `@EnabledIfSystemProperty`, so ordinary CI never runs it. Run it deliberately —
+
+```bash
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home \
+  mvn -B -pl runners/runner-chrome -am test -Drecorder.live=true
+```
+
+It needs Chrome or Chromium installed and takes about a second. It is the only test that proves the
+CDP wiring works against the browser as shipped, and it has already caught two defects the unit
+tests could not. S7 was
+the first fully green `mvn clean verify` on the branch and it has stayed green through S11.
+Docker must be running:
+Testcontainers uses PostgreSQL and MinIO. The environment limits earlier sessions recorded (Mockito
+inline self-attach, sockets refusing to bind) did **not** recur in the S10b full run; if they reappear,
+note them rather than assuming they are permanent. If a PostgreSQL module fails wholesale with
+`An error occurred while setting up the SSL connection`, that is a known flaky start — retry once.
+**If any integration test reports `Skipped`,
+that is a false green: investigate, do not accept it.**
+
+```bash
+cd platform-ui && npm test && npm run lint && npm run build   # 184 tests; 3 errors, 3 warnings, all pre-existing in V1's App.tsx
+```
+
+For the Kubernetes path, `docs/operations/local-kubernetes-run.md` is the whole procedure on kind.
+For recording a journey, `docs/operations/recording-locally.md` is the whole procedure on this
+machine.
+
+### Traps, all real, all hit at least once
+
+- Bash working directory **persists between calls**. `cd platform-ui` breaks every later command.
+  Always `cd` to the repo root or use absolute paths. This has bitten four times.
+- A background `java -jar` **survives `TaskStop`**. The shell dies, the JVM does not; the next start
+  fails with `Port 8080 was already in use` while `curl` answers happily from the *stale* jar.
+  `lsof -ti:8080 | xargs kill -9` first, or you will verify the wrong build. Same for vite on 5173.
+- An IDE language server can leave **Eclipse-compiled `.class` files** in `target/test-classes` that
+  throw `java.lang.Error: Unresolved compilation problem` at runtime while `mvn test-compile` reports
+  success. `mvn clean verify` — it is stale bytecode, not a bug.
+- Single test across the reactor needs `-Dsurefire.failIfNoSpecifiedTests=false`.
+- **UI lint reports 3 errors, 3 warnings, all pre-existing**, all in V1's `App.tsx`. Do not "fix"
+  them as part of something else. A previous session recorded 10; that was a **drifted
+  `node_modules`**, not a real change — `npm ci` in a clean worktree at HEAD gives 3. Reinstall
+  before believing a different number.
+- **`Tests run: 0` for a class with `@Nested` classes was cosmetic, never lost coverage** — Surefire
+  ≤3.5.2 filed the outer class's own tests into the last nested class's report file. The root pom now
+  pins **Surefire 3.5.3**, which attributes correctly. Mixing top-level and `@Nested` tests is safe.
+  A `Tests run: 0` line is still correct for a class where every test is nested. `HANDOFF.md` §2/§3h.
+
+---
+
+## 2. What to do next
+
+> **Before anything else: there is uncommitted studio work in the tree, on purpose.** An **About**
+> step that moves name/team/application/environment ahead of Validate (the Validator resolves its
+> target from those and was failing with `metadata.team is required`), plus S10h's correlation-proof
+> panel. Eight files: `api.ts`, `StepScreens.tsx`, `Studio.tsx`, `PerformanceConsole.tsx`,
+> `draft.ts`, `studio.css`, `CorrelationProofs.tsx`, `CorrelationProofs.test.tsx`. The tree
+> typechecks, tests (184) and builds. **Do not revert it**; commit it as one studio commit when the
+> About work is finished. S10h's backend is already committed without it — see `HANDOFF.md` §3ak.
+
+**Read [`PLAN.md`](PLAN.md) first. It is the decision about what happens next**; `ROADMAP.md` is now
+the inventory of what exists, and `HANDOFF.md` §3 is the account of how each piece was built.
+
+**The direction: turn this into a Performance Studio.** One UI where someone with **no performance
+testing experience** configures a test, watches it run live, and reads a report they can act on. Two
+first-class capabilities — **API load testing** (one or many APIs) and **web performance testing**
+(record a journey, upload a HAR, or bring a Playwright script; Core Web Vitals) — plus the pairing of
+the two, which is the flagship: *is the page still fast when the backend is at 500 users?*
+
+`PLAN.md` sequences this as **S1–S12**, each shipping a backend capability **and** the studio screen
+that exposes it. Nothing lands API-only.
+
+### Release 1 is S1–S6. Decisions are made — do not relitigate them
+
+| Decision | Chosen |
+|---|---|
+| **vitest** | **Approved and added in S1.** §31 pause cleared. **158 UI tests** now. |
+| **Recorder** | **The bridge is built** (S10d, `HANDOFF.md` §3ag). A session attaches a real Chrome behind the `RecorderBrowser` port, streams JPEG frames to the console and accepts ten brokered interactions — there is no path from the API to a DevTools method. Security review controls are in place: frozen DNS, route guard, audit-by-origin, sanitized captures, rate limiting, idle/deadline expiry. **A recording now becomes a draft test** (S10e, §3ah): the captures are rendered as a HAR and read by the ordinary HAR importer, so *Turn this into a test* opens the studio with journeys, weights and correlation suggestions. **S10h makes the Validator prove the correlations a person accepted** (§3ak), and **S10i completes git-pinned Playwright import** (§3al). |
+| **Playwright import** | **In release 1** — upload or paste the `.spec.ts`, stored immutably by content digest. **Not** a git clone: no credentials, no `GitSourceFetcher`, no §31 pause. Git-pinned import is S10. |
+| **Live monitoring** | **Built in S7.** Runners publish rolling snapshots to object storage; the reconciler merges them; the console shows throughput, latency, errors, per-journey breakdown, per-generator health, live objectives and rule-based observations. |
+| **Arrival-rate sizing** | **Built in S8**: a test can hold a rate instead of a number of users, with the concurrency ceiling an open model cannot run without. |
+| **Web performance under load** | **Built in S11**: named stages, `startWhen` validation, delayed browser shards and browser-session budget enforcement. |
+| **Dropping V1** | **Authorized** (§31 pause cleared), and the user asked for it **after** the studio build phases. S5 removed the credentials/session blocker, but removal still needs a focused audit because development identity remains local-only and V1 endpoints must stay operational until that increment is explicitly picked up. |
+
+### What is built
+
+- **S1** (`HANDOFF.md` §3n) — the studio. *New test* → pick a test type → import a source → review
+  journeys → set load → set objectives → the platform validates live → Save. Verified end to end in
+  a browser against a running control plane.
+- **S2** (§3o) — the report opens with the answer in a sentence, every metric explains itself where
+  it appears, and a running test shows where it is in its plan.
+- **S3** (§3p, §3q, §3r) — a test can sign in, a HAR capture becomes an ordered journey, and the
+  Rules screen proposes correlations with evidence. Scenarios carry ordered steps, values are
+  extracted and carried forward, and a broken correlation fails loudly instead of reporting
+  excellent latency. Proposed correlations are accepted or rejected by a person and never applied
+  silently.
+- **S4** (§3s) — the Validator runs one real protocol iteration before Save and shows request,
+  response, extraction and assertion evidence.
+- **S5** (§3t) — targets, credentials and sessions: runtime credential references, `SecretResolver`,
+  broker-backed `run://session`, mounted session partitions, lifecycle cleanup, Helm RBAC and
+  production docs.
+- **S6a** (§3u) — production-readiness validation for broker-backed `run://session`: kind smoke
+  procedure with a stub broker Service, mounted broker-client Secret, runner session Secret
+  creation/cleanup checks and a failed-acquisition runbook.
+- **S6** (§3v) — browser-only Playwright execution behind the engine SPI, artifact-backed script
+  digests, browser profiles, Core Web Vitals objectives and explicit rejection of mixed-engine specs
+  until hybrid orchestration exists.
+
+- **S7** (§3w) — live monitoring. Runners publish `progress.json` every five seconds; the reconciler
+  merges across shards into a durable series; `GET /api/v2/test-runs/{id}/progress` serves it with
+  live objectives and rule-based observations; the console's Monitor shows it. Verified with real
+  load at **11–14 s freshness**. Also fixed two pre-existing failures it uncovered — the Spring
+  context could not start (two `TargetResolver` beans, since S5), and that masked seventeen broken
+  end-to-end tests.
+
+- **S8** (§3x) — load models. A test can hold **requests per second** instead of users, with the
+  mandatory concurrency ceiling that admission budgets against instead of the rate; staged
+  concurrency now **glides** rather than stepping at boundaries. Both render through JMeter's Custom
+  Thread Groups plugin, which the start script installs and the control plane refuses to start
+  without. Also fixed a throughput objective that could not be written at all (`Threshold` had no
+  per-second unit).
+
+- **S9** (§3y) — one run, many workloads. A run compiles **one plan per workload**, provisions
+  shards per workload and analyses every workload's results together, so a protocol load and a
+  browser cohort can belong to one run. A workload naming an engine this deployment lacks is now
+  refused **at validation**, closing a defect that once dropped later workloads silently. The
+  browser-session budget moved to S11, where the thing it governs first becomes possible.
+
+- **S10c** (§3ac) — recorder audit events and capture sanitization. Recorder sessions are durable
+  audit subjects; captures drop credential headers, token-looking values, browser storage state and
+  unsafe bodies before anything is rendered or drafted. The console has a target-bound
+  `Start guarded recording` entry point that returns `PENDING_BROWSER_BRIDGE`; it does not expose
+  CDP yet.
+
+- **S11** (§3ad) — web performance under load. Protocol workloads start first; delayed browser
+  shards stay durable `PENDING` rows until the depended workload is `RUNNING`, the named stage
+  boundary has elapsed and live progress has samples. Browser sessions are capped separately from
+  protocol virtual users, defaulting to 20 per run.
+
+- **S10h** (§3ak) — the Validator proves a recording's correlations. Accepting a suggestion used to
+  be an unchecked claim: the extraction resolved, every assertion passed, and the Validator reported
+  success whether or not the rule had been applied to anything — because the literal it replaces is
+  usually still valid minutes after capture. `POST /api/v2/recordings/{id}/validator` runs the same
+  iteration against the recording, recovers those literals, and returns a verdict per rule:
+  **proven** (a different value from the recorded one, and a later step sent it), **unproven** (the
+  same value, so nothing is shown either way), **used** (no recording to compare against),
+  **unused** (extracted and sent by nothing — an **ERROR**), **not-extracted**.
+
+- **S10i** (§3al) — a git-pinned Playwright source reaches the runner. `SourceSpec.GitSource` and
+  its validation existed; the engine dropped the coordinates, so a git source compiled into a plan
+  with `sourceUri` and `sourceDigest` empty and the runner got a workload with no script. The
+  coordinates are now part of the plan and its digest, a source carrying no material is refused at
+  compile, and **`GitSourceAllowlist` stops a specification naming a repository nobody declared** —
+  fail-closed, since an empty allowlist means "not decided", not "no restriction". Credentials in a
+  clone URL are refused. Configure with
+  `platform.orchestration.playwright.allowed-repositories`. **Private repositories do not work yet**:
+  the git credential is not wired through `SecretResolver`.
+
+- **S10j** (§3am) — **a browser journey actually runs, triggered from the console.** Until this,
+  none could run anywhere: `LocalJmeterExecutionProvider` rejected every non-JMeter engine and was
+  the only provider bean, and the Kubernetes path it pointed people to was a placeholder entrypoint
+  that never invoked `npx playwright test`. Now `EngineRoutingExecutionProvider` dispatches by
+  engine (resolving `inspect`/`cancel` through the handle's own provider, so a restart cannot hand a
+  shard to an adapter that never started it), and `LocalPlaywrightExecutionProvider` runs a cohort of
+  real browsers from two Node scripts shipped as jar resources. Sources resolve from
+  `workspace://<path>` inside a configured root — development only, and reported as a **warning**,
+  because a file on disk can change between two runs of the same immutable version.
+
+  It also fixed **`CanonicalJson`, which emitted invalid JSON**: every field after the first was
+  written with no separator, so *every plan this platform ever rendered was unparseable* and every
+  plan digest was taken over a malformed document. It survived because JMeter executes a JMX file and
+  never parsed a plan; the browser runner is the first consumer that does. The class had **no test** —
+  it has ten now.
+
+  Verified from the console: 5 browsers × 2 iterations = 10 journeys, 126 samples, `synthetic=false`,
+  ending **Failed / OBJECTIVE_BREACHED** on a genuine p95 breach. **Web vitals report INDETERMINATE**
+  — capturing them needs a fixture injected before page load, and a number synthesized from step
+  timings would be worse than none.
+
+**Next, in order:**
+
+1. **Port the local runner into the container image.** `runner-images/playwright-runner/entrypoint.sh`
+   still does not run Playwright, so **browser workloads cannot execute in production** — only on a
+   developer's machine. `perf-runner.mjs`/`perf-reporter.mjs` were written to be what that image
+   runs; the git-fetch-and-verify block already in the entrypoint stays, and the placeholder tail
+   goes. This is the largest remaining honesty gap: the platform can now show a browser report that
+   no production deployment could produce.
+2. **The studio cannot author a browser test at all** (`HANDOFF.md` §3af) — `toSpecification` always
+   emits `type: protocol` and `engine: jmeter`, so S10h's correlation panel, S10i's git source and
+   now S10j's runnable browser workload all have nowhere to live. Three shipped increments, no
+   screen. The YAML tab is the only way in.
+3. Live progress for browser runs (the reducer is engine-neutral; this is wiring), then S12 scale
+   hardening.
+
+**The saving that makes release 1 affordable:** a browser-**only** web performance test is one
+workload, one engine, one plan. It does not need S9's multi-plan refactor — only the hybrid does.
+
+### The three facts the studio work has to deal with
+
+Found by reading the code, and each is recorded in `PLAN.md` §2:
+
+1. ~~**A journey is one request.**~~ **Fixed in S3.** Scenarios carry ordered steps with extraction
+   and assertions.
+2. ~~**`spec.authentication` is parsed, validated and used by nothing.**~~ **S5 added runtime
+   credential references, `SecretResolver`, and broker-backed `run://session`.** Corporate identity
+   and non-Kubernetes secret managers remain later pause-condition decisions.
+3. ~~**A run still has one plan with one engine.**~~ **Fixed in S9**, and S11 added the hybrid
+   coordination that starts browser shards under protocol load.
+
+### The caveat to carry forward
+
+2h changed the JMeter runner image's entrypoint (it now fetches dataset partitions), **S7 changed it
+again** (a rolling progress publisher, plus a Python reducer added to the image), and none of it has
+been run on a cluster. S6 added a separate Playwright runner image contract and S7 added a Node
+reducer to it; that image has still never been built or run on kind. The local-JMeter path is
+verified with real load — including S3's journeys and S7's live view. Before trusting either
+Kubernetes runner path, re-run `docs/operations/local-kubernetes-run.md`, whose new §7 covers the
+live-monitoring checks including the two-shard generator kill.
+
+### Environment caveat, now lifted
+
+Earlier sessions could not run the full suite here (Mockito inline self-attach, sockets refusing to
+bind). S7 ran `mvn clean verify` end to end with Docker running and got 1,058 green tests with
+nothing skipped. Treat a recurrence as a new observation, not as the expected state.
+
+### Datasets, in one paragraph
+
+`POST /api/v2/datasets?team=…&name=…` with the CSV as the body. It returns a
+`dataset://{name}/{version}` uri; put that in `spec.datasets[].source.uri` along with the columns
+the test expects, and bind to a column with `${column}` in a journey's path, query, headers or body.
+Versions are allocated, never chosen, and never overwritten. A column named as a credential is
+refused and nothing is stored. `docs/api/v2-examples.md` has the whole flow.
+
+### What is already done — do not rebuild
+
+Increments 0 through 2h, then S1–S6. The canonical specification, durable run orchestration, the
+JMeter engine behind the SPI, the Kubernetes provider proven on a real cluster, the S3 artifact
+store, the runner image, report and artifact download, synthetic-run marking, **four source
+importers**, dataset binding, partitioning, upload, storage and delivery — and then **the studio**
+(shell, sources, refine, load, objectives, review), **a report a non-expert can read**, **run
+progress**, **multi-step journeys with reviewed correlation rules**, **a live Validator before
+Save**, **S5 runtime credentials, broker-backed sessions and cleanup**, and **S6a broker-path
+production-readiness docs**, plus **S6 browser-only Playwright/Core Web Vitals support**.
+`HANDOFF.md` §3–§3v is the account of each.
+
+## 3. Rules that do not bend
+
+- **Stop after the increment you were asked for.** Produce the CLAUDE.md §30 completion report.
+- **Finish every increment the same way**, before anything else is started. **All four documents,
+  every time** — the list is four because it was three when `PLAN.md` did not exist, and updating
+  only the old three is a mistake that has already been made once:
+  1. **`HANDOFF.md`** — the status table, the test counts, and a new `§3x` section saying what was
+     built, what was decided and *why*, and what was deliberately left undone.
+  2. **`PLAN.md`** — the status line under the title, and the increment's row in the §11 sequence
+     table. It is the plan of record; a plan that still describes work as pending after it shipped is
+     the document most likely to make somebody rebuild it.
+  3. **`NEXT-SESSION.md` §2** and **`ROADMAP.md`**, so the next person's first move is obvious and
+     the inventory of what exists is true.
+  4. **Commit**, code and documents together, with a message in this repo's style: an imperative
+     sentence naming the outcome a consumer gets, not the files touched. `git log` for examples —
+     *"Import a cURL command into draft scenarios"*, *"Let a specification express a whole request"*,
+     *"Prove the Kubernetes path on a real cluster, and fix what that found"*. The body carries the
+     detail: what changed, what was decided, what is verified, what is not.
+
+  A commit whose documents still describe the previous state is how a fresh context starts by
+  rebuilding something that already exists.
+
+  **The check that catches a miss**, before committing — the four must agree on all three:
+
+  ```bash
+  grep -ohE "9[0-9]{2} (Java )?tests|1[0-9]{2} UI tests" HANDOFF.md NEXT-SESSION.md ROADMAP.md PLAN.md | sort -u
+  grep -n "S7\|live monitoring" HANDOFF.md PLAN.md                       # the same next increment is outstanding
+  grep -n "next" NEXT-SESSION.md ROADMAP.md | grep -i "increment\|S[0-9]"   # the same next move
+  ```
+- Do not push, tag, merge or publish without explicit authorization.
+- **V1 still works and still must, for now.** Its removal is authorized but deferred until after the
+  studio build phases. S5 removed the credentials/session blocker, but V1 removal still needs an
+  explicit increment and audit of development identity, team sync and target resolution. Until then
+  `/api/v1/**` and the **Legacy (v1)** tab are the check.
+- Tests named `KNOWN DEFECT` / `KNOWN GAP` / `KNOWN SECURITY GAP` assert behaviour that is wrong on
+  purpose. Invert them in place when the owning increment fixes them; never delete one to go green.
+- Pause and ask before: a new unapproved dependency, k6, a secret manager, an identity provider, a
+  production S3 bucket, production or unrestricted targets, or real credentials.
+- **Never present a synthetic run's numbers as evidence of anything**, and never weaken the marking
+  that says so. The platform enforces this in four places; each is there because a report travels
+  further than its caveats.
+- **A specification never contains a credential value.** Headers, query parameters and bodies are all
+  checked, and importers strip what they find. If you add a field that can hold a string a consumer
+  authored, ask whether a secret can be written into it.

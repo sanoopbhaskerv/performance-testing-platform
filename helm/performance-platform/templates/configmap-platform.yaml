@@ -1,0 +1,20 @@
+{{- if not (has .Values.branding.theme (list "dark" "light")) }}
+{{- fail "branding.theme must be dark or light" }}
+{{- end }}
+{{- range $name, $color := .Values.branding.colors }}
+{{- if not (regexMatch "^#[0-9a-fA-F]{6}$" $color) }}
+{{- fail (printf "branding.colors.%s must be a six-digit hex color" $name) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "performance-platform.fullname" . }}-platform-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "performance-platform.labels" . | nindent 4 }}
+data:
+  platform-config.json: |
+    {{- pick .Values.branding "name" "logoUrl" "logoAlt" "theme" "colors" | toPrettyJson | nindent 4 }}
+  application.yaml: |
+    {{- toYaml .Values.applicationConfig | nindent 4 }}

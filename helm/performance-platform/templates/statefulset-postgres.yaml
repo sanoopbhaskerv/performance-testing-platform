@@ -36,12 +36,12 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: password
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata

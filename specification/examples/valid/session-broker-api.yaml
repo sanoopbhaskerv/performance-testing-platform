@@ -1,0 +1,76 @@
+# API load that acquires short-lived application sessions from the approved broker.
+#
+# The specification names run://session, never a bearer token, cookie or refresh token.
+# At run time the control plane calls the configured SessionAcquisitionProvider and mounts
+# this shard's session partition into the runner as /workspace/sessions.csv.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: authenticated-proposal-api
+  team: advice-implementation
+  application: proposal
+  labels:
+    auth: broker-session
+    tier: tier-0
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  authentication:
+    - name: broker-session
+      type: bearer
+      injectAs: Authorization
+      secretRef: run://session
+
+  workloads:
+    - name: authenticated-api-load
+      type: protocol
+      engine: jmeter
+      authRef: broker-session
+      model:
+        type: stages
+        stages:
+          - duration: 2m
+            targetUsers: 50
+          - duration: 10m
+            targetUsers: 150
+          - duration: 2m
+            targetUsers: 0
+      scenarios:
+        - name: open-dashboard
+          weight: 70
+          method: GET
+          path: /api/dashboard
+        - name: search-proposals
+          weight: 30
+          method: GET
+          path: /api/proposals/search
+          query:
+            status: active
+
+  objectives:
+    - metric: http.response.time
+      scope: authenticated-api-load
+      percentile: 95
+      threshold: 800ms
+    - metric: http.error.rate
+      scope: authenticated-api-load
+      threshold: 1%
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+    serviceTagSelector: application:proposal
+    collect:
+      - service-response-time
+      - failure-rate
+
+  governance:
+    maxDuration: 20m
+    approvalPolicy: non-production-standard
+    retention: 30d
+

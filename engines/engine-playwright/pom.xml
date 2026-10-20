@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>engine-playwright</artifactId>
+  <packaging>jar</packaging>
+  <name>Engine — Playwright</name>
+  <description>
+    Playwright provider for the engine SPI: browser workload plan compilation, runner rendering and
+    browser result normalization. This module stays framework-free and reaches the rest of the
+    platform only through platform-domain and platform-engine-spi.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-engine-spi</artifactId>
+    </dependency>
+
+    <!--
+      The logging facade only. The local execution provider starts and destroys process trees whose
+      leaves are real browsers, and an operator needs to see which tree belonged to which run when
+      one has to be killed. slf4j-api is already the facade used throughout the repository; no
+      binding is added here, so the composition root still chooses one.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

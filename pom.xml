@@ -21,9 +21,82 @@
   <properties>
     <java.version>17</java.version>
     <springdoc.version>2.3.0</springdoc.version>
+    <!--
+      Test scope only. Raised from 1.19.3 because Docker Engine 29 refuses API versions below
+      1.44, and the docker-java bundled with 1.19.3 negotiates lower — Testcontainers silently
+      skipped every integration test rather than failing, which would have made the PostgreSQL
+      guarantees look verified when nothing had run. Centralized here so the modules cannot drift.
+    -->
+    <testcontainers.version>1.20.6</testcontainers.version>
+    <!--
+      Kubernetes client for the production execution provider (Increment 1E, CLAUDE.md §16).
+      Fabric8 rather than the upstream io.kubernetes client: its fluent Job builder keeps the
+      manifest readable, and its KubernetesMockServer lets the Job contract be tested without a
+      cluster — which is what CLAUDE.md §25 asks for before requiring a real one. Apache 2.0.
+    -->
+    <fabric8.kubernetes.version>6.13.4</fabric8.kubernetes.version>
+    <!--
+      S3-compatible object storage for durable artifacts. The filesystem store cannot serve a
+      multi-replica control plane: a file written by one replica is invisible to the others.
+      No bucket, account or region is chosen here — all are configuration.
+    -->
+    <awssdk.version>2.29.52</awssdk.version>
+    <!--
+      Docker Engine 29 rejects API versions below 1.44 with HTTP 400, and the docker-java client
+      inside Testcontainers negotiates lower unless told otherwise. Without this, Testcontainers
+      reports "could not find a valid Docker environment" and every integration test is silently
+      SKIPPED — a green build that proved nothing. Override on a host with an older daemon.
+    -->
+    <docker.api.version>1.44</docker.api.version>
   </properties>
 
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <!--
+            Raised from the 3.1.2 managed by spring-boot-starter-parent 3.2.3. Up to and including
+            3.5.2, Surefire files a test class's own @Test methods into the report of the last
+            @Nested class it emitted, then prints "Tests run: 0" for the outer class. The tests do
+            run — the <testcase> entries keep the correct classname — but the console line reads as
+            lost coverage and was twice recorded in this repo as a defect that does not exist.
+            3.5.3 attributes each test to its own class. Test reporting only: the full reactor
+            produces the same 803 tests, 0 skipped, on both versions.
+          -->
+          <version>3.5.3</version>
+          <configuration>
+            <systemPropertyVariables>
+              <api.version>${docker.api.version}</api.version>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+  <!--
+    Modular monolith. Dependencies point inward: platform-domain depends on nothing,
+    platform-core depends on everything and owns application bootstrapping.
+    See docs/adr/003-engine-spi.md and CLAUDE.md §9 for the dependency rules, which are
+    enforced by ModuleDependencyRulesTest in platform-core.
+  -->
   <modules>
+    <module>platform-domain</module>
+    <module>platform-engine-spi</module>
+    <module>platform-results</module>
+    <module>platform-persistence</module>
+    <module>platform-orchestration</module>
+    <module>platform-api</module>
+    <module>engines/engine-jmeter</module>
+    <module>engines/engine-playwright</module>
+    <module>runners/runner-kubernetes</module>
+    <module>runners/runner-chrome</module>
+    <module>platform-importers/importer-curl</module>
+    <module>platform-importers/importer-openapi</module>
+    <module>platform-importers/importer-har</module>
+    <module>platform-importers/importer-postman</module>
     <module>platform-core</module>
   </modules>
 
@@ -34,6 +107,107 @@
         <groupId>org.springdoc</groupId>
         <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         <version>${springdoc.version}</version>
+      </dependency>
+
+      <!-- Internal modules -->
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-engine-spi</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-results</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-persistence</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-orchestration</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>platform-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>engine-jmeter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>engine-playwright</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>runner-kubernetes</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>runner-chrome</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-curl</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-openapi</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-har</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.perfplatform</groupId>
+        <artifactId>importer-postman</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- External clients, pinned here so no module can drift onto its own version. -->
+      <dependency>
+        <groupId>io.fabric8</groupId>
+        <artifactId>kubernetes-client</artifactId>
+        <version>${fabric8.kubernetes.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.fabric8</groupId>
+        <artifactId>kubernetes-server-mock</artifactId>
+        <version>${fabric8.kubernetes.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>s3</artifactId>
+        <version>${awssdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>sts</artifactId>
+        <version>${awssdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>minio</artifactId>
+        <version>${testcontainers.version}</version>
+        <scope>test</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>

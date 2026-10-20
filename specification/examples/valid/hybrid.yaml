@@ -1,0 +1,115 @@
+# A hybrid test: a small browser cohort measured while the API is under protocol load.
+#
+# The two workloads answer different questions. JMeter generates backend load
+# economically; Playwright measures what a real user experiences while that load is
+# present. Running the browser cohort during steady state is the point — measuring it
+# against an idle system would say nothing about behaviour under load.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: proposal-hybrid
+  team: advice-implementation
+  application: proposal
+  labels:
+    tier: tier-0
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-api
+      type: openapi
+      uri: artifact://proposal/openapi.yaml
+
+    - name: proposal-browser
+      type: playwright
+      uri: artifact://playwright-sources/sha256-a9e8/proposal-journey.spec.ts
+      digest: sha256:a9e8d7c6b5a4938271605f4e3d2c1b0aa0b1c2d3e4f5061728394a5b6c7d8e9f
+
+  authentication:
+    - name: test-user
+      type: oauth2-client-credentials
+      secretRef: vault://performance/proposal/client
+
+  workloads:
+    - name: api-background-load
+      type: protocol
+      engine: jmeter
+      sourceRef: proposal-api
+      model:
+        type: stages
+        stages:
+          - name: ramp-up
+            duration: 5m
+            targetUsers: 200
+          - name: steady-state
+            duration: 20m
+            targetUsers: 600
+          - name: ramp-down
+            duration: 5m
+            targetUsers: 0
+      scenarios:
+        - name: search-client
+          weight: 60
+          operationId: searchClient
+        - name: open-proposal
+          weight: 30
+          operationId: getProposal
+        - name: save-proposal
+          weight: 10
+          operationId: saveProposal
+
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: proposal-browser
+      # Wait for the protocol workload to reach steady state before measuring.
+      startWhen:
+        workload: api-background-load
+        stage: steady-state
+      browserUsers: 5
+      iterationsPerUser: 3
+      browserProfile:
+        device: mobile
+        network: slow-4g
+        cpuThrottle: 4
+
+  objectives:
+    - metric: http.response.time
+      scope: api-background-load
+      percentile: 95
+      threshold: 750ms
+    - metric: http.error.rate
+      scope: api-background-load
+      threshold: 1%
+    - metric: browser.journey.duration
+      scope: browser-experience
+      percentile: 95
+      threshold: 8s
+    - metric: web.lcp
+      scope: browser-experience
+      percentile: 95
+      threshold: 2500ms
+    - metric: web.cls
+      scope: browser-experience
+      percentile: 95
+      threshold: 0.1score
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+    serviceTagSelector: application:proposal
+    collect:
+      - service-response-time
+      - failure-rate
+      - cpu
+      - database-time
+
+  governance:
+    maxDuration: 45m
+    approvalPolicy: non-production-standard
+    retention: 90d

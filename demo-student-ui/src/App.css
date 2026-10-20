@@ -1,0 +1,93 @@
+.workspace { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 42px 0 64px; }
+.masthead { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 26px; border-bottom: 2px solid #31595a; }
+.eyebrow, .endpoint, .summary-label { margin: 0; color: #527175; font-family: 'Courier New', monospace; font-size: 0.75rem; font-weight: bold; letter-spacing: 0; text-transform: uppercase; }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 0; color: #1f3434; font-size: 3rem; font-weight: 500; line-height: 1; }
+h2 { margin: 8px 0 0; color: #213f41; font-size: 1.45rem; font-weight: 500; line-height: 1.1; }
+.service-status { margin: 0; color: #31595a; font-family: 'Courier New', monospace; font-size: 0.85rem; white-space: nowrap; }
+.service-status span { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: #e16c35; }
+.summary { display: flex; gap: 18px; align-items: baseline; margin: 24px 0; padding: 14px 16px; border-left: 4px solid #e16c35; background: #f6f2e9; }
+.summary-info { border-left-color: #31595a; background: #eef5f2; }
+.summary-success { border-left-color: #2f8f5b; background: #ecf8f0; }
+.summary-error { border-left-color: #b33d24; background: #fbeeea; }
+.summary p:last-child { margin-bottom: 0; }
+.work-area { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+.operation, .active-record { min-width: 0; padding: 24px; border: 1px solid #b6c6ba; border-radius: 6px; background: #f7f8f3; box-shadow: 3px 4px 0 rgba(49, 89, 90, 0.12); }
+.list-operation { grid-column: span 8; }
+.create-operation { grid-column: span 4; background: #e3eee6; }
+.active-record { grid-column: span 4; background: #31595a; color: #f4f2e7; }
+.active-record h2 { color: #fffdf5; }
+.active-record .endpoint { color: #b9d4ca; }
+.update-operation { grid-column: span 8; }
+.details-card { grid-column: span 12; }
+.operation-heading { margin-bottom: 22px; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+label { display: grid; gap: 7px; color: #35575a; font-family: 'Courier New', monospace; font-size: 0.78rem; font-weight: bold; }
+input { width: 100%; min-height: 42px; border: 1px solid #9bb3a6; border-radius: 3px; padding: 9px 10px; color: #203738; background: #fffef9; font-family: Georgia, 'Times New Roman', serif; font-size: 1rem; }
+input:focus { outline: 3px solid rgba(225, 108, 53, 0.28); border-color: #e16c35; }
+button { min-height: 42px; margin-top: 22px; border: 0; border-radius: 3px; padding: 10px 18px; color: #fffdf5; background: #31595a; cursor: pointer; font-family: 'Courier New', monospace; font-size: 0.82rem; font-weight: bold; letter-spacing: 0; }
+button:hover:not(:disabled) { background: #e16c35; }
+button:focus-visible { outline: 3px solid #e16c35; outline-offset: 3px; }
+button:disabled { cursor: not-allowed; opacity: 0.52; }
+
+.student-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.student-list-item {
+  width: 100%;
+  margin: 0;
+  text-align: left;
+  display: grid;
+  gap: 5px;
+  background: #fefefb;
+  color: #203738;
+  border: 1px solid #9bb3a6;
+}
+
+.student-list-item:hover:not(:disabled) {
+  background: #fdf3e9;
+  border-color: #e16c35;
+  color: #203738;
+}
+
+.student-name {
+  font-size: 1.05rem;
+  font-weight: bold;
+}
+
+.student-subtext {
+  color: #4b6663;
+  font-family: 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+
+.details-actions {
+  margin-top: 24px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.details-actions button {
+  margin: 0;
+}
+dl { display: grid; gap: 16px; margin: 0; }
+dl div { display: grid; gap: 3px; }
+dt { color: #b9d4ca; font-family: 'Courier New', monospace; font-size: 0.72rem; font-weight: bold; text-transform: uppercase; }
+dd { margin: 0; overflow-wrap: anywhere; font-size: 1.06rem; }
+.empty-state { margin-bottom: 0; color: #d9e4dc; line-height: 1.45; }
+@media (max-width: 760px) {
+  .workspace { width: min(100% - 28px, 560px); padding-top: 28px; }
+  .masthead { align-items: start; flex-direction: column; gap: 14px; }
+  h1 { font-size: 2.35rem; }
+  .summary { display: block; }
+  .summary-label { margin-bottom: 8px; }
+  .work-area { display: flex; flex-direction: column; }
+  .field-grid { grid-template-columns: 1fr; }
+  .details-actions { flex-direction: column; }
+}

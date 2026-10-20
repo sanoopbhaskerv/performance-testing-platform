@@ -1,0 +1,27 @@
+# Test fixture only. These API keys are not real credentials and are never used
+# outside the characterization test suite.
+team: beta
+apiKey: "test-key-beta"
+
+targets:
+  - name: beta-service
+    baseUrl: "http://localhost:18098"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
+tests:
+  load:
+    enabled: true
+    rampUpUsers: 5
+    steadyStateUsers: 10
+    rampUpDurationSeconds: 5
+    steadyStateDurationSeconds: 10
+    scenarios:
+      - name: "beta-flow"
+        endpoints:
+          - method: GET
+            path: "/api/beta"
+
+sla:
+  maxP95LatencyMs: 500
+  maxErrorRatePercent: 1.0

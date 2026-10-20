@@ -1,0 +1,251 @@
+/*
+ * Design tokens for the studio.
+ *
+ * The studio must be re-brandable without touching a component: a deploying team supplies their own
+ * colours and the whole UI follows. That only works if there is exactly one place to supply them,
+ * which is what this file is.
+ *
+ * ## Two layers, and the distinction is the point
+ *
+ *   PRIMITIVES  raw values — a brand ramp, a neutral ramp, status hues. A re-brand replaces these
+ *               and nothing else.
+ *   SEMANTICS   what a thing is for — surface, border, action, verdict. Components reference only
+ *               these.
+ *
+ * A component that reaches past the semantic layer to a primitive is the bug this structure exists
+ * to prevent: it is how a re-brand ends up ninety per cent complete, with a stray indigo button
+ * nobody notices until a customer does. `tokens.test.ts` fails the build if a literal colour appears
+ * in any stylesheet but this one.
+ *
+ * ## Theme
+ *
+ * Dark is the default, because the surrounding V1 shell (`index.css`) is dark-only and a studio that
+ * followed the OS into light mode would render light panels on a near-black page. Light is defined
+ * and correct, but activates only on an explicit `data-theme="light"` — an honest opt-in rather than
+ * a half-working automatic one. When V1 is retired, `prefers-color-scheme` can drive it.
+ *
+ * V1's own variables in `index.css` are deliberately untouched: V1 stays operational until its
+ * replacement is verified, and they retire with it.
+ *
+ * ## Overriding
+ *
+ * Supply a stylesheet after this one that re-declares any primitive:
+ *
+ *   :root { --pf-brand-600: #007a33; --pf-brand-rgb: 0 122 51; }
+ *
+ * No component rebuild, no fork. See PLAN.md §4.4.
+ */
+
+:root {
+  /* ── Primitives: brand ─────────────────────────────────────────────────
+   * The three a re-brand almost always needs. `--pf-brand-rgb` is the same colour as a channel
+   * triple, because a selected-row tint is that colour at low alpha and CSS cannot take a hex apart.
+   *
+   * Channels are SPACE-separated, not comma-separated, and that is load-bearing. These are consumed
+   * as `rgb(var(--pf-brand-rgb) / 16%)`; commas would expand to `rgb(79, 70, 229 / 16%)`, which mixes
+   * legacy and modern syntax, fails to parse, and drops the whole declaration. The failure is silent
+   * — the background simply vanishes and `border-color` falls back to `currentColor` — so a
+   * re-brand supplying commas would break every status surface at once. `tokens.test.ts` pins it.
+   */
+  --pf-brand-500: #6366f1;
+  --pf-brand-600: #4f46e5;
+  --pf-brand-rgb: 79 70 229;
+
+  /* ── Primitives: neutrals ─────────────────────────────────────────────*/
+  --pf-neutral-0: #ffffff;
+  --pf-neutral-50: #f8fafc;
+  --pf-neutral-100: #e2e8f0;
+  --pf-neutral-200: #cbd5e1;
+  --pf-neutral-400: #94a3b8;
+  --pf-neutral-600: #334155;
+  --pf-neutral-800: #111c33;
+  --pf-neutral-900: #0f172a;
+  --pf-neutral-950: #020617;
+
+  /* ── Primitives: status hues ──────────────────────────────────────────
+   * As channel triples, because every status surface is the same hue at three alphas: a wash for
+   * the fill, a stronger one for the border, and a solid tint for the text.
+   *
+   * These carry MEANING, not brand. A palette that rendered a breach in a reassuring green would
+   * make the studio lie in its own house style, and this is a tool whose entire output is a verdict.
+   * They are overridable — a brand may have its own red — but see the contrast floor below, and note
+   * that no verdict is ever conveyed by colour alone: each carries an icon and a word.
+   */
+  --pf-hue-pass: 34 197 94;
+  --pf-hue-fail: 239 68 68;
+  --pf-hue-busy: 59 130 246;
+  --pf-hue-warn: 245 158 11;
+  --pf-hue-unknown: 148 163 184;
+
+  /* Foreground tints. Each is chosen to clear 4.5:1 against `--pf-surface` in its own theme; that
+   * ratio is the floor an override must also meet, and it is why these are separate values rather
+   * than the hue lightened arithmetically at render time. */
+  --pf-tint-pass: #4ade80;
+  --pf-tint-fail: #f87171;
+  --pf-tint-busy: #60a5fa;
+  --pf-tint-warn: #fbbf24;
+  --pf-tint-unknown: #cbd5e1;
+  --pf-tint-fail-soft: #fca5a5;
+  --pf-tint-busy-soft: #93c5fd;
+  --pf-tint-warn-soft: #fde68a;
+  --pf-tint-warn-strong: #fcd34d;
+  --pf-tint-warn-rule: #f59e0b;
+
+  /* ── Semantics: surfaces ──────────────────────────────────────────────
+   * Overlays rather than opaque colours, so a card sits on whatever the page behind it is. That is
+   * what lets one set of rules serve both themes.
+   */
+  --pf-surface: transparent;
+  --pf-surface-raised: rgb(255 255 255 / 4%);
+  --pf-surface-sunken: rgb(0 0 0 / 35%);
+  --pf-surface-sunken-soft: rgb(0 0 0 / 30%);
+  --pf-surface-hover: rgb(255 255 255 / 4%);
+  --pf-surface-selected: rgb(var(--pf-brand-rgb) / 16%);
+  --pf-surface-emphasis: rgb(255 255 255 / 3%);
+  --pf-surface-panel: var(--pf-neutral-900);
+  --pf-surface-input: var(--pf-neutral-950);
+  --pf-surface-finding: var(--pf-neutral-800);
+
+  /* ── Semantics: borders ───────────────────────────────────────────────*/
+  --pf-border-subtle: rgb(255 255 255 / 7%);
+  --pf-border: rgb(255 255 255 / 10%);
+  --pf-border-strong: rgb(255 255 255 / 18%);
+  --pf-border-field: rgb(255 255 255 / 15%);
+  --pf-border-fieldset: rgb(255 255 255 / 12%);
+  --pf-border-panel: var(--pf-neutral-600);
+
+  /* ── Semantics: text ──────────────────────────────────────────────────*/
+  --pf-text: inherit;
+  --pf-text-strong: var(--pf-neutral-50);
+  --pf-text-panel: var(--pf-neutral-100);
+  --pf-text-code: var(--pf-neutral-200);
+  --pf-text-on-action: var(--pf-neutral-0);
+  /* Muting is an opacity rather than a colour so it composes over any surface without a second
+   * value per theme. */
+  --pf-text-muted-opacity: 0.62;
+  --pf-text-subtle-opacity: 0.6;
+
+  /* ── Semantics: action ────────────────────────────────────────────────*/
+  --pf-action: var(--pf-brand-600);
+  --pf-action-border: var(--pf-border-strong);
+  --pf-action-text: var(--pf-text-on-action);
+
+  /* ── Semantics: verdicts and status ───────────────────────────────────*/
+  --pf-verdict-pass-fg: var(--pf-tint-pass);
+  --pf-verdict-pass-bg: rgb(var(--pf-hue-pass) / 15%);
+  --pf-verdict-pass-border: rgb(var(--pf-hue-pass) / 35%);
+
+  --pf-verdict-fail-fg: var(--pf-tint-fail);
+  --pf-verdict-fail-bg: rgb(var(--pf-hue-fail) / 15%);
+  --pf-verdict-fail-border: rgb(var(--pf-hue-fail) / 35%);
+
+  --pf-status-busy-fg: var(--pf-tint-busy);
+  --pf-status-busy-bg: rgb(var(--pf-hue-busy) / 15%);
+  --pf-status-busy-border: rgb(var(--pf-hue-busy) / 35%);
+
+  --pf-status-wait-fg: var(--pf-tint-warn);
+  --pf-status-wait-bg: rgb(var(--pf-hue-warn) / 15%);
+  --pf-status-wait-border: rgb(var(--pf-hue-warn) / 35%);
+
+  --pf-verdict-unknown-fg: var(--pf-tint-unknown);
+  --pf-verdict-unknown-bg: rgb(var(--pf-hue-unknown) / 15%);
+  --pf-verdict-unknown-border: rgb(var(--pf-hue-unknown) / 30%);
+
+  /* Banners are a wash rather than a pill, so they carry their own softer alphas. */
+  --pf-banner-bad-fg: var(--pf-tint-fail-soft);
+  --pf-banner-bad-bg: rgb(var(--pf-hue-fail) / 12%);
+  --pf-banner-bad-border: rgb(var(--pf-hue-fail) / 35%);
+  --pf-banner-info-fg: var(--pf-tint-busy-soft);
+  --pf-banner-info-bg: rgb(var(--pf-hue-busy) / 12%);
+  --pf-banner-info-border: rgb(var(--pf-hue-busy) / 35%);
+
+  /* The provider line and the synthetic banner. Their own tokens because they must stay legible
+   * after a re-brand: they are the disclosure that a run's numbers are invented, and PLAN.md's
+   * standing rule is that a report travels further than its caveats. */
+  --pf-disclosure-fg: var(--pf-tint-unknown);
+  --pf-disclosure-bg: rgb(var(--pf-hue-unknown) / 8%);
+  --pf-disclosure-border: rgb(var(--pf-hue-unknown) / 25%);
+  --pf-synthetic-fg: var(--pf-tint-warn-soft);
+  --pf-synthetic-fg-strong: var(--pf-tint-warn-strong);
+  --pf-synthetic-bg: rgb(var(--pf-hue-warn) / 14%);
+  --pf-synthetic-border: rgb(var(--pf-hue-warn) / 50%);
+  --pf-synthetic-rule: var(--pf-tint-warn-rule);
+  --pf-disclosure-alert-fg: var(--pf-tint-warn-strong);
+  --pf-disclosure-alert-bg: rgb(var(--pf-hue-warn) / 12%);
+  --pf-disclosure-alert-border: rgb(var(--pf-hue-warn) / 45%);
+
+  /* ── Semantics: data series ───────────────────────────────────────────
+   * One series — expected users over time — so one hue and no legend. Named as a series rather than
+   * as the brand, because a chart colour and a button colour answer to different constraints and
+   * will diverge the moment a second series exists.
+   */
+  --pf-series-1: var(--pf-brand-500);
+
+  /* ── Space ────────────────────────────────────────────────────────────*/
+  --pf-space-1: 0.2rem;
+  --pf-space-2: 0.3rem;
+  --pf-space-3: 0.45rem;
+  --pf-space-4: 0.6rem;
+  --pf-space-5: 0.75rem;
+  --pf-space-6: 1rem;
+  --pf-space-7: 1.25rem;
+  --pf-space-8: 2rem;
+
+  /* ── Radius ───────────────────────────────────────────────────────────*/
+  --pf-radius-sm: 6px;
+  --pf-radius-md: 8px;
+  --pf-radius-lg: 10px;
+  --pf-radius-pill: 999px;
+
+  /* ── Type ─────────────────────────────────────────────────────────────*/
+  --pf-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --pf-text-2xs: 0.7rem;
+  --pf-text-xs: 0.75rem;
+  --pf-text-sm: 0.8rem;
+  --pf-text-md: 0.85rem;
+  --pf-text-lg: 1.05rem;
+  /* One step above --pf-text-lg, for a headline number that has to be readable across a room —
+   * the live view is watched, not studied. */
+  --pf-text-xl: 1.35rem;
+  --pf-weight-strong: 600;
+  --pf-tracking-caps: 0.06em;
+}
+
+/*
+ * Light theme. Opt-in only — see the header. Surfaces invert from white overlays to black ones, the
+ * panel colours become their light counterparts, and every status tint darkens to keep its contrast
+ * against a light surface. The hues themselves do not change: a breach is the same red, read against
+ * a different background.
+ */
+:root[data-theme='light'] {
+  --pf-surface-raised: rgb(0 0 0 / 3%);
+  --pf-surface-sunken: rgb(0 0 0 / 5%);
+  --pf-surface-sunken-soft: rgb(0 0 0 / 4%);
+  --pf-surface-hover: rgb(0 0 0 / 4%);
+  --pf-surface-emphasis: rgb(0 0 0 / 2%);
+  --pf-surface-panel: var(--pf-neutral-0);
+  --pf-surface-input: var(--pf-neutral-50);
+  --pf-surface-finding: rgb(0 0 0 / 3%);
+
+  --pf-border-subtle: rgb(0 0 0 / 8%);
+  --pf-border: rgb(0 0 0 / 12%);
+  --pf-border-strong: rgb(0 0 0 / 20%);
+  --pf-border-field: rgb(0 0 0 / 18%);
+  --pf-border-fieldset: rgb(0 0 0 / 14%);
+  --pf-border-panel: var(--pf-neutral-200);
+
+  --pf-text-strong: var(--pf-neutral-900);
+  --pf-text-panel: var(--pf-neutral-900);
+  --pf-text-code: var(--pf-neutral-600);
+
+  /* Darkened so each still clears 4.5:1, this time against a light surface. */
+  --pf-tint-pass: #15803d;
+  --pf-tint-fail: #b91c1c;
+  --pf-tint-busy: #1d4ed8;
+  --pf-tint-warn: #b45309;
+  --pf-tint-unknown: #475569;
+  --pf-tint-fail-soft: #991b1b;
+  --pf-tint-busy-soft: #1e40af;
+  --pf-tint-warn-soft: #78350f;
+  --pf-tint-warn-strong: #92400e;
+}

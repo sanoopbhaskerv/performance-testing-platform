@@ -28,6 +28,8 @@ services:
 
   postgres:
     image: postgres:15-alpine
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: perfplatform
       POSTGRES_USER: perf
@@ -81,6 +83,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8081:8081"
+    environment:
+      DEMO_DB_URL: jdbc:postgresql://postgres:5432/perfplatform
+      DEMO_DB_USER: perf
+      DEMO_DB_PASSWORD: perf
     networks:
       - perf-platform
     volumes:

@@ -1,0 +1,28 @@
+{
+  "name": "performance-testing-platform",
+  "version": "1.0.0",
+  "description": "A **self-service, config-driven performance testing platform** that eliminates the bottleneck of a central performance engineering team. Any team can run load, endurance, and spike tests by filling in a single YAML config file — no JMeter expertise required.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanoopbhaskerv/performance-testing-platform.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/sanoopbhaskerv/performance-testing-platform/issues"
+  },
+  "homepage": "https://github.com/sanoopbhaskerv/performance-testing-platform#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

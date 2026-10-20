@@ -18,6 +18,7 @@ spec:
       annotations:
         # Trigger rolling update when team configs or secrets change
         checksum/config: {{ toJson .Values.teamConfigs | sha256sum }}
+        checksum/platform-config: {{ printf "%s%s" (toJson .Values.branding) (toJson .Values.applicationConfig) | sha256sum }}
         checksum/secret: {{ toJson .Values.database | sha256sum }}
         # Prometheus scrape annotations — platform-core exposes /actuator/prometheus
         prometheus.io/scrape: "true"
@@ -34,18 +35,107 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "optional:file:/config/platform/"
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.deploymentProfile | quote }}
+            - name: SERVICE_TOKEN_FILE
+              value: {{ if .Values.auth.serviceTokenSecret }}"/var/run/perfplatform/auth/identities.json"{{ else }}""{{ end }}
+            - name: MAX_CONCURRENT_RUNS
+              value: {{ .Values.capacity.maxConcurrentRuns | quote }}
+            - name: MAX_PROTOCOL_USERS_PER_RUN
+              value: {{ .Values.capacity.maxProtocolUsersPerRun | quote }}
+            - name: MAX_TEST_DURATION
+              value: {{ .Values.capacity.maxDuration | quote }}
             - name: SPRING_DATASOURCE_URL
               value: {{ include "performance-platform.databaseUrl" . | quote }}
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: password
+            # ── V2 execution and storage ──────────────────────────────────
+            # Production runs workloads as isolated, ephemeral Kubernetes Jobs.
+            # The control plane never generates material load itself.
+            - name: PLATFORM_ORCHESTRATION_EXECUTIONPROVIDER
+              value: "kubernetes"
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_NAMESPACE
+              value: {{ .Values.runnerCell.namespace | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_SERVICEACCOUNT
+              value: {{ .Values.runnerCell.serviceAccount | quote }}
+            {{- range $engine, $image := .Values.runnerCell.images }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_IMAGES_{{ $engine | upper }}
+              value: {{ $image | quote }}
+            {{- end }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_CPUREQUEST
+              value: {{ .Values.runnerCell.resources.cpuRequest | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_CPULIMIT
+              value: {{ .Values.runnerCell.resources.cpuLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_MEMORYREQUEST
+              value: {{ .Values.runnerCell.resources.memoryRequest | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_MEMORYLIMIT
+              value: {{ .Values.runnerCell.resources.memoryLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_WORKSPACESIZELIMIT
+              value: {{ .Values.runnerCell.workspaceSizeLimit | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_FINISHEDJOBTTL
+              value: {{ .Values.runnerCell.finishedJobTtl | quote }}
+            - name: PLATFORM_ORCHESTRATION_RUNNERCELL_DEADLINEGRACE
+              value: {{ .Values.runnerCell.deadlineGrace | quote }}
+            - name: PLATFORM_ORCHESTRATION_LIFECYCLECLEANUP_ENABLED
+              value: {{ .Values.lifecycleCleanup.enabled | quote }}
+            - name: PLATFORM_ORCHESTRATION_LIFECYCLECLEANUP_INTERVAL
+              value: {{ .Values.lifecycleCleanup.interval | quote }}
+
+            # Artifacts must be durable and reachable from every replica and
+            # every runner. Startup refuses a pod-local filesystem in production.
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_STORE
+              value: {{ .Values.artifacts.store | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_BUCKET
+              value: {{ .Values.artifacts.bucket | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_REGION
+              value: {{ .Values.artifacts.region | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_ENDPOINT
+              value: {{ .Values.artifacts.endpoint | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_PATHSTYLEACCESS
+              value: {{ .Values.artifacts.pathStyleAccess | quote }}
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_RUNNERENDPOINT
+              value: {{ .Values.artifacts.runnerEndpoint | quote }}
+            # A Secret name, never its contents. Empty where the runner's own
+            # projected service-account token is enough, which is the EKS case.
+            - name: PLATFORM_ORCHESTRATION_ARTIFACTS_RUNNERCREDENTIALSSECRET
+              value: {{ .Values.artifacts.runnerCredentialsSecret | quote }}
+            # No object-storage credentials here, by design. The SDK's default
+            # provider chain reads them from an IRSA-projected service account
+            # token or an instance profile; a key in a values file is a key in
+            # source control eventually.
+
+            # Session acquisition provider seam. The default runtime-credential
+            # provider is local-only; production profiles refuse it so a real
+            # login/refresh adapter must be selected intentionally.
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_PROVIDER
+              value: {{ .Values.sessionAcquisition.provider | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_RUNTIMECREDENTIALTTL
+              value: {{ .Values.sessionAcquisition.runtimeCredentialTtl | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_REQUESTTIMEOUT
+              value: {{ .Values.sessionAcquisition.requestTimeout | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_ENDPOINT
+              value: {{ .Values.sessionAcquisition.endpoint | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_LOGINPATH
+              value: {{ .Values.sessionAcquisition.loginPath | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_REFRESHPATH
+              value: {{ .Values.sessionAcquisition.refreshPath | quote }}
+            - name: PLATFORM_ORCHESTRATION_SESSIONACQUISITION_CLIENTCREDENTIALSECRETREF
+              value: {{ .Values.sessionAcquisition.clientCredentialSecretRef | quote }}
+            - name: PLATFORM_ORCHESTRATION_SECRETRESOLVER_MOUNTROOT
+              value: {{ .Values.secretResolver.mountRoot | quote }}
+            - name: PLATFORM_ORCHESTRATION_RECORDER_NETWORKENFORCEMENT_ENABLED
+              value: {{ .Values.recorder.networkEnforcement.enabled | quote }}
+
             - name: JMETER_HOME
               value: {{ .Values.jmeter.home | quote }}
             - name: MAT_HOME
@@ -61,10 +151,37 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          {{- if .Values.artifacts.controlPlaneCredentialsSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.artifacts.controlPlaneCredentialsSecret | quote }}
+          {{- end }}
           volumeMounts:
+            - name: platform-config
+              mountPath: /config/platform
+              readOnly: true
+            - name: platform-config
+              mountPath: /app/ui/platform-config.json
+              subPath: platform-config.json
+              readOnly: true
+            {{- if .Values.branding.logoConfigMap }}
+            - name: branding-logo
+              mountPath: /app/ui/branding
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auth.serviceTokenSecret }}
+            - name: service-identities
+              mountPath: /var/run/perfplatform/auth
+              readOnly: true
+            {{- end }}
             - name: team-configs
               mountPath: /config/teams
               readOnly: true
+            {{- range $index, $secret := .Values.secretResolver.mountedSecrets }}
+            - name: secret-resolver-{{ $index }}
+              mountPath: {{ printf "%s/%s" $.Values.secretResolver.mountRoot $secret.name | quote }}
+              readOnly: true
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -87,6 +204,24 @@ spec:
               cpu: {{ .Values.resources.platformCore.limits.cpu }}
               memory: {{ .Values.resources.platformCore.limits.memory }}
       volumes:
+        - name: platform-config
+          configMap:
+            name: {{ include "performance-platform.fullname" . }}-platform-config
+        {{- if .Values.branding.logoConfigMap }}
+        - name: branding-logo
+          configMap:
+            name: {{ .Values.branding.logoConfigMap | quote }}
+        {{- end }}
+        {{- if .Values.auth.serviceTokenSecret }}
+        - name: service-identities
+          secret:
+            secretName: {{ .Values.auth.serviceTokenSecret | quote }}
+        {{- end }}
         - name: team-configs
           configMap:
             name: {{ include "performance-platform.fullname" . }}-team-configs
+        {{- range $index, $secret := .Values.secretResolver.mountedSecrets }}
+        - name: secret-resolver-{{ $index }}
+          secret:
+            secretName: {{ $secret.name | quote }}
+        {{- end }}

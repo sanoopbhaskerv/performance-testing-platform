@@ -1,0 +1,17 @@
+# Build from repository root after mvn package. Serves the React console and API on one origin.
+FROM node:22.22.2-alpine AS console
+WORKDIR /ui
+COPY platform-ui/package*.json ./
+RUN npm ci
+COPY platform-ui/ ./
+RUN npm run build
+
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+COPY platform-core/target/platform-core-1.0.0.jar app.jar
+COPY --from=console /ui/dist /app/ui
+ENV SPRING_WEB_RESOURCES_STATIC_LOCATIONS=file:/app/ui/,classpath:/static/
+RUN mkdir -p /data /config/teams && chown -R 10001:10001 /data /config
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]

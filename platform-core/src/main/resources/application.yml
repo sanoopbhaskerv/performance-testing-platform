@@ -10,20 +10,37 @@ spring:
     url: ${DB_URL:jdbc:h2:mem:perfplatform;DB_CLOSE_DELAY=-1}
     username: ${DB_USER:sa}
     password: ${DB_PASS:}
-    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    driver-class-name: ${DB_DRIVER:}
 
   h2:
     console:
       enabled: true
       path: /h2-console
 
+  # Flyway owns the schema. Previously the shape of test_runs was a side effect of editing a JPA
+  # entity — no review, no history, no deliberate roll-forward. ddl-auto is now 'none' so a schema
+  # change is a reviewed migration (CLAUDE.md §12).
+  #
+  # baseline-on-migrate lets an existing deployment, whose test_runs table was created by the old
+  # ddl-auto:update, adopt Flyway without Flyway trying to recreate it.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
+    baseline-version: 0
+
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     show-sql: false
+    # No explicit dialect. Hibernate 6 detects it from the JDBC connection, and hardcoding a
+    # default of H2Dialect meant a PostgreSQL deployment that did not also set DB_DIALECT emitted
+    # H2 syntax against PostgreSQL — the failure surfaces only on the JSON columns, so it looked
+    # like a working deployment until the first specification was stored. Set DB_DIALECT only if a
+    # specific dialect is genuinely needed.
     properties:
       hibernate:
-        dialect: ${DB_DIALECT:org.hibernate.dialect.H2Dialect}
+        dialect: ${DB_DIALECT:}
 
   # Mail (email notifications)
   mail:
@@ -40,6 +57,8 @@ spring:
 
 # Platform configuration
 platform:
+  security:
+    service-token-file: ${SERVICE_TOKEN_FILE:}
   # Where team config YAML files live (can be a mounted ConfigMap in K8s)
   config-dir: ${TEAM_CONFIG_DIR:config/teams}
 
@@ -51,6 +70,113 @@ platform:
 
   # Eclipse MAT binary path (for heap dump analysis)
   mat-home: ${MAT_HOME:/opt/mat}
+
+  # Durable run orchestration (V2). Every value here is enforced server-side; nothing in a
+  # submitted specification can influence it. See docs/operations/run-lifecycle.md.
+  orchestration:
+    # 'fake' progresses runs through their lifecycle without generating load. The application
+    # refuses to start with it under a production profile — a platform reporting successful runs
+    # that never executed is worse than one that fails loudly. Kubernetes arrives in Increment 1E.
+    execution-provider: ${EXECUTION_PROVIDER:fake}
+
+    reconciliation-enabled: ${RECONCILIATION_ENABLED:true}
+    # Runs last minutes to hours, so polling faster buys nothing and costs a round trip per
+    # replica per tick.
+    reconciliation-interval: 10s
+    lifecycle-cleanup:
+      enabled: ${LIFECYCLE_CLEANUP_ENABLED:true}
+      # Sweeps runner-owned ephemeral Secrets that outlived terminal observation because the
+      # control plane restarted or lost contact. Normal completion/cancel paths still delete them
+      # immediately.
+      interval: ${LIFECYCLE_CLEANUP_INTERVAL:1m}
+
+    session-acquisition:
+      # Development foundation. Production profiles refuse this mode; configure an approved
+      # provider adapter once real login/refresh acquisition is installed.
+      provider: ${SESSION_ACQUISITION_PROVIDER:runtime-credential}
+      runtime-credential-ttl: ${SESSION_ACQUISITION_RUNTIME_CREDENTIAL_TTL:12h}
+      request-timeout: ${SESSION_ACQUISITION_REQUEST_TIMEOUT:10s}
+      # Provider seams for approved production acquisition. Coordinates and secret references only;
+      # never put session values, client secrets or refresh tokens in configuration.
+      endpoint: ${SESSION_ACQUISITION_ENDPOINT:}
+      login-path: ${SESSION_ACQUISITION_LOGIN_PATH:}
+      refresh-path: ${SESSION_ACQUISITION_REFRESH_PATH:}
+      client-credential-secret-ref: ${SESSION_ACQUISITION_CLIENT_CREDENTIAL_SECRET_REF:}
+
+    secret-resolver:
+      # Mounted Kubernetes Secret files. k8s://broker-client/token resolves to
+      # /var/run/perfplatform/secrets/broker-client/token.
+      mount-root: ${SECRET_RESOLVER_MOUNT_ROOT:/var/run/perfplatform/secrets}
+
+    recorder:
+      network-enforcement:
+        # Local-only bypass for development clusters without NetworkPolicy enforcement. Production
+        # profiles refuse false before any recorder endpoint can start.
+        enabled: ${RECORDER_NETWORK_ENFORCEMENT_ENABLED:true}
+
+      # No brokered input for this long and the browser closes itself. An unattended recording
+      # browser holds a live corporate session inside the runner network.
+      idle-timeout: 5m
+      # A hard cap regardless of activity. A recording is authoring work, not a long-lived session.
+      deadline: 30m
+      # Catches the user who closed the tab, whose session nobody polls any more.
+      sweep-interval: 30s
+
+      viewport-width: 1280
+      viewport-height: 800
+      # Frames held for a client that has fallen behind. Small on purpose: showing someone the past
+      # while they are trying to click the present is worse than dropping frames.
+      frame-buffer-size: 8
+      event-buffer-size: 500
+      max-concurrent-sessions: 5
+
+      local-browser:
+        # A Chrome child process as the recorder bridge. Development only — production profiles
+        # refuse it outright, because the control plane is not where user-driven browsers belong.
+        enabled: ${RECORDER_LOCAL_BROWSER_ENABLED:false}
+        # Empty searches the usual Chrome and Chromium locations.
+        binary: ${RECORDER_LOCAL_BROWSER_BINARY:}
+        headless: ${RECORDER_LOCAL_BROWSER_HEADLESS:true}
+        # Needed to record a demo service on this machine. Production profiles refuse it. It relaxes
+        # only the loopback rule; metadata, link-local, wildcard and multicast stay denied.
+        allow-loopback-target: ${RECORDER_ALLOW_LOOPBACK_TARGET:false}
+        frame-quality: 60
+        max-capture-bytes: 262144
+
+    playwright:
+      # The checkout that workspace:// source paths resolve against, and the boundary a browser
+      # journey cannot read outside of. Empty by default: until an operator names a directory,
+      # browser workloads have no local execution provider at all. Development only — production
+      # browser execution runs the pinned runner image against a git-pinned commit, because a file
+      # on a developer's disk can change between two runs of the same immutable definition version.
+      workspace-root: ${PLAYWRIGHT_WORKSPACE_ROOT:}
+      # Empty searches the usual Node locations.
+      node-command: ${PLAYWRIGHT_NODE_COMMAND:}
+      npx-command: ${PLAYWRIGHT_NPX_COMMAND:}
+
+    # Must comfortably exceed the reconciliation interval, or a reconciler loses runs it is
+    # actively working on to a peer mid-provision.
+    lease-duration: 2m
+    # Too short fails healthy runs during a slow GC pause; too long leaves a dead run holding a
+    # capacity slot.
+    heartbeat-tolerance: 5m
+    # Added to a plan's duration to form the runner's hard deadline: covers startup, ramp-down and
+    # artifact upload, none of which appear in the plan's stage arithmetic.
+    execution-grace: 10m
+    validation-grace: 1m
+    claim-batch-size: 20
+
+    # CLAUDE.md §13. Ten is the worst-case ceiling, not a target — normal operation is three or
+    # four. One per team by default is what stops a single team occupying every global slot.
+    capacity:
+      global-max-runs: ${MAX_CONCURRENT_RUNS:5}
+      default-team-max-runs: ${MAX_CONCURRENT_RUNS_PER_TEAM:1}
+      max-protocol-users-per-run: ${MAX_PROTOCOL_USERS_PER_RUN:1000}
+      max-duration: ${MAX_TEST_DURATION:1h}
+      # Raise a specific team to the policy-approved maximum of 2 by name, e.g.
+      # team-overrides:
+      #   advice-implementation: 2
+      team-overrides: {}
 
 # Actuator endpoints
 management:

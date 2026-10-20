@@ -1,0 +1,40 @@
+# Replace team/application with an authorized registered non-production target.
+# 100 RPS is the steady target; 20 is a ceiling, not a constant observed user count.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+metadata:
+  name: api-100-rps
+  team: my-team
+  application: my-application
+spec:
+  environment:
+    name: performance
+    runnerCell: standalone
+    targetClass: non-production
+  workloads:
+    - name: api-rate
+      type: protocol
+      engine: jmeter
+      model:
+        type: arrival-rate
+        maxConcurrency: 20
+        stages:
+          - {duration: 10s, targetRate: 100}
+          - {duration: 1m, targetRate: 100}
+          - {duration: 10s, targetRate: 0}
+      scenarios:
+        - name: open-page
+          weight: 100
+          steps:
+            - name: open-page
+              method: GET
+              path: /
+              expect:
+                - {subject: status, operator: equals, value: "200"}
+  objectives:
+    - {metric: http.response.time, scope: api-rate, percentile: 95, threshold: 200ms}
+    - {metric: http.error.rate, scope: api-rate, threshold: 0%}
+    # Expected whole-profile mean is 87.5/s, including both ramps.
+    - {metric: http.throughput, scope: api-rate, threshold: 85/s}
+  governance:
+    maxDuration: 2m

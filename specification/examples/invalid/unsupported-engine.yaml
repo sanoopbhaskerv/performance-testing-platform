@@ -1,0 +1,32 @@
+# INVALID FIXTURE — expected finding: spec.parse.enum.invalid
+#
+# k6 is technically capable but is AGPL-3.0 licensed and has not been approved for
+# enterprise use. The platform must not accept it by default.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: unsupported-engine
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: k6-land
+
+  workloads:
+    - name: api-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          - duration: 5m
+            targetUsers: 100
+
+  objectives:
+    - metric: http.response.time
+      percentile: 95
+      threshold: 750ms

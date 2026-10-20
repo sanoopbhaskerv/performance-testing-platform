@@ -1,0 +1,18 @@
+# INVALID FIXTURE — expected finding: spec.workload.missing
+#
+# A specification with no workloads generates no traffic and cannot be executed.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: no-workloads
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads: []

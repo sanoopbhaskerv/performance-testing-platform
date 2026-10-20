@@ -1,3 +1,4 @@
+{{- if .Values.legacyJobTemplate.enabled }}
 ---
 # JMeter Job template.
 # This manifest is used as a BASE SPEC by JmeterTestOrchestrator.java — it is
@@ -66,12 +67,12 @@ spec:
             - name: RESULTS_DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: username
             - name: RESULTS_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "performance-platform.fullname" . }}-db-credentials
+                  name: {{ include "performance-platform.databaseSecretName" . }}
                   key: password
           volumeMounts:
             - name: team-configs
@@ -93,3 +94,5 @@ spec:
             name: {{ include "performance-platform.fullname" . }}-team-configs
         - name: results
           emptyDir: {}
+
+{{- end }}

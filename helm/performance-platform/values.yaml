@@ -1,6 +1,17 @@
+# Standalone deployment. Supply existing Secrets before installing in production.
+deploymentProfile: production
+auth:
+  serviceTokenSecret: ""
+capacity:
+  maxConcurrentRuns: 5
+  maxProtocolUsersPerRun: 1000
+  maxDuration: 1h
+legacyJobTemplate:
+  enabled: false
+
 # ─────────────────────────────────────────────────────────
 #  Performance Testing Platform — Helm values
-#  Customize for your EKS cluster.
+#  Customize for your Kubernetes cluster.
 # ─────────────────────────────────────────────────────────
 
 image:
@@ -10,6 +21,24 @@ image:
 
 replicaCount: 1
 
+# Runtime branding. A generated public JSON file is mounted over the bundled defaults.
+branding:
+  name: Performance Studio
+  logoUrl: ""
+  logoAlt: ""
+  logoConfigMap: "" # Optional existing ConfigMap containing logo.svg or logo.png.
+  theme: dark # dark or light
+  colors:
+    primary: "#4f46e5"
+    accent: "#c084fc"
+
+serviceAccount:
+  annotations: {} # Control-plane workload identity; separate from runnerCell's identity.
+imagePullSecrets: [] # Existing Secrets in the control-plane namespace: [{name: registry-access}].
+# Extra non-secret Spring configuration, mounted as application.yaml. Environment settings below
+# take precedence. Credentials belong in existing Secrets, never in this map.
+applicationConfig: {}
+
 service:
   type: ClusterIP
   port: 8080
@@ -17,21 +46,172 @@ service:
 ingress:
   enabled: true
   className: "nginx"
+  annotations: {} # Set the annotations required by your company's ingress controller.
   host: "perf-platform.internal.your-company.com"
   tls: []
 
-# Team config files — each key becomes a *.yml file in /config/teams/
-# Teams add their config here via a PR, and the platform auto-loads it.
-teamConfigs:
-  example-team: |
-    team: example-team
-    apiKey: "change-me"
-    targets:
-      - name: example-service
-        baseUrl: "http://example-service:8080"
-        jvmEnabled: false
+# Optional legacy V1 files. Production V2 uses scoped identities and persisted target onboarding.
+teamConfigs: {}
+
+# ─────────────────────────────────────────────────────────
+#  Runner cell — where production load is actually generated.
+#
+#  CLAUDE.md §4 forbids the control plane from generating material load, so a
+#  production deployment runs workloads as isolated, ephemeral Jobs here.
+# ─────────────────────────────────────────────────────────
+runnerCell:
+  enabled: true
+  createNamespace: true # Set false when your operator pre-creates the dedicated runner namespace.
+
+  # A namespace of its own. A runner executes a plan compiled from a user's
+  # document and is the least trusted thing in the platform; it must not share a
+  # namespace with the control plane's Secrets and ServiceAccounts.
+  egress:
+    # Restrict imported code at the network layer. Requires a NetworkPolicy-capable CNI.
+    # Include approved targets plus object storage and, for git sources, git/npm egress proxies.
+    allowedCidrs: []
+  namespace: perf-runners
+
+  # The identity a runner Pod runs as. Scoped to uploading its own artifacts.
+  # Never the control plane's account, which can create Jobs.
+  serviceAccount: perf-runner
+
+  # For IRSA, so a runner uploads with short-lived credentials rather than a
+  # static key mounted into the Pod:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+  serviceAccountAnnotations: {}
+  imagePullSecrets: [] # Existing registry Secrets in the runner namespace.
+
+  # An allowlist of engine to pinned image, not a template. An engine with no
+  # entry here cannot be provisioned at all — a fallback image would mean a
+  # misconfiguration produces a run on the wrong engine whose results look valid.
+  #
+  # Tags must be pinned. Startup refuses `latest`, `main`, `master`, `edge` or an
+  # untagged image: a moving tag means two runs of the same immutable definition
+  # version can execute on different runner builds, so the plan digest still
+  # matches while the thing executing it has changed.
+  images:
+    jmeter: "perfplatform/jmeter-runner:5.6.3-3"
+    playwright: "perfplatform/playwright-runner:1.62.1-1"
+
+  # Sized so the generator is not the bottleneck. A throttled load generator
+  # reports latencies of itself rather than of the system under test — calibrate
+  # before trusting a number. See docs/operations/runner-calibration.md.
+  resources:
+    cpuRequest: "2"
+    cpuLimit: "4"
+    memoryRequest: "2Gi"
+    memoryLimit: "4Gi"
+
+  # Bound on the runner's temporary workspace, so a runaway results file fills an
+  # emptyDir rather than the node.
+  workspaceSizeLimit: "8Gi"
+
+  # Long enough that reconciliation can still see how a Job ended after a
+  # control-plane restart. Artifacts are already durable by then.
+  finishedJobTtl: 6h
+
+  # Added to the plan's own duration to form activeDeadlineSeconds, covering
+  # image pull, startup and artifact upload.
+  deadlineGrace: 5m
+
+# ─────────────────────────────────────────────────────────
+#  Recorder security.
+#
+#  The interactive recorder puts a user-driven browser inside the runner
+#  network. Browser-level route guards are not enough on their own; recorder
+#  sessions must also get per-session egress enforcement from Kubernetes
+#  NetworkPolicy or an equivalent provider.
+#
+#  Keep this true for any shared or production-like deployment. A local
+#  administrator may set it false only to test recorder flows on a development
+#  cluster without a NetworkPolicy controller; production profiles refuse that
+#  setting at startup.
+# ─────────────────────────────────────────────────────────
+recorder:
+  networkEnforcement:
+    enabled: true
+
+lifecycleCleanup:
+  enabled: true
+  # Sweeps runner-owned ephemeral Secrets that survived because the control
+  # plane missed terminal observation. Normal completion/cancel paths delete
+  # them immediately.
+  interval: 1m
+
+# ─────────────────────────────────────────────────────────
+#  Artifact storage.
+#
+#  Pod-local files are working files, never the system of record (CLAUDE.md §6).
+#  A production deployment must use object storage: a file written by one replica
+#  is invisible to the others, and a runner cannot reach it at all. Startup
+#  refuses `filesystem` under a production profile.
+# ─────────────────────────────────────────────────────────
+artifacts:
+  store: s3
+  bucket: "" # Required. Choosing one is an operator decision, not a default.
+  region: ""
+
+  # Set only for an S3-compatible appliance or MinIO. Empty means real AWS S3.
+  endpoint: ""
+  pathStyleAccess: false
+
+  # The endpoint *runners* use, when it differs from the control plane's. Empty
+  # means they are the same, which is the normal case and true for real S3. They
+  # differ when storage is reached by another route from inside the cluster —
+  # in-cluster service DNS versus an external address, or a VPC versus a public
+  # endpoint. Getting it wrong is not subtle: the runner cannot fetch its plan.
+  runnerEndpoint: ""
+
+  # Name of a Secret in the runner namespace holding storage credentials.
+  #
+  # Leave empty on EKS with real S3: the runner's IRSA-projected service account
+  # token is enough and there is no credential to leak. Set it for a store that
+  # only understands access keys (MinIO, most on-premises appliances).
+  #
+  # A NAME, never a value. kubelet injects the contents into the runner Pod, so
+  # nothing sensitive passes through the control plane, the Job manifest, or any
+  # log — the same reason a specification carries a secretRef and never a secret.
+  # Create it out of band:
+  #   kubectl -n perf-runners create secret generic runner-storage-credentials \
+  #     --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+  controlPlaneCredentialsSecret: ""
+  runnerCredentialsSecret: ""
+
+# Session acquisition provider seam. Values are coordinates and secret
+# references only, never session values or client secrets.
+sessionAcquisition:
+  # Local foundation mode. Production profiles refuse this; choose an approved
+  # real provider adapter such as oauth2-refresh or external-session-broker once
+  # it is installed.
+  provider: disabled
+  runtimeCredentialTtl: 12h
+  requestTimeout: 10s
+  endpoint: ""
+  # For external-session-broker these default to the approved broker contract:
+  # /v1/sessions:acquire and /v1/sessions:refresh. For oauth2-refresh, set both
+  # explicitly when that adapter is installed.
+  loginPath: ""
+  refreshPath: ""
+  clientCredentialSecretRef: ""
+
+secretResolver:
+  # Existing Kubernetes Secrets mounted read-only into the control plane. The
+  # chart does not create these Secrets and never stores their values.
+  mountRoot: /var/run/perfplatform/secrets
+  mountedSecrets: []
+  # Example:
+  # mountedSecrets:
+  #   - name: session-broker-client
+  # Then reference key `token` as k8s://session-broker-client/token.
+
+# The control plane's own credentials are never configured here either. The SDK's
+# default provider chain reads them from the environment, an instance profile, or
+# an IRSA-projected token — a key in a values file is a key in source control
+# eventually.
 
 database:
+  existingSecret: "" # Keys: username, password. Required for production.
   username: "perf"
   password: "perf" # Use a K8s Secret in production
 
@@ -43,6 +223,7 @@ mat:
 
 # Karpenter node selector for JMeter job pods (CPU-heavy, spot-safe)
 karpenter:
+  enabled: false # Optional; the same chart works on any Kubernetes provider.
   nodePool: perf-testing
   instanceCategory: c # Compute optimised (c5, c6i etc.)
   capacityType: spot # Use spot instances to save cost

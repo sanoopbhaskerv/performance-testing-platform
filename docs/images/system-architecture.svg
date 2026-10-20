@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="880" style="max-width:100%;height:auto" viewBox="0 0 1400 880" role="img" aria-labelledby="title description">
+<title id="title">Standalone system architecture</title><desc id="description">Consumers reach one modular control plane. PostgreSQL stores durable state; S3 stores evidence. Isolated Kubernetes Jobs generate the material load.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/></marker></defs>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#0f172a}.title{font-size:28px;font-weight:bold}.label{font-size:17px}.small{font-size:15px;fill:#475569}.heading{font-size:19px;font-weight:bold}.line{stroke:#475569;stroke-width:2;fill:none}</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="32" y="45" class="title" text-anchor="start">Standalone system architecture</text>
+<rect x="250" y="75" width="350" height="78" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="425.0" y="105" class="heading" text-anchor="middle">Browser consumer</text>
+<text x="425.0" y="131" class="label" text-anchor="middle">Self-service console</text>
+<rect x="800" y="75" width="350" height="78" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="975.0" y="105" class="heading" text-anchor="middle">CI or AI editor</text>
+<text x="975.0" y="131" class="label" text-anchor="middle">Python CLI / REST / YAML</text>
+<rect x="400" y="195" width="600" height="65" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="700.0" y="225" class="heading" text-anchor="middle">Company ingress and TLS</text>
+<polyline points="425,153 425,175 550,175 550,195" class="line" marker-end="url(#arrow)"/>
+<polyline points="975,153 975,175 850,175 850,195" class="line" marker-end="url(#arrow)"/>
+<rect x="330" y="295" width="740" height="190" rx="16" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="350" y="324" class="heading" text-anchor="start">Control-plane namespace</text>
+<rect x="370" y="340" width="660" height="100" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="700.0" y="370" class="heading" text-anchor="middle">One React + Spring Boot application</text>
+<text x="700.0" y="396" class="label" text-anchor="middle">Authorization, validation, queue, reconciliation, analysis</text>
+<text x="700.0" y="420" class="label" text-anchor="middle">Helm / ConfigMaps / existing operator Secrets</text>
+<polyline points="700,260 700,340" class="line" marker-end="url(#arrow)"/>
+<rect x="30" y="565" width="310" height="110" rx="12" fill="#f0fdf4" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="185.0" y="595" class="heading" text-anchor="middle">Company PostgreSQL</text>
+<text x="185.0" y="621" class="label" text-anchor="middle">Definitions, versions, runs, events</text>
+<text x="185.0" y="645" class="label" text-anchor="middle">Leases, objectives and summaries</text>
+<rect x="1060" y="565" width="310" height="110" rx="12" fill="#f0fdf4" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="1215.0" y="595" class="heading" text-anchor="middle">Private S3-compatible store</text>
+<text x="1215.0" y="621" class="label" text-anchor="middle">Plans, sources, datasets, results</text>
+<text x="1215.0" y="645" class="label" text-anchor="middle">Reports, traces, logs, progress</text>
+<rect x="400" y="540" width="600" height="170" rx="16" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="420" y="569" class="heading" text-anchor="start">Dedicated runner namespace</text>
+<rect x="425" y="585" width="260" height="80" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="555.0" y="615" class="heading" text-anchor="middle">JMeter Job</text>
+<text x="555.0" y="641" class="label" text-anchor="middle">Bounded protocol load</text>
+<rect x="715" y="585" width="260" height="80" rx="12" fill="#eff6ff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="845.0" y="615" class="heading" text-anchor="middle">Playwright Job</text>
+<text x="845.0" y="641" class="label" text-anchor="middle">Real Chromium journeys</text>
+<text x="700" y="693" class="small" text-anchor="middle">Ephemeral workspace · execute once · upload evidence</text>
+<polyline points="370,390 185,390 185,565" class="line" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="185" y="525" class="small" text-anchor="middle">Durable state</text>
+<polyline points="1030,390 1215,390 1215,565" class="line" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="1215" y="525" class="small" text-anchor="middle">Inputs and evidence</text>
+<polyline points="700,440 700,540" class="line" marker-end="url(#arrow)"/>
+<text x="700" y="515" class="small" text-anchor="middle">Kubernetes API: create / inspect / cancel</text>
+<polyline points="1000,625 1060,625" class="line" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<rect x="475" y="785" width="450" height="65" rx="12" fill="#fff7ed" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="700.0" y="815" class="heading" text-anchor="middle">Approved application under test</text>
+<polyline points="555,710 555,785" class="line" marker-end="url(#arrow)"/>
+<polyline points="845,710 845,785" class="line" marker-end="url(#arrow)"/>
+<text x="700" y="753" class="small" text-anchor="middle">Actual traffic carries a run correlation ID</text>
+</svg>

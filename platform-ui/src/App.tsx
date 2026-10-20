@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import PerformanceConsole from './v2/PerformanceConsole';
+import BrandHeader from './BrandHeader';
 import {
   Activity,
   Play,
@@ -37,7 +39,34 @@ function App() {
   const [teams, setTeams] = useState<string[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string>('');
   const [apiKey, setApiKey] = useState<string>('');
+  const [accessInput, setAccessInput] = useState('');
+  const [connection, setConnection] = useState<{ subject: string; teams: string[]; legacyAvailable: boolean; recorderAvailable: boolean } | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  useEffect(() => {
+    if (!apiKey) return;
+    let active = true;
+    const headers = { Authorization: `Bearer ${apiKey}`, 'X-API-Key': apiKey };
+    Promise.all([
+      axios.get<{ subject: string; teams: string[] }>('/api/v2/platform/caller', { headers }),
+      axios.get<{ legacyAvailable: boolean; recorderAvailable: boolean }>('/api/v2/platform/experience', { headers }),
+    ]).then(([caller, experience]) => {
+      if (active) { setConnection({ ...caller.data, ...experience.data }); setAuthError(null); }
+    }).catch(() => { if (active) { setConnection(null); setAuthError('Could not connect. Check the token, its expiry, and the platform address.'); } })
+      .finally(() => { if (active) setConnecting(false); });
+    return () => { active = false; };
+  }, [apiKey, authAttempt]);
   const [testType, setTestType] = useState<string>('load');
+
+  /**
+   * Which surface is showing.
+   *
+   * V2 is the default because it is the one that works end to end — durable runs, objectives,
+   * cancellation. V1 stays reachable until its replacement is verified and its removal approved
+   * (CLAUDE.md §5), which is why this is a tab and not a redirect.
+   */
+  const [surface, setSurface] = useState<'v2' | 'v1'>('v2');
 
   const [history, setHistory] = useState<TestRun[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
@@ -45,59 +74,24 @@ function App() {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial load
-  useEffect(() => {
-    fetchTeams();
-  }, []);
-
-  // Fetch history when team changes
-  useEffect(() => {
-    if (selectedTeam) {
-      fetchHistory(selectedTeam);
-    } else {
-      setHistory([]);
-    }
-  }, [selectedTeam]);
-
-  // Polling history every 5 seconds if there are running tests
-  useEffect(() => {
-    let interval: number;
-    const hasRunningTests = history.some(r => r.status === 'PENDING' || r.status === 'RUNNING');
-
-    if (selectedTeam && hasRunningTests) {
-      interval = window.setInterval(() => {
-        fetchHistory(selectedTeam, false);
-      }, 5000);
-    }
-    return () => clearInterval(interval);
-  }, [selectedTeam, history]);
-
-  const fetchTeams = async () => {
+  const fetchTeams = useCallback(async () => {
+    if (!apiKey) return;
     try {
       setLoadingTeams(true);
       setError(null);
-      const res = await axios.get<TeamConfigResponse>('/api/v1/config/teams');
+      const res = await axios.get<TeamConfigResponse>('/api/v1/config/teams', { headers: { 'X-API-Key': apiKey } });
       setTeams(res.data.teams);
-      if (res.data.teams.length > 0 && !selectedTeam) {
-        setSelectedTeam(res.data.teams[0]);
-      }
-    } catch (err: any) {
-      console.error('Error fetching teams:', err);
-      // For local dev, we might not have the API key required for config API if it was locked down,
-      // but in our SecurityConfig /config/metrics might be public or we assume example-team exists.
-      // Actually SecurityConfig says "Everything else requires API key"
-      // So fetching teams WITHOUT an API key will fail with 403!
-      // Let's handle this:
-      setError('Cannot fetch teams. Ensure backend is running. If API Key is required for config, you must set it in the code or allow public access.');
-      // Fallback for UI testing
-      setTeams(['example-team', 'payment-service-team']);
-      setSelectedTeam('payment-service-team');
+      setSelectedTeam(current => current || res.data.teams[0] || '');
+    } catch {
+      setError('Could not load your teams. Check your access token and try again.');
+      setTeams([]);
+      setSelectedTeam('');
     } finally {
       setLoadingTeams(false);
     }
-  };
+  }, [apiKey]);
 
-  const fetchHistory = async (team: string, showLoader = true) => {
+  const fetchHistory = useCallback(async (team: string, showLoader = true) => {
     if (!team) return;
     try {
       if (showLoader) setLoadingHistory(true);
@@ -106,9 +100,9 @@ function App() {
 
       const res = await axios.get<TestRun[]>(`/api/v1/tests/history?team=${team}&limit=10`, { headers });
       setHistory(res.data);
-      if (error && error.includes('API Key')) setError(null); // Clear auth errors if successful
-    } catch (err: any) {
-      if (err.response?.status === 403) {
+      setError(current => current?.includes('API Key') ? null : current); // Clear auth errors if successful
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
         setError('403 Forbidden: Valid API Key required to view history for this team.');
         setHistory([]);
       } else {
@@ -117,7 +111,34 @@ function App() {
     } finally {
       if (showLoader) setLoadingHistory(false);
     }
-  };
+  }, [apiKey]);
+
+  // Initial load
+  useEffect(() => {
+    if (surface === 'v1' && apiKey) void fetchTeams();
+  }, [surface, apiKey, fetchTeams]);
+
+  // Fetch history when team changes
+  useEffect(() => {
+    if (surface === 'v1' && selectedTeam) {
+      fetchHistory(selectedTeam);
+    } else {
+      setHistory([]);
+    }
+  }, [selectedTeam, surface, fetchHistory]);
+
+  // Polling history every 5 seconds if there are running tests
+  useEffect(() => {
+    let interval: number;
+    const hasRunningTests = history.some(r => r.status === 'PENDING' || r.status === 'RUNNING');
+
+    if (surface === 'v1' && selectedTeam && hasRunningTests) {
+      interval = window.setInterval(() => {
+        fetchHistory(selectedTeam, false);
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [selectedTeam, history, surface, fetchHistory]);
 
   const handleTriggerTest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,11 +158,11 @@ function App() {
 
       // Add the new pending run to the top of the history list
       setHistory(prev => [res.data, ...prev]);
-    } catch (err: any) {
-      if (err.response?.status === 403) {
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
         setError('403 Forbidden: Invalid API Key.');
       } else {
-        setError(err.response?.data?.error || 'Failed to trigger test run.');
+        setError((axios.isAxiosError<{ error?: string }>(err) && err.response?.data?.error) || 'Failed to trigger test run.');
       }
       console.error('Trigger error:', err);
     } finally {
@@ -185,16 +206,53 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-        <div className="header-brand">
-          <Activity className="logo-icon" size={28} />
-          <span>Antigravity<span className="text-gradient">Core</span></span>
-        </div>
+        <BrandHeader />
+        <nav className="surface-tabs" aria-label="Platform version">
+          <button
+            className={surface === 'v2' ? 'surface-tab active' : 'surface-tab'}
+            onClick={() => setSurface('v2')}
+            aria-current={surface === 'v2'}
+          >
+            Performance tests
+          </button>
+          {connection?.legacyAvailable && <button
+            className={surface === 'v1' ? 'surface-tab active' : 'surface-tab'}
+            onClick={() => setSurface('v1')}
+            aria-current={surface === 'v1'}
+          >
+            Legacy (v1)
+          </button>}
+        </nav>
         <div className="text-sm text-secondary flex items-center gap-2">
           <Server size={16} />
           <span>v1.0.0</span>
         </div>
       </header>
 
+      {surface === 'v2' && (
+        <main className="main-content">
+          <section className="glass-panel" style={{ marginBottom: '1.25rem' }}>
+            <div className="card-body">
+              {connection ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                <p role="status">Connected as <strong>{connection.subject}</strong> · {connection.teams.join(', ')}</p>
+                <button className="btn btn-secondary" type="button" onClick={() => { setConnection(null); setApiKey(''); setAccessInput(''); }}>Change access token</button>
+              </div> : <form onSubmit={event => { event.preventDefault(); const token = accessInput.trim().replace(/^Bearer\s+/, ''); setConnecting(true); setAuthAttempt(attempt => attempt + 1); setApiKey(token); }}>
+                <label className="form-label" htmlFor="v2-key">Team access token</label>
+                <div className="access-token-row">
+                  <input id="v2-key" type="password" className="form-control" value={accessInput}
+                    placeholder="Paste the token supplied by your platform operator" onChange={e => setAccessInput(e.target.value)} autoComplete="off" />
+                  <button className="btn btn-primary" type="submit" disabled={connecting || !accessInput.trim()}>{connecting ? 'Connecting…' : 'Connect'}</button>
+                </div>
+                <p className="studio-hint">Trying the local launcher? Use local-dev-key-not-a-secret. Your token stays in this page and is not saved in browser storage.</p>
+                {authError && <p role="alert" className="banner banner-bad">{authError}</p>}
+              </form>}
+            </div>
+          </section>
+          {connection && <PerformanceConsole apiKey={apiKey} teamNames={connection.teams} recorderAvailable={connection.recorderAvailable} />}
+        </main>
+      )}
+
+      {surface === 'v1' && (
       <main className="main-content">
         <div className="dashboard-grid">
 
@@ -365,6 +423,7 @@ function App() {
 
         </div>
       </main>
+      )}
     </div>
   );
 }

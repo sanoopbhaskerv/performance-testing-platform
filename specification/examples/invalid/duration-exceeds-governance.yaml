@@ -1,0 +1,39 @@
+# INVALID FIXTURE — expected finding: spec.governance.maxDuration.exceeded
+#
+# The stages run for 30 minutes but maxDuration is 10. The platform stops a run at its
+# ceiling, so this test would be truncated mid-flight and its results would not answer
+# the question it was written to ask.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: over-budget
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads:
+    - name: api-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          - duration: 10m
+            targetUsers: 200
+          - duration: 20m
+            targetUsers: 600
+
+  objectives:
+    - metric: http.response.time
+      percentile: 95
+      threshold: 750ms
+
+  governance:
+    maxDuration: 10m
+    approvalPolicy: non-production-standard

@@ -1,0 +1,985 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://performance.ameriprise.com/schema/v1alpha1/performance-test.schema.json",
+  "title": "PerformanceTest",
+  "description": "Canonical, engine-neutral description of a performance test. The web UI, the REST API and YAML/GitOps all produce exactly this document. Engine-specific plans are generated from it after validation; consumers never author JMX or Playwright harness configuration directly.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "performance.ameriprise.com/v1alpha1",
+      "description": "Schema version. Pinned so a future schema change is an explicit migration rather than a silent reinterpretation."
+    },
+    "kind": {
+      "type": "string",
+      "const": "PerformanceTest"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/spec"
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "Lowercase alphanumeric with hyphens. Names appear in artifact object keys and Kubernetes labels, which are length-limited and character-restricted."
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+\\s*(ms|s|m|h|d)|[Pp].*)$",
+      "description": "A duration such as 30s, 5m, 2h or 90d. ISO-8601 (PT5M) is also accepted.",
+      "examples": [
+        "30s",
+        "5m",
+        "45m",
+        "2h",
+        "90d"
+      ]
+    },
+    "threshold": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(ms|s|%|score)$",
+      "description": "An objective threshold with an explicit unit. A unit-less value is rejected rather than assumed, because a mis-scaled threshold silently changes a test's pass/fail outcome.",
+      "examples": [
+        "750ms",
+        "8s",
+        "1%",
+        "0.5%",
+        "0.1score"
+      ]
+    },
+    "secretRef": {
+      "type": "string",
+      "pattern": "^(vault|awssecrets|azurekeyvault|k8s|env|run)://.+",
+      "description": "A reference to a credential held in the approved secret manager. Never the credential itself: this document is stored, rendered, returned by the validate endpoint and often committed to Git, so an inline value is a disclosure.",
+      "examples": [
+        "vault://performance/proposal/client"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name",
+        "team",
+        "application"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name",
+          "description": "Unique within the owning team."
+        },
+        "team": {
+          "$ref": "#/$defs/name",
+          "description": "Owning team. Every authorization decision starts here."
+        },
+        "application": {
+          "$ref": "#/$defs/name",
+          "description": "The application under test."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Free-form metadata for search and reporting. Never used for policy decisions."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "environment",
+        "workloads"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "$ref": "#/$defs/environment"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "authentication": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authentication"
+          }
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataset"
+          }
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/workload"
+          }
+        },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/objective"
+          }
+        },
+        "observability": {
+          "$ref": "#/$defs/observability"
+        },
+        "governance": {
+          "$ref": "#/$defs/governance"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "name",
+        "runnerCell",
+        "targetClass"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "runnerCell": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The execution cell that runs the workload. Determines which targets are reachable."
+        },
+        "targetClass": {
+          "type": "string",
+          "enum": [
+            "non-production",
+            "production"
+          ],
+          "description": "Drives approval policy. Declared here but verified server-side against the application's registered environments \u2014 a specification cannot promote its own target to a safer class."
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "openapi",
+            "postman",
+            "har",
+            "curl",
+            "manual",
+            "playwright"
+          ],
+          "description": "k6 is not an accepted source type in this release."
+        },
+        "uri": {
+          "type": "string",
+          "description": "Stored artifact reference for document sources, including reviewed Playwright scripts."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of uploaded or pasted Playwright script content. Required with artifact-backed Playwright sources so the reviewed source is immutable."
+        },
+        "git": {
+          "type": "object",
+          "required": [
+            "repository",
+            "ref",
+            "path"
+          ],
+          "additionalProperties": false,
+          "description": "Coordinates for a Playwright source.",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(https://|ssh://|git@)",
+              "description": "An https or ssh clone URL, which must be on the deployment's allowlist (platform.orchestration.playwright.allowed-repositories). A test cannot choose where its code is fetched from, for the same reason it cannot choose its own target host. The URL must not carry credentials: a specification holds references, never secret values."
+            },
+            "ref": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{7,40}$",
+              "description": "An immutable commit SHA. A branch or tag is rejected: it can move after review, so the code that ran would not be recoverable from the stored version."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Test path relative to the repository root. Must not escape the checked-out workspace."
+            },
+            "project": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "playwright"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "git"
+                ]
+              },
+              {
+                "required": [
+                  "uri",
+                  "digest"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "openapi",
+                  "postman",
+                  "har",
+                  "curl"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "uri"
+            ]
+          }
+        }
+      ]
+    },
+    "authentication": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "secretRef"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "oauth2-client-credentials",
+            "basic",
+            "bearer"
+          ]
+        },
+        "injectAs": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The request header name the runner injects when a workload references this authentication entry, for example Authorization or X-Api-Key."
+        },
+        "secretRef": {
+          "$ref": "#/$defs/secretRef"
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "required": [
+        "name",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "type",
+            "uri"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object-storage",
+                "inline"
+              ]
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^dataset://[a-z0-9]([-a-z0-9]*[a-z0-9])?/[1-9][0-9]*$",
+              "description": "The stored dataset version this test reads, as dataset://<name>/<version> \u2014 the uri POST /api/v2/datasets returns. The version is required: without it, two runs of the same immutable test version would read different rows while carrying the same specification digest."
+            }
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Column names this test expects the dataset to have. A scenario binds to one with ${name} in its path, query, headers or body. Declared here because validation is side-effect-free and runs before any file is attached; the file's own header is compared against this before the run starts, so a re-exported dataset cannot silently bind different values to the same names."
+        },
+        "partitionByShard": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, each shard receives a non-overlapping slice. When false and the run is sharded, every generator replays the same rows, which distorts results and can duplicate writes to the target."
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "protocol",
+            "browser"
+          ]
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "jmeter",
+            "playwright",
+            "browserstack-playwright"
+          ],
+          "description": "Requested engine. Validated against declared engine capabilities. k6 is not approved for this release."
+        },
+        "sourceRef": {
+          "type": "string",
+          "description": "Name of a source declared under spec.sources."
+        },
+        "authRef": {
+          "type": "string",
+          "description": "Name of an authentication entry to inject for this workload."
+        },
+        "model": {
+          "$ref": "#/$defs/loadModel"
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scenario"
+          }
+        },
+        "startWhen": {
+          "type": "object",
+          "required": [
+            "workload"
+          ],
+          "additionalProperties": false,
+          "description": "Starts this workload when another reaches a named stage. Used to measure a browser cohort during protocol steady state.",
+          "properties": {
+            "workload": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stage": {
+              "type": "string"
+            }
+          }
+        },
+        "browserUsers": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent browser sessions. Budgeted separately from protocol virtual users: a browser session costs orders of magnitude more, so these are never counted against the same ceiling."
+        },
+        "iterationsPerUser": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "browserProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Browser measurement profile. Web-vital objectives are only comparable when device, network and CPU throttling are stable.",
+          "properties": {
+            "device": {
+              "type": "string",
+              "minLength": 1,
+              "description": "mobile, desktop or a named Playwright device."
+            },
+            "network": {
+              "type": "string",
+              "enum": [
+                "slow-4g",
+                "fast-4g",
+                "wifi",
+                "none"
+              ]
+            },
+            "cpuThrottle": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "protocol"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "model"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "browser"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "browserUsers"
+            ]
+          }
+        }
+      ]
+    },
+    "loadModel": {
+      "type": "object",
+      "required": [
+        "type",
+        "stages"
+      ],
+      "additionalProperties": false,
+      "description": "Load, stress, spike and endurance tests are all expressed as a staged shape; the platform models the shape rather than naming fixed test types. Two shapes: stages holds a number of concurrent users and lets throughput be whatever they produce, and arrival-rate sends a stated number of requests per second whatever the system does with them. See docs/operations/load-models.md.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "stages",
+            "arrival-rate"
+          ]
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The most requests allowed in flight at once. Required for arrival-rate and refused for stages, where the user count is the concurrency. In an open model a stalled target accumulates in-flight requests without bound until the generator itself fails and the run reports that as the target's failure. Admission control budgets against this number, never against the rate."
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "duration"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
+                "description": "Optional stage name used by browser workloads that start during a protocol load boundary."
+              },
+              "duration": {
+                "$ref": "#/$defs/duration"
+              },
+              "targetUsers": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Concurrent users, for a stages model. Stage order is significant: stages run in sequence, and a final stage targeting zero expresses ramp-down."
+              },
+              "targetRate": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Requests per second, for an arrival-rate model. A final stage targeting zero expresses ramp-down."
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "arrival-rate"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "maxConcurrency"
+            ],
+            "properties": {
+              "stages": {
+                "items": {
+                  "required": [
+                    "targetRate"
+                  ],
+                  "not": {
+                    "required": [
+                      "targetUsers"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "stages"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "maxConcurrency"
+              ]
+            },
+            "properties": {
+              "stages": {
+                "items": {
+                  "required": [
+                    "targetUsers"
+                  ],
+                  "not": {
+                    "required": [
+                      "targetRate"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "scenario": {
+      "type": "object",
+      "required": [
+        "name",
+        "weight"
+      ],
+      "additionalProperties": false,
+      "description": "A weighted journey. Weights are what produce a realistic traffic mix instead of an even spread across every endpoint. A scenario says what to call either directly, with method and path, or by referring to an imported operation with operationId.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Relative share of iterations. Weights across a workload should sum to 100."
+        },
+        "operationId": {
+          "type": "string",
+          "description": "Reference to an operation in an imported source. Resolved from Increment 2 onward; until then such a scenario addresses /{operationId}, which is deliberately obvious rather than plausible."
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "description": "HTTP method. Defaults to GET when omitted."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Request path, relative to the base URL the platform resolves for this application. Never a full URL: where a run's traffic goes is decided by the team's registered targets, not by the specification."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers. Never credentials: Authorization, Cookie, X-Api-Key and similar are refused outright, and any value shaped like a token is rejected. Authentication belongs in spec.authentication as a reference the runner resolves at execution time.",
+          "propertyNames": {
+            "not": {
+              "pattern": "^(?i)(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-amz-security-token)$"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Query parameters appended to the path. Never credentials: a query string is written to every access log between the runner and the target."
+        },
+        "body": {
+          "description": "The request body, for methods that carry one. A bare string is shorthand for {content: \"...\"}.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "content"
+              ],
+              "properties": {
+                "contentType": {
+                  "type": "string",
+                  "description": "Media type sent. Defaults to application/json, and is written as a Content-Type header so the target does not reject the request."
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "steps": {
+          "description": "The ordered requests this journey makes. A scenario states either one request, through method and path, or a list of steps -- never both. Steps are what let a journey sign in and carry the session forward.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "required": [
+            "operationId"
+          ]
+        }
+      ]
+    },
+    "objective": {
+      "type": "object",
+      "required": [
+        "metric",
+        "threshold"
+      ],
+      "additionalProperties": false,
+      "description": "The pass/fail contract. A test with no objectives can neither pass nor fail.",
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "http.response.time",
+            "http.error.rate",
+            "http.throughput",
+            "browser.journey.duration",
+            "browser.step.duration",
+            "browser.error.rate",
+            "web.lcp",
+            "web.inp",
+            "web.cls",
+            "web.ttfb",
+            "web.tbt",
+            "web.lighthouse.score"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "description": "Workload this applies to. Omit to apply to the whole test."
+        },
+        "percentile": {
+          "type": "integer",
+          "enum": [50, 75, 90, 95, 99, 100],
+          "description": "An explicitly measured percentile; 100 is the maximum. Other percentiles are rejected."
+        },
+        "threshold": {
+          "$ref": "#/$defs/threshold"
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "dynatrace",
+            "none"
+          ]
+        },
+        "correlationHeader": {
+          "type": "string",
+          "description": "Injected into workload traffic so application telemetry can be correlated to this run.",
+          "default": "X-Performance-Test-Run-Id"
+        },
+        "serviceTagSelector": {
+          "type": "string"
+        },
+        "collect": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "service-response-time",
+              "failure-rate",
+              "cpu",
+              "memory",
+              "database-time",
+              "downstream-calls"
+            ]
+          }
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDuration": {
+          "$ref": "#/$defs/duration",
+          "description": "Ceiling for this test. Enforced server-side alongside the platform limit; the lower of the two applies."
+        },
+        "approvalPolicy": {
+          "type": "string"
+        },
+        "retention": {
+          "$ref": "#/$defs/duration"
+        }
+      }
+    },
+    "step": {
+      "description": "One request within a journey.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "description": "Identifies this step in results and findings.",
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "description": "HTTP method. Defaults to GET when omitted."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Request path, relative to the base URL the platform resolves for this application. Never a full URL: where a run's traffic goes is decided by the team's registered targets, not by the specification."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers. Never credentials: Authorization, Cookie, X-Api-Key and similar are refused outright, and any value shaped like a token is rejected. Authentication belongs in spec.authentication as a reference the runner resolves at execution time.",
+          "propertyNames": {
+            "not": {
+              "pattern": "^(?i)(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-amz-security-token)$"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Query parameters appended to the path. Never credentials: a query string is written to every access log between the runner and the target."
+        },
+        "body": {
+          "description": "The request body, for methods that carry one. A bare string is shorthand for {content: \"...\"}.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "content"
+              ],
+              "properties": {
+                "contentType": {
+                  "type": "string",
+                  "description": "Media type sent. Defaults to application/json, and is written as a Content-Type header so the target does not reject the request."
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "extract": {
+          "description": "Values taken out of the response for later steps to use. A failed extraction is never silent: the engine substitutes a sentinel and an assertion fails the sample, because an unfilled reference is sent as literal text and the run would otherwise report fast, healthy-looking latency for a target that did no work.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/extraction"
+          }
+        },
+        "expect": {
+          "description": "What must be true of the response. Without a correctness check, a load test of a broken deployment reports excellent numbers for a wall of 500s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "thinkTime": {
+          "description": "How long a user pauses after this step, e.g. '2s'.",
+          "type": "string",
+          "pattern": "^\\d+(ms|s|m|h)$"
+        }
+      }
+    },
+    "extraction": {
+      "description": "A value pulled out of a response, referred to later as ${name}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "from"
+      ],
+      "properties": {
+        "name": {
+          "description": "The ${name} later steps use. Must not collide with a dataset column, or the reference would have two sources.",
+          "type": "string"
+        },
+        "from": {
+          "description": "Where in the response to look.",
+          "enum": [
+            "json-body",
+            "regex-body",
+            "header",
+            "set-cookie",
+            "status"
+          ]
+        },
+        "expression": {
+          "description": "A JSON path, a regular expression with exactly one capturing group, a header name, or a cookie name -- whichever 'from' calls for. Not needed for 'status'.",
+          "type": "string"
+        },
+        "required": {
+          "description": "Whether the journey can continue without it. True by default, and rarely worth changing: an optional extraction still produces its sentinel, but nothing fails when it does not match.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "assertion": {
+      "description": "What must be true of a response.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "operator",
+        "value"
+      ],
+      "properties": {
+        "subject": {
+          "enum": [
+            "status",
+            "body"
+          ]
+        },
+        "operator": {
+          "enum": [
+            "equals",
+            "contains",
+            "matches"
+          ]
+        },
+        "value": {
+          "description": "The status code, the text, or the pattern.",
+          "type": [
+            "string",
+            "integer"
+          ]
+        }
+      }
+    }
+  }
+}

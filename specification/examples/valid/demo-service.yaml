@@ -1,0 +1,87 @@
+# A runnable local test against the bundled demo service.
+#
+# Unlike the other examples, this one is meant to be executed rather than only parsed. It names the
+# `local-dev` team and the `demo-service` target that ship in config/teams, so it works on a laptop
+# with no editing.
+#
+# The scenarios state their method and path directly. That is the manual form: no importer is needed,
+# and it is what lets this document address the demo service's real endpoints. Only the path comes
+# from here — the host and port are resolved by the platform from the team's registered target, which
+# is why a specification cannot point a thousand users at an address of its own choosing.
+#
+# To actually generate load you also need the local-jmeter execution provider. The default provider
+# sends no traffic at all and every objective below will be reported as indeterminate. See the README.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: demo-service-baseline
+  team: local-dev
+  application: demo-service
+  labels:
+    purpose: local-demo
+
+spec:
+  environment:
+    name: performance
+    runnerCell: local
+    targetClass: non-production
+
+  workloads:
+    - name: demo-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          # Deliberately short. This is a demonstration, not a capacity exercise, and a laptop
+          # generating load against a service on the same laptop measures the laptop as much as
+          # the service.
+          - duration: 30s
+            targetUsers: 5
+          - duration: 1m
+            targetUsers: 10
+          - duration: 15s
+            targetUsers: 0
+
+      scenarios:
+        # A stable seeded record makes this route runnable after a fresh database migration.
+        - name: retrieve-student
+          weight: 65
+          method: GET
+          path: /api/students/1
+          headers:
+            Accept: application/json
+
+        - name: update-student
+          weight: 35
+          method: PUT
+          path: /api/students/1
+          body:
+            contentType: application/json
+            content: |
+              {"firstName":"Demo","lastName":"Student","email":"demo.student@example.test","program":"Performance Engineering"}
+
+  objectives:
+    - metric: http.response.time
+      scope: demo-load
+      percentile: 95
+      threshold: 250ms
+
+    - metric: http.error.rate
+      scope: demo-load
+      threshold: 1%
+
+    - metric: http.response.time
+      scope: demo-load/retrieve-student
+      percentile: 95
+      threshold: 250ms
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+
+  governance:
+    maxDuration: 10m
+    approvalPolicy: non-production-standard
+    retention: 7d

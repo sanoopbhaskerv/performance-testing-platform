@@ -65,3 +65,7 @@ Database URL — prefer externalUrl if postgres is disabled.
 {{- .Values.postgres.externalUrl }}
 {{- end }}
 {{- end }}
+
+{{- define "performance-platform.databaseSecretName" -}}
+{{- default (printf "%s-db-credentials" (include "performance-platform.fullname" .)) .Values.database.existingSecret -}}
+{{- end -}}

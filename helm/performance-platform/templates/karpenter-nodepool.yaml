@@ -1,3 +1,4 @@
+{{- if .Values.karpenter.enabled }}
 ---
 # Karpenter NodePool for JMeter test job pods.
 apiVersion: karpenter.sh/v1
@@ -49,3 +50,5 @@ spec:
   limits:
     cpu: "64"
     memory: 128Gi
+
+{{- end }}

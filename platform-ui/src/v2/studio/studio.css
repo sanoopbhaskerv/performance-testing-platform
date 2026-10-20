@@ -1,0 +1,433 @@
+/*
+ * Studio styles.
+ *
+ * Every value is a semantic token from `tokens.css` — `tokens.test.ts` fails the build on a colour
+ * literal here. Scoped under `.studio`, which lives inside `.v2`, so V1 is untouched.
+ */
+
+.v2 .studio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-6);
+}
+
+/* ── The stepper ────────────────────────────────────────────────────────
+ *
+ * An ordered list, not a row of buttons, because the order is the meaning: it tells someone who has
+ * never done this what the whole job consists of before they start it. Completed steps stay
+ * clickable — a wizard that will not let you go back to check something you already entered makes
+ * people restart rather than revise.
+ */
+
+.v2 .studio-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-space-2);
+  counter-reset: step;
+}
+
+.v2 .studio-steps > li {
+  flex: 1 1 8rem;
+  min-width: 7rem;
+}
+
+.v2 .studio-step {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-top: 2px solid var(--pf-border);
+  padding: var(--pf-space-3) 0 0;
+  cursor: pointer;
+  color: inherit;
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .studio-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.v2 .studio-step-current {
+  border-top-color: var(--pf-action);
+  font-weight: var(--pf-weight-strong);
+}
+
+.v2 .studio-step-done {
+  border-top-color: var(--pf-verdict-pass-border);
+}
+
+/* The number carries the order for a screen reader too, via the label on the button. */
+.v2 .studio-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: var(--pf-radius-pill);
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border);
+  font-size: var(--pf-text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.v2 .studio-step-current .studio-step-index {
+  background: var(--pf-action);
+  border-color: var(--pf-action);
+  color: var(--pf-action-text);
+}
+
+.v2 .studio-step-done .studio-step-index {
+  background: var(--pf-verdict-pass-bg);
+  border-color: var(--pf-verdict-pass-border);
+  color: var(--pf-verdict-pass-fg);
+}
+
+/* ── The step body ──────────────────────────────────────────────────────*/
+
+.v2 .studio-head h2 {
+  margin: 0;
+  font-size: var(--pf-text-lg);
+}
+
+.v2 .studio-head p {
+  margin: var(--pf-space-1) 0 0;
+  font-size: var(--pf-text-md);
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .studio-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-5);
+}
+
+.v2 .studio-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-4);
+  border-top: 1px solid var(--pf-border-subtle);
+  padding-top: var(--pf-space-5);
+}
+
+.v2 .studio-foot .studio-foot-spacer {
+  flex: 1;
+}
+
+/*
+ * What is stopping the next step, beside the button rather than inside a tooltip. A disabled button
+ * with the reason hidden is the most common way a wizard strands somebody.
+ */
+.v2 .studio-blocker {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+  font-size: var(--pf-text-sm);
+  color: var(--pf-status-wait-fg);
+}
+
+/* ── Choosing a test type ───────────────────────────────────────────────
+ *
+ * Two cards, each naming the question it answers rather than the technology it uses. Someone who
+ * has never done this does not know whether they want "protocol load" — they know whether they are
+ * asking "can it take the traffic" or "is the page slow".
+ */
+
+.v2 .studio-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--pf-space-5);
+}
+
+.v2 .studio-type {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+  align-items: flex-start;
+  text-align: left;
+  padding: var(--pf-space-6);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: var(--pf-surface-raised);
+  color: inherit;
+  cursor: pointer;
+}
+
+.v2 .studio-type:hover,
+.v2 .studio-type:focus-visible {
+  border-color: var(--pf-action);
+}
+
+.v2 .studio-type h3 {
+  margin: 0;
+  font-size: var(--pf-text-lg);
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 1;
+}
+
+/* The question, in the consumer's words. This is the line that does the choosing. */
+.v2 .studio-type-question {
+  margin: 0;
+  font-size: var(--pf-text-md);
+  color: var(--pf-status-busy-fg);
+}
+
+.v2 .studio-type p {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+  line-height: 1.5;
+  opacity: var(--pf-text-muted-opacity);
+}
+
+/* ── Forms ──────────────────────────────────────────────────────────────*/
+
+.v2 .studio-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.v2 .studio-field > label {
+  font-size: var(--pf-text-md);
+  font-weight: var(--pf-weight-strong);
+}
+
+/* Why the field exists, under the label rather than in a tooltip: a hint someone has to hover to
+ * find is a hint for people who already knew. */
+.v2 .studio-hint {
+  font-size: var(--pf-text-sm);
+  line-height: 1.45;
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .studio-field input[type='text'],
+.v2 .studio-field input:not([type]),
+.v2 .studio-field input[type='number'],
+.v2 .studio-field textarea,
+.v2 .studio-field select {
+  font: inherit;
+  font-size: var(--pf-text-md);
+  padding: var(--pf-space-3) var(--pf-space-4);
+  border-radius: var(--pf-radius-sm);
+  border: 1px solid var(--pf-border-field);
+  background: var(--pf-surface-sunken);
+  color: inherit;
+}
+
+.v2 .studio-field textarea {
+  resize: vertical;
+  min-height: 12rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.5;
+}
+
+.v2 fieldset.studio-field {
+  border: 1px solid var(--pf-border-field);
+  border-radius: var(--pf-radius-sm);
+  padding: var(--pf-space-4);
+}
+
+.v2 .studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--pf-space-5);
+}
+
+.v2 .studio-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-4);
+}
+
+.v2 .studio-section h3,
+.v2 .rule-card h4 {
+  margin: 0;
+  font-size: var(--pf-text-md);
+}
+
+.v2 .rule-list {
+  display: grid;
+  gap: var(--pf-space-4);
+}
+
+.v2 .rule-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--pf-space-4);
+  align-items: start;
+  padding: var(--pf-space-4);
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-raised);
+}
+
+.v2 .rule-card p {
+  margin: var(--pf-space-2) 0 0;
+}
+
+.v2 .rule-evidence {
+  margin: var(--pf-space-3) 0 0;
+  padding-left: var(--pf-space-5);
+  font-size: var(--pf-text-sm);
+}
+
+/*
+  The Validator's verdict on each correlation. Set apart from the per-step evidence above it
+  because it answers a different question: the steps say what happened to each request, this says
+  whether the rules a person accepted are actually carrying anything.
+*/
+.v2 .correlation-proofs {
+  margin-top: var(--pf-space-4);
+  padding-top: var(--pf-space-3);
+  border-top: 1px solid var(--pf-border);
+}
+
+.v2 .correlation-proofs h5 {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .correlation-proofs .rule-evidence li {
+  margin-bottom: var(--pf-space-2);
+}
+
+.v2 .rule-actions {
+  display: flex;
+  gap: var(--pf-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.v2 .inline-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .validator-list {
+  display: grid;
+  gap: var(--pf-space-3);
+}
+
+.v2 .validator-journey {
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  padding: var(--pf-space-4);
+  background: var(--pf-surface-raised);
+}
+
+.v2 .validator-journey h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  margin: 0 0 var(--pf-space-3);
+  font-size: var(--pf-text-md);
+}
+
+.v2 .validator-step {
+  border-top: 1px solid var(--pf-border-subtle);
+  padding: var(--pf-space-3) 0;
+}
+
+.v2 .validator-step summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pf-space-3);
+  cursor: pointer;
+}
+
+.v2 .validator-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--pf-space-3);
+  margin-top: var(--pf-space-3);
+}
+
+.v2 .validator-grid h5 {
+  margin: 0 0 var(--pf-space-2);
+}
+
+.v2 .validator-grid pre {
+  max-height: 12rem;
+  overflow: auto;
+  margin: var(--pf-space-2) 0 0;
+  padding: var(--pf-space-3);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface-sunken);
+}
+
+/* ── The load summary ───────────────────────────────────────────────────
+ *
+ * One sentence saying what the numbers add up to. Someone who has never run a performance test has
+ * no intuition for what three durations total, and "this will take 23 minutes" is the difference
+ * between an informed click and a surprise.
+ */
+.v2 .studio-summary {
+  font-size: var(--pf-text-md);
+  line-height: 1.5;
+  padding: var(--pf-space-4) var(--pf-space-5);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border-subtle);
+}
+
+.v2 .studio-summary strong {
+  color: var(--pf-text-strong);
+}
+
+/*
+ * The load-model choice: two options, each explained where it is chosen.
+ *
+ * A radio pair rather than a select, because the difference between holding users and holding a rate
+ * is the thing a novice most needs told — and a select hides every option but one behind a click,
+ * which is where an explanation goes to die.
+ */
+.v2 .studio-choice {
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  padding: var(--pf-space-5);
+  margin-bottom: var(--pf-space-6);
+}
+
+.v2 .studio-choice legend {
+  padding: 0 var(--pf-space-3);
+  font-weight: var(--pf-weight-strong);
+}
+
+.v2 .studio-choice > label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-4);
+  padding: var(--pf-space-3) 0;
+  cursor: pointer;
+}
+
+.v2 .studio-choice > label > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.v2 .studio-choice input[type='radio'] {
+  margin-top: 0.2rem;
+}
+
+/*
+ * Two actions that belong to the same decision, side by side: run the check, or take the document
+ * away and read it. Wraps rather than overflows, because the studio is usable at a narrow width.
+ */
+.v2 .studio-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-3);
+}

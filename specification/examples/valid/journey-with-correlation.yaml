@@ -1,0 +1,122 @@
+# A journey that signs in and carries the session forward.
+#
+# This is the shape almost every real test needs and none could express before: a
+# scenario used to be a single request, so there was nowhere to put the second call
+# and no way to hand it what the first returned.
+#
+# The failure this guards against is worth stating, because it is the one that looks
+# like success. If the extraction below finds nothing, the engine substitutes a
+# sentinel and sends the next request anyway. The target answers 401 in two
+# milliseconds, the run finishes early, and the report shows a beautiful latency curve
+# for a system that did no work. So every extraction renders with an assertion that
+# fails the sample when the sentinel survives: a broken correlation appears as an error
+# rate, never as good latency.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: order-journey
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  # The credential is a reference, never a value. A session is short-lived and a
+  # specification version is permanent, so storing one in the other is broken on its own
+  # terms: the test would work today and return 401s next month.
+  authentication:
+    - name: test-user
+      type: oauth2-client-credentials
+      secretRef: vault://performance/proposal/client
+
+  workloads:
+    - name: order-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          - duration: 2m
+            targetUsers: 50
+          - duration: 10m
+            targetUsers: 50
+          - duration: 1m
+            targetUsers: 0
+
+      scenarios:
+        - name: place-an-order
+          weight: 100
+          steps:
+            - name: sign-in
+              method: POST
+              path: /auth/login
+              body:
+                contentType: application/json
+                content: '{"grant_type":"client_credentials"}'
+              extract:
+                # Later steps refer to this as ${session}. The name shares a namespace
+                # with dataset columns, so it must not collide with one — two sources
+                # for one reference would make which value a request used depend on
+                # evaluation order rather than on anything the document says.
+                - name: session
+                  from: json-body
+                  expression: $.access_token
+              expect:
+                - subject: status
+                  operator: equals
+                  value: 200
+              # Real users pause. Rendered as a spread rather than a fixed wait, because
+              # every user pausing identically produces synchronised waves of traffic
+              # that no real population makes.
+              thinkTime: 2s
+
+            - name: open-basket
+              method: GET
+              path: /api/basket
+              headers:
+                Authorization: Bearer ${session}
+              extract:
+                # Chained: the basket id comes from this response and is used by the next
+                # step. A reference to a value a *later* step extracts is refused at
+                # validation — it would be sent as literal text.
+                - name: basketId
+                  from: json-body
+                  expression: $.id
+              expect:
+                - subject: status
+                  operator: equals
+                  value: 200
+              thinkTime: 5s
+
+            - name: submit-order
+              method: POST
+              path: /api/orders
+              headers:
+                Authorization: Bearer ${session}
+              body:
+                contentType: application/json
+                content: '{"basketId":"${basketId}"}'
+              expect:
+                - subject: status
+                  operator: equals
+                  value: 201
+
+  # An objective scoped to the workload covers every step in it, and takes the highest
+  # percentile among them — so it passes only if every step would have passed.
+  objectives:
+    - metric: http.response.time
+      scope: order-load
+      percentile: 95
+      threshold: 900ms
+    - metric: http.error.rate
+      scope: order-load
+      threshold: 1%
+
+  governance:
+    maxDuration: 25m
+    approvalPolicy: non-production-standard
+    retention: 90d

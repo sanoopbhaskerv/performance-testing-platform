@@ -1,0 +1,41 @@
+# INVALID FIXTURE — expected findings:
+#   spec.workload.sourceRef.unresolved
+#   spec.objective.scope.unresolved
+#
+# Both references name things this document never declares. Neither is detectable by
+# schema validation: the types are correct and only cross-field checking finds them.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: unresolved-references
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-api
+      type: openapi
+      uri: artifact://proposal/openapi.yaml
+
+  workloads:
+    - name: api-load
+      type: protocol
+      engine: jmeter
+      sourceRef: a-source-that-does-not-exist
+      model:
+        type: stages
+        stages:
+          - duration: 5m
+            targetUsers: 100
+
+  objectives:
+    - metric: http.response.time
+      scope: a-workload-that-does-not-exist
+      percentile: 95
+      threshold: 750ms

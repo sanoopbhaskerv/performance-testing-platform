@@ -4,6 +4,21 @@ server:
 spring:
   application:
     name: demo-service
+  datasource:
+    url: ${DEMO_DB_URL:jdbc:postgresql://localhost:5432/perfplatform}
+    username: ${DEMO_DB_USER:perf}
+    password: ${DEMO_DB_PASSWORD:perf}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: demo
+  flyway:
+    create-schemas: true
+    default-schema: demo
+    schemas: demo
 
 management:
   endpoints:

@@ -1,0 +1,27 @@
+# Test fixture only. These API keys are not real credentials and are never used
+# outside the characterization test suite.
+team: alpha
+apiKey: "test-key-alpha"
+
+targets:
+  - name: alpha-service
+    baseUrl: "http://localhost:18099"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
+tests:
+  load:
+    enabled: true
+    rampUpUsers: 5
+    steadyStateUsers: 10
+    rampUpDurationSeconds: 5
+    steadyStateDurationSeconds: 10
+    scenarios:
+      - name: "alpha-flow"
+        endpoints:
+          - method: GET
+            path: "/api/alpha"
+
+sla:
+  maxP95LatencyMs: 500
+  maxErrorRatePercent: 1.0

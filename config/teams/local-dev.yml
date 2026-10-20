@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────
+#  Local development team.
+#
+#  Exists so the platform is usable immediately after `mvn install` — the shipped
+#  example-team points at a Kubernetes service name that does not resolve on a
+#  laptop, and target policy correctly refuses a target it cannot resolve.
+#
+#  The key below is NOT a credential. It is a fixed local-development value, the
+#  same for everyone, and the platform refuses to start with this whole
+#  YAML-based identity mechanism under a production profile. Real keys and
+#  corporate identity arrive with Increment 4.
+# ─────────────────────────────────────────────────────────────
+
+team: local-dev
+apiKey: "local-dev-key-not-a-secret"
+
+targets:
+  # The application name in a V2 specification's metadata must match a target
+  # name here — that correspondence is how the platform resolves where a run's
+  # traffic goes, and it is deliberately not something a specification can set
+  # for itself.
+  #
+  # Points at the platform's own port. With the default `fake` execution provider
+  # no traffic is sent at all; the address only has to resolve, so that the target
+  # safety policy has something real to check.
+  - name: local-service
+    baseUrl: "http://localhost:8080"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
+  # The bundled demo service (demo-service/, port 8081). It provides PostgreSQL-backed
+  # student create, retrieve and update routes under /api/students.
+  #
+  # Start it with:
+  #   java -jar demo-service/target/demo-service-1.0.0.jar
+  #
+  # Generating real load against it also needs the local-jmeter provider; the
+  # default fake provider sends no traffic anywhere. See the README.
+  - name: demo-service
+    baseUrl: "http://localhost:8081"
+    healthCheckPath: "/actuator/health"
+    jvmEnabled: false
+
+  # The student web app (demo-student-ui/, port 5174) — the browser client for the demo
+  # service, and therefore the target a Playwright journey navigates. It points at the UI
+  # rather than the API on 8081: a browser workload loads pages, and a target resolving to
+  # a JSON endpoint would give the cohort nothing to render.
+  - name: student-app
+    baseUrl: "http://localhost:5174"
+    # Vite serves the app at the root; there is no actuator on a static dev server.
+    healthCheckPath: "/"
+    jvmEnabled: false
+
+# V1 needs this block to consider the team runnable. V2 takes its load model from
+# the PerformanceTest specification instead, so these values are only used by the
+# legacy surface.
+tests:
+  load:
+    enabled: true
+    rampUpUsers: 5
+    steadyStateUsers: 10
+    rampUpDurationSeconds: 10
+    steadyStateDurationSeconds: 30
+    scenarios:
+      - name: "local-flow"
+        endpoints:
+          - method: GET
+            path: "/actuator/health"
+
+sla:
+  p95LatencyMs: 750
+  errorRatePercent: 1.0
+
+notifications:
+  email:
+    enabled: false
+    recipients: []

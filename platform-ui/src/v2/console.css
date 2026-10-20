@@ -1,0 +1,1298 @@
+/*
+ * V2 console styles.
+ *
+ * Scoped under .v2 so nothing here can change how the V1 screens render — V1 stays operational
+ * until its replacement is verified, and a shared stylesheet is the easiest way to break it by
+ * accident.
+ *
+ * Every colour, radius and type size here is a semantic token from `tokens.css`. A literal value in
+ * this file is a bug — it is a spot a re-brand will miss — and `tokens.test.ts` fails the build on
+ * one. Reach for a semantic token; if none fits, add one there rather than a hex here.
+ */
+
+@import './tokens.css';
+
+.v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  text-align: left;
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+.v2 .card {
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  padding: 1.1rem var(--pf-space-7);
+}
+
+.v2 .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.v2 .card-head h2 {
+  font-size: 1.05rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.v2 h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+  margin: 1.1rem 0 0.4rem;
+}
+
+.v2 .card-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.v2 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--pf-action-border);
+  background: var(--pf-action);
+  color: var(--pf-action-text);
+  border-radius: var(--pf-radius-sm);
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.v2 .btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.v2 .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.v2 .btn-quiet {
+  background: transparent;
+  color: var(--pf-text-strong);
+}
+
+.v2 .btn-small {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.v2 .link {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+
+/* ── Status ─────────────────────────────────────────────────────────── */
+
+.v2 .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: var(--pf-radius-pill);
+  padding: 0.1rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.v2 .pill-good {
+  background: var(--pf-verdict-pass-bg);
+  color: var(--pf-verdict-pass-fg);
+  border-color: var(--pf-verdict-pass-border);
+}
+
+.v2 .pill-bad {
+  background: var(--pf-verdict-fail-bg);
+  color: var(--pf-verdict-fail-fg);
+  border-color: var(--pf-verdict-fail-border);
+}
+
+.v2 .pill-busy {
+  background: var(--pf-status-busy-bg);
+  color: var(--pf-status-busy-fg);
+  border-color: var(--pf-status-busy-border);
+}
+
+.v2 .pill-wait {
+  background: var(--pf-status-wait-bg);
+  color: var(--pf-status-wait-fg);
+  border-color: var(--pf-status-wait-border);
+}
+
+.v2 .pill-neutral {
+  background: var(--pf-verdict-unknown-bg);
+  color: var(--pf-verdict-unknown-fg);
+  border-color: var(--pf-verdict-unknown-border);
+}
+
+.v2 .tone-good { color: var(--pf-verdict-pass-fg); }
+.v2 .tone-bad { color: var(--pf-verdict-fail-fg); }
+.v2 .tone-neutral { color: var(--pf-verdict-unknown-fg); }
+
+.v2 .spin {
+  animation: v2-spin 1.1s linear infinite;
+}
+
+@keyframes v2-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Respect a reduced-motion preference: the spinner is decorative, the label carries the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .v2 .spin { animation: none; }
+}
+
+/* ── Banners ────────────────────────────────────────────────────────── */
+
+.v2 .banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.v2 .banner-bad {
+  background: var(--pf-banner-bad-bg);
+  border: 1px solid var(--pf-banner-bad-border);
+  color: var(--pf-banner-bad-fg);
+}
+
+.v2 .banner-info {
+  background: var(--pf-banner-info-bg);
+  border: 1px solid var(--pf-banner-info-border);
+  color: var(--pf-banner-info-fg);
+}
+
+/* ── Definitions ────────────────────────────────────────────────────── */
+
+.v2 .definitions,
+.v2 .versions,
+.v2 .objectives,
+.v2 .artifacts,
+.v2 .timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.v2 .definitions > li {
+  border-top: 1px solid var(--pf-border-subtle);
+  padding: 0.6rem 0;
+}
+
+.v2 .runtime-credential {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.v2 .runtime-credential label {
+  font-size: 0.78rem;
+  font-weight: var(--pf-weight-strong);
+  color: var(--pf-text-strong);
+}
+
+.v2 .runtime-credential input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--pf-radius-sm);
+  border: 1px solid var(--pf-border-field);
+  background: var(--pf-surface-input);
+  color: inherit;
+}
+
+.v2 .definition-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.v2 .versions > li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.v2 .digest {
+  font-family: var(--pf-font-mono);
+  font-size: 0.72rem;
+  opacity: 0.6;
+}
+
+.v2 .recorder-entry {
+  display: grid;
+  gap: 0.65rem;
+  border-top: 1px solid var(--pf-border-subtle);
+  border-bottom: 1px solid var(--pf-border-subtle);
+  padding: 0.75rem 0;
+  margin: 0.25rem 0 0.85rem;
+}
+
+.v2 .recorder-entry h3 {
+  margin-top: 0;
+}
+
+.v2 .recorder-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.v2 .recorder-controls select {
+  min-width: min(100%, 16rem);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--pf-radius-sm);
+  border: 1px solid var(--pf-border-field);
+  background: var(--pf-surface-input);
+  color: inherit;
+}
+
+.v2 .recorder-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+/* ── Editor ─────────────────────────────────────────────────────────── */
+
+.v2 .editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.v2 .editor > label {
+  font-size: 0.82rem;
+  opacity: 0.8;
+}
+
+/* ── Template picker ────────────────────────────────────────────────────*/
+
+.v2 .templates {
+  border: 1px solid var(--pf-border-fieldset);
+  border-radius: var(--pf-radius-md);
+  padding: 0.6rem 0.8rem 0.7rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.v2 .templates legend {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  padding: 0 0.3rem;
+}
+
+.v2 .template {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.v2 .template input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+/* Label and hint stack, so the hint reads as explanation rather than as a second option. */
+.v2 .template > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.v2 .template .muted {
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.v2 .editor textarea {
+  width: 100%;
+  font-family: var(--pf-font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: var(--pf-surface-sunken);
+  color: var(--pf-text);
+  border: 1px solid var(--pf-border-field);
+  border-radius: var(--pf-radius-sm);
+  padding: 0.7rem;
+  resize: vertical;
+}
+
+.v2 .editor-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.v2 .validation {
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+  background: var(--pf-surface-sunken-soft);
+  border-radius: var(--pf-radius-sm);
+  padding: 0.6rem;
+  margin: 0;
+}
+
+/* ── Runs ───────────────────────────────────────────────────────────── */
+
+.v2 .runs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.v2 .runs th {
+  text-align: left;
+  font-weight: 600;
+  opacity: 0.6;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 0.4rem;
+}
+
+.v2 .runs td {
+  padding: 0.45rem 0.5rem 0.45rem 0;
+  border-top: 1px solid var(--pf-border-subtle);
+}
+
+.v2 .runs tbody tr {
+  cursor: pointer;
+}
+
+.v2 .runs tbody tr:hover {
+  background: var(--pf-surface-hover);
+}
+
+.v2 .runs tbody tr.selected {
+  background: var(--pf-surface-selected);
+}
+
+/* ── Detail ─────────────────────────────────────────────────────────── */
+
+.v2 .objectives > li,
+.v2 .artifacts > li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-size: 0.83rem;
+}
+
+.v2 .objective-scope {
+  font-weight: 600;
+}
+
+.v2 .timeline > li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.2rem 0;
+  font-size: 0.8rem;
+}
+
+.v2 .timeline time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+  min-width: 5.5rem;
+}
+
+.v2 .muted {
+  opacity: 0.62;
+}
+
+.v2-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  opacity: 0.7;
+}
+
+/* ── The provider line ──────────────────────────────────────────────────
+ *
+ * Permanently visible in the console header. A deployment that generates no load produces runs
+ * indistinguishable from real ones apart from the numbers, so the disclosure cannot be somewhere a
+ * consumer has to go looking.
+ */
+
+.v2 .provider-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--pf-disclosure-border);
+  background: var(--pf-disclosure-bg);
+  color: var(--pf-disclosure-fg);
+}
+
+.v2 .provider-line code {
+  font-family: var(--pf-font-mono);
+  font-size: 0.75rem;
+}
+
+/* Not styled as an error, because it is not one — it is the honest description of a development
+ * deployment. Styled as a standing warning, because acting on its numbers would be a mistake. */
+.v2 .provider-line-synthetic {
+  border-color: var(--pf-disclosure-alert-border);
+  background: var(--pf-disclosure-alert-bg);
+  color: var(--pf-disclosure-alert-fg);
+}
+
+/* ── The synthetic banner ───────────────────────────────────────────────
+ *
+ * Deliberately the loudest element in the report. It must survive being screenshotted alongside a
+ * latency figure, which a tooltip or a footnote does not.
+ */
+
+.v2 .synthetic-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.4rem;
+  background: var(--pf-synthetic-bg);
+  border: 1px solid var(--pf-synthetic-border);
+  /* A left rule so the block still reads as a warning if a screenshot loses the colour, and in
+   * forced-colors mode where backgrounds are replaced. */
+  border-left: 4px solid var(--pf-synthetic-rule);
+  color: var(--pf-synthetic-fg);
+}
+
+.v2 .synthetic-banner strong {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--pf-synthetic-fg-strong);
+}
+
+.v2 .synthetic-banner p {
+  margin: 0.35rem 0 0;
+  font-size: 0.81rem;
+  line-height: 1.45;
+  opacity: 0.9;
+}
+
+/* ── Report ─────────────────────────────────────────────────────────────*/
+
+.v2 .report .verdict {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.v2 .report .verdict-good { color: var(--pf-verdict-pass-fg); }
+.v2 .report .verdict-neutral { color: var(--pf-verdict-unknown-fg); }
+
+.v2 .footnote {
+  font-size: 0.76rem;
+  margin: 0.5rem 0 0;
+}
+
+/* Wide content scrolls inside its own container rather than making the page scroll sideways. */
+.v2 .table-scroll {
+  overflow-x: auto;
+}
+
+.v2 table.metrics,
+.v2 table.stages {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.v2 table.metrics th,
+.v2 table.stages th {
+  text-align: left;
+  font-weight: 600;
+}
+
+/* Recessive header: the numbers are the content, the labels only locate them. */
+.v2 table.metrics thead th,
+.v2 table.stages thead th {
+  opacity: 0.6;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 0.55rem 0.35rem 0;
+  white-space: nowrap;
+}
+
+.v2 table.metrics td,
+.v2 table.metrics tbody th,
+.v2 table.stages td,
+.v2 table.stages tbody th {
+  padding: 0.4rem 0.55rem 0.4rem 0;
+  border-top: 1px solid var(--pf-border-subtle);
+  white-space: nowrap;
+}
+
+/* Tabular figures so a column of latencies lines up and can be compared by eye. */
+.v2 .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The row a whole-test objective is judged against. */
+.v2 table.metrics tr.aggregate {
+  font-weight: 600;
+  background: var(--pf-surface-emphasis);
+}
+
+/* p95 is the percentile objectives are usually written against, so it is the one to find fast. */
+.v2 table.metrics .emphasis {
+  color: var(--pf-text-strong);
+  font-weight: var(--pf-weight-strong);
+}
+
+/* ── Load profile ───────────────────────────────────────────────────────
+ *
+ * One series — expected users over time — so a bar, one hue, no legend. The hue is the brand
+ * primary at a step validated against this surface for lightness, chroma and contrast. Every bar
+ * carries its own number beside it, so identity and magnitude are never colour or length alone.
+ */
+
+.v2 .workload {
+  border-top: 1px solid var(--pf-border-subtle);
+  padding: 0.6rem 0;
+}
+
+.v2 .workload-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+}
+
+.v2 .stage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 12rem;
+}
+
+/*
+ * The bar's own space. Separated from the value so the longest bar cannot push its number out of
+ * view — the number is the reading, and a full-width bar with the figure clipped off the edge is a
+ * chart that lost the data.
+ */
+.v2 .stage-track {
+  flex: 1;
+  min-width: 0;
+}
+
+.v2 .stage-bar {
+  display: block;
+  height: 10px;
+  min-width: 2px;
+  background: var(--pf-series-1);
+  /* Rounded only at the data end; the origin end stays square against the baseline. */
+  border-radius: 0 4px 4px 0;
+}
+
+/* Text wears a text token, never the series colour. */
+.v2 .stage-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--pf-text-strong);
+  /* Reserved width, so the column of figures lines up down the profile. */
+  min-width: 3.5rem;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.v2 .mix {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.1rem;
+  font-size: 0.8rem;
+}
+
+.v2 .mix > li {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* ── Evidence ───────────────────────────────────────────────────────────*/
+
+.v2 .link-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  opacity: 1;
+}
+
+.v2 .link-download:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Advanced ───────────────────────────────────────────────────────────*/
+
+.v2 .advanced {
+  margin-top: 1.1rem;
+  border-top: 1px solid var(--pf-border-subtle);
+  padding-top: 0.6rem;
+}
+
+.v2 .advanced summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.v2 .advanced dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.9rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+}
+
+.v2 .advanced dt {
+  opacity: 0.6;
+}
+
+.v2 .advanced dd {
+  margin: 0;
+}
+
+/* Available to screen readers, invisible on screen. Table captions carry what the heading above
+ * implies visually but a screen reader reaching the table directly would not have. */
+.v2 .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Forced-colors mode replaces backgrounds, which would erase a bar drawn as a coloured block. */
+@media (forced-colors: active) {
+  .v2 .stage-bar {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .v2 .synthetic-banner {
+    border: 2px solid;
+  }
+}
+
+/* ── Importing ────────────────────────────────────────────────────────────
+   The import panel sits inside the editor, because importing is a step in
+   describing a test rather than a destination of its own. Findings get more
+   room than the journeys do: what an importer removed is what stands between
+   a draft and a test that measures something. */
+
+.v2 .editor-import {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.v2 .import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--pf-border-panel);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-panel);
+}
+
+.v2 .import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.v2 .import-head h3 {
+  margin: 0;
+}
+
+.v2 .import-panel textarea {
+  width: 100%;
+  font-family: var(--pf-font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--pf-border-panel);
+  background: var(--pf-surface-input);
+  color: var(--pf-text-panel);
+  resize: vertical;
+}
+
+.v2 .import-result h4,
+.v2 .import-findings h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.v2 .import-scenarios code {
+  font-size: var(--pf-text-xs);
+  color: var(--pf-text-code);
+  word-break: break-all;
+}
+
+.v2 .findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.v2 .finding {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  background: var(--pf-surface-finding);
+  border-left: 3px solid var(--pf-border-panel);
+}
+
+.v2 .finding p {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.v2 .finding code {
+  font-size: 0.72rem;
+}
+
+.v2 .tone-warn { color: var(--pf-status-wait-fg); }
+
+/* Keeps a file input operable by keyboard and screen reader while the styled
+   button in front of it is what everyone else sees. `display: none` would take
+   it out of the accessibility tree entirely. */
+.v2 .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── The answer, and progress ────────────────────────────────────────────
+ *
+ * Added with S2. Both exist for the reader who has not run a performance test before: one says what
+ * the result means, the other says how much longer to wait.
+ */
+
+.v2 .answer {
+  border-left: 3px solid var(--pf-border);
+  padding: var(--pf-space-4) 0 var(--pf-space-4) var(--pf-space-5);
+  margin-bottom: var(--pf-space-5);
+}
+
+.v2 .answer-good { border-left-color: var(--pf-verdict-pass-border); }
+.v2 .answer-bad { border-left-color: var(--pf-verdict-fail-border); }
+.v2 .answer-unknown { border-left-color: var(--pf-verdict-unknown-border); }
+
+/* The sentence someone reads first, so it is the largest text in the report. */
+.v2 .answer-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-3);
+  margin: 0;
+  font-size: 1rem;
+  font-weight: var(--pf-weight-strong);
+  line-height: 1.45;
+}
+
+.v2 .answer-detail {
+  margin: var(--pf-space-3) 0 0;
+  font-size: var(--pf-text-md);
+  line-height: 1.55;
+  opacity: var(--pf-text-muted-opacity);
+}
+
+/* A dotted underline marks a term that explains itself, which is the established convention for
+ * one — a plain header gives no hint that hovering would help. */
+.v2 .column-label {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  cursor: help;
+}
+
+.v2 .run-progress {
+  margin: var(--pf-space-5) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.v2 .run-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pf-space-4);
+  font-size: var(--pf-text-md);
+}
+
+.v2 .run-progress-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+  font-weight: var(--pf-weight-strong);
+}
+
+.v2 .run-progress-track {
+  height: 8px;
+  border-radius: var(--pf-radius-pill);
+  background: var(--pf-surface-raised);
+  border: 1px solid var(--pf-border-subtle);
+  overflow: hidden;
+}
+
+.v2 .run-progress-fill {
+  height: 100%;
+  background: var(--pf-series-1);
+  transition: width 0.6s linear;
+}
+
+/* Past its planned finish the bar stops reading as progress and starts reading as a wait. */
+.v2 .run-progress-track.overrun .run-progress-fill {
+  background: var(--pf-status-wait-fg);
+}
+
+.v2 .run-progress-note {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+  line-height: 1.5;
+}
+
+/* Forced-colors mode replaces backgrounds, which would erase a bar drawn as a coloured block. */
+@media (forced-colors: active) {
+  .v2 .run-progress-fill {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}
+
+/* A bar that animates its width is motion. The number beside it carries the same information. */
+@media (prefers-reduced-motion: reduce) {
+  .v2 .run-progress-fill { transition: none; }
+}
+
+/* ── Live monitoring ──────────────────────────────────────────────────────────
+ *
+ * The panel a person watches while a test runs. Its layout follows what somebody actually does with
+ * it: read whether anything is wrong, then read the four numbers, then look for which journey is
+ * responsible. Observations therefore sit above the tiles rather than beside them.
+ */
+.v2 .live-monitor {
+  margin: var(--pf-space-6) 0;
+  padding: var(--pf-space-6);
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-lg);
+  background: var(--pf-surface-raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-5);
+}
+
+.v2 .live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-space-4);
+}
+
+.v2 .live-head h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-3);
+}
+
+.v2 .live-monitor h4 {
+  margin: var(--pf-space-3) 0 0;
+  font-size: var(--pf-text-md);
+}
+
+/* The freshness badge. Its whole job is to stop reading as "Live" the moment it stops being true. */
+.v2 .live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-1) var(--pf-space-4);
+  border-radius: var(--pf-radius-pill);
+  font-size: var(--pf-text-xs);
+  border: 1px solid transparent;
+}
+
+.v2 .live-live {
+  color: var(--pf-status-busy-fg);
+  background: var(--pf-status-busy-bg);
+  border-color: var(--pf-status-busy-border);
+}
+
+.v2 .live-lagging {
+  color: var(--pf-status-wait-fg);
+  background: var(--pf-status-wait-bg);
+  border-color: var(--pf-status-wait-border);
+}
+
+.v2 .live-stale {
+  color: var(--pf-verdict-fail-fg);
+  background: var(--pf-verdict-fail-bg);
+  border-color: var(--pf-verdict-fail-border);
+}
+
+.v2 .observations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.v2 .observation {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-4);
+  padding: var(--pf-space-4);
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border-subtle);
+  background: var(--pf-surface-emphasis);
+}
+
+.v2 .observation > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.v2 .obs-critical {
+  color: var(--pf-banner-bad-fg);
+  background: var(--pf-banner-bad-bg);
+  border-color: var(--pf-banner-bad-border);
+}
+
+.v2 .obs-warning {
+  color: var(--pf-synthetic-fg);
+  background: var(--pf-synthetic-bg);
+  border-color: var(--pf-synthetic-border);
+}
+
+.v2 .obs-info {
+  color: var(--pf-banner-info-fg);
+  background: var(--pf-banner-info-bg);
+  border-color: var(--pf-banner-info-border);
+}
+
+.v2 .live-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--pf-space-4);
+}
+
+.v2 .live-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-5);
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border-subtle);
+  background: var(--pf-surface-sunken-soft);
+}
+
+.v2 .live-tile-bad {
+  border-color: var(--pf-verdict-fail-border);
+}
+
+.v2 .live-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: var(--pf-text-xs);
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .live-tile-value {
+  font-size: var(--pf-text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tile's own explanation, because "p95" means nothing to somebody on their first load test. */
+.v2 .live-tile-hint {
+  font-size: var(--pf-text-2xs);
+  line-height: 1.4;
+}
+
+.v2 .sparkline,
+.v2 .sparkline-placeholder {
+  height: 28px;
+  width: 100%;
+}
+
+.v2 .sparkline path {
+  stroke: var(--pf-series-1);
+}
+
+.v2 .live-tile-bad .sparkline path {
+  stroke: var(--pf-verdict-fail-fg);
+}
+
+.v2 .live-total {
+  margin: 0;
+  font-size: var(--pf-text-sm);
+}
+
+.v2 .live-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--pf-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.v2 .live-table th,
+.v2 .live-table td {
+  text-align: left;
+  padding: var(--pf-space-3) var(--pf-space-4);
+  border-bottom: 1px solid var(--pf-border-subtle);
+}
+
+.v2 .live-table th {
+  font-weight: var(--pf-weight-strong);
+  opacity: var(--pf-text-muted-opacity);
+}
+
+.v2 .live-table .bad {
+  color: var(--pf-verdict-fail-fg);
+}
+
+/* A generator that has gone quiet. Marked on its row as well as named in an observation: the
+ * totals above are still climbing, so the row is the only place the loss is visible as a fact. */
+.v2 .live-table .row-bad {
+  background: var(--pf-verdict-fail-bg);
+}
+
+/* A sparkline is decoration for the number beside it; forced-colors mode can drop it entirely. */
+@media (forced-colors: active) {
+  .v2 .sparkline path { stroke: CanvasText; }
+}
+
+/* ── Recorder panel ─────────────────────────────────────────────────── */
+
+.v2 .recorder-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--pf-border-subtle);
+  border-radius: var(--pf-radius-md);
+  padding: 0.85rem;
+  margin: 0.25rem 0 0.85rem;
+}
+
+.v2 .recorder-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.v2 .recorder-panel-header h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+}
+
+.v2 .recorder-panel-header p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+}
+
+.v2 .recorder-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.v2 .recorder-state {
+  font-family: var(--pf-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--pf-radius-sm);
+  border: 1px solid var(--pf-border-subtle);
+}
+
+.v2 .recorder-state-live {
+  border-color: var(--pf-accent-positive, currentColor);
+}
+
+.v2 .recorder-state-failed,
+.v2 .recorder-state-expired {
+  border-color: var(--pf-accent-negative, currentColor);
+}
+
+/*
+ * The surface is sized by the frame's own aspect ratio, so it never letterboxes and the pointer
+ * mapping in RecorderPanel stays a straight ratio.
+ */
+.v2 .recorder-surface {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: var(--pf-surface-input);
+  border: 1px solid var(--pf-border-field);
+  border-radius: var(--pf-radius-sm);
+  cursor: default;
+  touch-action: none;
+}
+
+.v2 .recorder-surface:focus-visible {
+  outline: 2px solid var(--pf-focus, currentColor);
+  outline-offset: 2px;
+}
+
+.v2 .recorder-surface img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.v2 .recorder-waiting {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.82rem;
+}
+
+.v2 .recorder-failure {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.v2 .recorder-pending {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  font-size: 0.84rem;
+}
+
+.v2 .recorder-pending p {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+}
+
+.v2 .recorder-evidence {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.v2 .recorder-evidence h4 {
+  margin: 0 0 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.v2 .recorder-evidence p {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.v2 .recorder-evidence ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.v2 .recorder-evidence li {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.76rem;
+}
+
+.v2 .recorder-evidence li code {
+  font-family: var(--pf-font-mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.v2 .recorder-evidence li span {
+  font-size: 0.72rem;
+}

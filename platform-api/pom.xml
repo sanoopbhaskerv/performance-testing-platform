@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>platform-api</artifactId>
+  <packaging>jar</packaging>
+  <name>Platform API</name>
+  <description>
+    The /api/v2/** REST surface: controllers, request/response DTOs, validation and RFC 7807
+    problem responses. Calls orchestration use cases and never a Spring Data repository directly.
+    Persistence entities are never exposed as responses. Spring Web and Spring Security are added
+    in Increment 1B together with the first V2 endpoint.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-orchestration</artifactId>
+    </dependency>
+
+    <!--
+      Spring Web and Validation for the V2 controllers; Jackson YAML to accept the
+      GitOps serialization of the same canonical specification the UI and API produce.
+      Jackson is confined to this module: the domain must stay free of serialization
+      annotations so its shape is not dictated by a wire format.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    </dependency>
+
+    <!--
+      MockMvc, so the V2 controllers and their RFC 7807 problem mapping are tested at the HTTP
+      boundary rather than by calling methods. Status codes and problem bodies are the contract CI
+      integrations key on, and a method-level test cannot show what a caller actually receives.
+      Already used in platform-core; no new dependency is introduced to the repository.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,56 @@
+# A browser-only journey test using a reviewed Playwright script artifact.
+#
+# S6 executes uploaded or pasted Playwright material by immutable artifact URI and
+# SHA-256 digest. Git-pinned repository import is intentionally deferred.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: proposal-journey
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-browser
+      type: playwright
+      uri: artifact://playwright-sources/sha256-a9e8/proposal-journey.spec.ts
+      digest: sha256:a9e8d7c6b5a4938271605f4e3d2c1b0aa0b1c2d3e4f5061728394a5b6c7d8e9f
+
+  workloads:
+    - name: browser-experience
+      type: browser
+      engine: playwright
+      sourceRef: proposal-browser
+      # Browser sessions are budgeted separately from protocol virtual users and
+      # start small: the default is 5, with an initial policy maximum of 20.
+      browserUsers: 5
+      iterationsPerUser: 3
+      browserProfile:
+        device: mobile
+        network: slow-4g
+        cpuThrottle: 4
+
+  objectives:
+    - metric: browser.journey.duration
+      scope: browser-experience
+      percentile: 95
+      threshold: 8s
+    - metric: web.lcp
+      scope: browser-experience
+      percentile: 95
+      threshold: 2500ms
+    - metric: web.cls
+      scope: browser-experience
+      percentile: 95
+      threshold: 0.1score
+
+  governance:
+    maxDuration: 30m
+    approvalPolicy: non-production-standard
+    retention: 90d

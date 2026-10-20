@@ -1,0 +1,32 @@
+# INVALID FIXTURE — expected finding: spec.parse.threshold.invalid
+#
+# The threshold carries no unit. Guessing milliseconds would silently change the
+# test's pass/fail outcome, so it is rejected instead.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: unitless-threshold
+  team: advice-implementation
+  application: proposal
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads:
+    - name: api-load
+      type: protocol
+      engine: jmeter
+      model:
+        type: stages
+        stages:
+          - duration: 5m
+            targetUsers: 100
+
+  objectives:
+    - metric: http.response.time
+      percentile: 95
+      threshold: 750

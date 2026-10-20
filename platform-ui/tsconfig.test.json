@@ -1,0 +1,40 @@
+{
+  /*
+   * Tests get their own project, separate from `tsconfig.app.json`.
+   *
+   * Two reasons, and both matter more than the small amount of duplication. Test code needs Node's
+   * types — `tokens.test.ts` reads stylesheets off disk to prove no colour literal escaped the token
+   * layer — while application code must not have them: browser code that can see `fs` or `process`
+   * compiles happily and fails at runtime in the one environment nobody tested. And the DOM types
+   * the tests need come with jsdom's matchers, which have no business in the app's type space.
+   *
+   * Referenced from `tsconfig.json`, so `tsc -b` (and therefore `npm run build`) still type-checks
+   * every test file. A test project outside the build is one that quietly stops compiling.
+   */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "ES2023",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["node", "vite/client"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-setup.ts"]
+}

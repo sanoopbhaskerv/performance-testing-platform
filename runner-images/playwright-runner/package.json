@@ -1,0 +1,11 @@
+{
+  "name": "performance-platform-browser-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@playwright/test": "1.62.1"
+  },
+  "scripts": {
+    "test": "node --test runner.test.mjs"
+  }
+}

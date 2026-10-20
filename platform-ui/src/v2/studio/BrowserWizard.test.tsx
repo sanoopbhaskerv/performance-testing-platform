@@ -1,0 +1,40 @@
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { it, expect, vi } from 'vitest';
+import Studio from './Studio';
+import type { V2Client } from '../api';
+
+it('a first-time author can save a real browser specification through labelled controls', async () => {
+  const source = { uri: 'artifact://teams/team-id/sources/playwright/' + 'a'.repeat(64) + '/journey.spec.ts', digest: 'sha256:' + 'a'.repeat(64), sizeBytes: 40 };
+  const create = vi.fn().mockResolvedValue({ name: 'browser-check' });
+  const upload = vi.fn().mockResolvedValue(source);
+  const client = { listTeamNames: vi.fn().mockResolvedValue(['my-team']), uploadBrowserSource: upload,
+    validate: vi.fn().mockResolvedValue({ valid: true, findings: [], digest: 'sha256:checked' }), createDefinition: create } as unknown as V2Client;
+  const saved = vi.fn(); const user = userEvent.setup();
+  render(<Studio client={client} team="my-team" onSaved={saved} onCancel={vi.fn()} />);
+  await user.click(screen.getByRole('button', { name: /Test web performance/ }));
+  await user.type(screen.getByLabelText('Name this test'), 'browser-check');
+  await user.type(screen.getByLabelText('Which application?'), 'shop');
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.change(screen.getByLabelText('Reviewed journey'), { target: { value: "import { test } from '@playwright/test';" } });
+  expect(screen.getByRole('button', { name: 'Store reviewed script' })).toBeDisabled();
+  await user.click(screen.getByRole('checkbox', { name: /I reviewed this journey/ }));
+  await user.click(screen.getByRole('button', { name: 'Store reviewed script' }));
+  await waitFor(() => expect(upload).toHaveBeenCalledWith('my-team', expect.any(String)));
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  expect(screen.getByLabelText('Browsers at once')).toHaveValue(1);
+  expect(screen.getByLabelText('Journeys per browser')).toHaveValue(1);
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  expect(screen.getAllByRole('option', { name: 'Whole journey duration' }).length).toBeGreaterThan(0);
+  expect(screen.queryByRole('option', { name: 'Throughput' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await user.click(screen.getByRole('button', { name: 'Check browser configuration' }));
+  await screen.findByText('Configuration checked. Ready to save.');
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save test' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Save test' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledWith('browser-check'));
+  expect(create.mock.calls[0][0]).toContain('engine: playwright');
+  expect(create.mock.calls[0][0]).toContain(source.digest);
+  expect(create.mock.calls[0][0]).not.toContain('engine: jmeter');
+});

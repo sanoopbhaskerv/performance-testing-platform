@@ -1,0 +1,80 @@
+# Production-like overlay for broker-backed run://session.
+#
+# This file intentionally contains only coordinates, names and secret references.
+# Create the referenced Kubernetes Secrets out of band.
+
+replicaCount: 2
+
+image:
+  repository: registry.internal/perfplatform/platform-core
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "perf-platform.internal.your-company.com"
+  tls:
+    - secretName: perf-platform-tls
+      hosts:
+        - perf-platform.internal.your-company.com
+
+runnerCell:
+  enabled: true
+  namespace: perf-runners
+  serviceAccount: perf-runner
+  serviceAccountAnnotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::<account-id>:role/perf-runner-artifacts"
+  images:
+    jmeter: "registry.internal/perfplatform/jmeter-runner:5.6.3-3"
+    playwright: "registry.internal/perfplatform/playwright-runner:1.50.0-1"
+  resources:
+    cpuRequest: "2"
+    cpuLimit: "4"
+    memoryRequest: "2Gi"
+    memoryLimit: "4Gi"
+  workspaceSizeLimit: "8Gi"
+  finishedJobTtl: 6h
+  deadlineGrace: 5m
+
+lifecycleCleanup:
+  enabled: true
+  interval: 1m
+
+artifacts:
+  store: s3
+  bucket: perf-platform-artifacts
+  region: us-east-1
+  endpoint: ""
+  pathStyleAccess: false
+  runnerEndpoint: ""
+  runnerCredentialsSecret: ""
+
+sessionAcquisition:
+  provider: external-session-broker
+  endpoint: https://session-broker.perf-platform.svc.cluster.local
+  requestTimeout: 10s
+  # Defaults for external-session-broker are shown here to make the contract explicit.
+  loginPath: /v1/sessions:acquire
+  refreshPath: /v1/sessions:refresh
+  clientCredentialSecretRef: k8s://session-broker-client/token
+
+secretResolver:
+  mountRoot: /var/run/perfplatform/secrets
+  mountedSecrets:
+    - name: session-broker-client
+
+database:
+  username: perf
+  # Replace chart-managed database credentials with an external Secret before production use.
+  password: change-through-secret-management
+
+postgres:
+  enabled: false
+  externalUrl: jdbc:postgresql://perf-platform-postgres.internal:5432/perf_platform
+
+prometheus:
+  enabled: true
+
+grafana:
+  enabled: false

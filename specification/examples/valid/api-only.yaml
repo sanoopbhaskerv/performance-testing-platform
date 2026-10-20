@@ -1,0 +1,91 @@
+# A protocol-only API load test: the common case.
+#
+# Nothing here mentions JMeter internals. The consumer describes traffic and objectives;
+# the platform compiles an engine plan after the specification validates.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: proposal-workflow-baseline
+  team: advice-implementation
+  application: proposal
+  labels:
+    tier: tier-0
+    portfolio: awm
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  sources:
+    - name: proposal-api
+      type: openapi
+      uri: artifact://proposal/openapi.yaml
+
+  authentication:
+    # A reference, never the credential. The value is resolved at execution time and
+    # mounted only into the runner.
+    - name: test-user
+      type: oauth2-client-credentials
+      secretRef: vault://performance/proposal/client
+
+  datasets:
+    - name: client-data
+      source:
+        type: object-storage
+        uri: dataset://proposal-clients/1
+      # Each shard gets a non-overlapping slice, so sharding does not make every
+      # generator replay the same rows.
+      partitionByShard: true
+
+  workloads:
+    - name: api-background-load
+      type: protocol
+      engine: jmeter
+      sourceRef: proposal-api
+      model:
+        type: stages
+        stages:
+          - duration: 5m
+            targetUsers: 200
+          - duration: 20m
+            targetUsers: 600
+          # Target zero to ramp down rather than stopping abruptly.
+          - duration: 5m
+            targetUsers: 0
+      # Weights produce a realistic mix rather than an even spread across endpoints.
+      scenarios:
+        - name: search-client
+          weight: 60
+          operationId: searchClient
+        - name: open-proposal
+          weight: 30
+          operationId: getProposal
+        - name: save-proposal
+          weight: 10
+          operationId: saveProposal
+
+  objectives:
+    - metric: http.response.time
+      scope: api-background-load
+      percentile: 95
+      threshold: 750ms
+    - metric: http.error.rate
+      scope: api-background-load
+      threshold: 1%
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+    serviceTagSelector: application:proposal
+    collect:
+      - service-response-time
+      - failure-rate
+      - cpu
+
+  governance:
+    maxDuration: 45m
+    approvalPolicy: non-production-standard
+    retention: 90d

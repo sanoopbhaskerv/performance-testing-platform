@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>platform-persistence</artifactId>
+  <packaging>jar</packaging>
+  <name>Platform Persistence</name>
+  <description>
+    PostgreSQL adapters and Flyway migrations implementing the repository ports defined by the
+    domain. Allowed dependencies are platform-domain, Spring Data and Flyway. Spring Data and
+    Flyway are added in Increment 1B/1C together with the code that uses them, so that the
+    dependency set stays an honest record of what this module actually needs.
+    See docs/adr/002-postgresql-durable-orchestration.md.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+
+    <!-- Spring Data JPA for the repository adapters; Flyway owns the schema. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+
+    <!--
+      Jackson, for the one column in this module that stores a document: a live snapshot's
+      per-operation breakdown, latency buckets and per-shard capture times (run_progress.detail_json).
+      Not a new library for the platform — orchestration already uses it — and the alternative was
+      three child tables written every few seconds per run and always read together.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!--
+      S3-compatible object storage for durable artifacts (Increment 1E). It lives beside the
+      filesystem store because both implement the same storage port and share one key layout; only
+      the medium differs. The filesystem store cannot serve multiple replicas, and a runner Pod on
+      another node cannot reach it at all.
+
+      No bucket, region, endpoint or credential appears in code — all are configuration, and
+      choosing a production bucket is a decision for whoever operates the platform (CLAUDE.md §31).
+    -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+    </dependency>
+    <!-- The default credential chain needs STS on the runtime classpath for projected
+         web-identity tokens (for example EKS IRSA). Reuses the existing AWS SDK version. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>sts</artifactId>
+    </dependency>
+
+    <!--
+      PostgreSQL via Testcontainers is the authoritative integration-test database (CLAUDE.md §25):
+      H2 does not have JSONB, plpgsql triggers, or PostgreSQL's locking semantics, so a green H2
+      test would prove a weaker claim than the one being made. All of these are already used
+      elsewhere in the repository; no new dependency is introduced.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      MinIO speaks the S3 API, so the S3 adapter is exercised against a real server rather than a
+      mock. An in-memory fake would prove the code compiles against the SDK and nothing else — and
+      the properties that matter here (key layout, metadata round-trip, a missing key) are exactly
+      the ones a fake would be written to satisfy.
+    -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>minio</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

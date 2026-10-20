@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.perfplatform</groupId>
+    <artifactId>performance-testing-platform</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>platform-orchestration</artifactId>
+  <packaging>jar</packaging>
+  <name>Platform Orchestration</name>
+  <description>
+    Admission control, queue claiming, the run state machine and reconciliation. Reaches engines
+    and runners only through the engine SPI and execution ports, never through an engine or
+    Kubernetes client directly. See docs/adr/001-control-execution-separation.md.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-engine-spi</artifactId>
+    </dependency>
+
+    <!--
+      The logging facade only. CLAUDE.md §8 requires structured log fields (runId, teamId, engine)
+      on orchestration decisions, and reconciliation is where "why did this run not start" is
+      answered. slf4j-api is already the facade used throughout platform-core and is pulled in by
+      Spring Boot regardless; declaring it here keeps this module's dependency list honest rather
+      than relying on it arriving transitively. No binding is added — the composition root chooses.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <!--
+      JSON contract for the external session broker adapter. This adapter exchanges a narrow
+      request/response document with an approved broker; using Jackson keeps credential acquisition
+      parsing structured instead of relying on fragile string handling.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

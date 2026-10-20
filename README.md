@@ -1,168 +1,218 @@
 # Performance Testing Platform
 
-A **self-service, config-driven performance testing platform** that eliminates the bottleneck of a central performance engineering team. Any team can run load, endurance, and spike tests by filling in a single YAML config file — no JMeter expertise required.
+A self-hosted performance testing platform for people who know their application's requirements,
+but do not want to write JMeter plans or operate load generators by hand.
 
----
+Import API requests or a reviewed Playwright journey, describe the traffic and objectives, run the
+test, and read measured results with downloadable evidence. The web console, REST API and YAML
+use the same immutable test specification. You can fork the code, change the UI, add integrations
+and deploy it in your own infrastructure. [MIT licensed](LICENSE).
 
-## 🚀 Quickstart (Local)
+## Start with your goal
 
-```bash
-# 1. Clone the repo
-git clone <repo-url>
-cd performance-testing-platform
+| Goal | Guide |
+|---|---|
+| Clone and install in company infrastructure | [Step-by-step company installation](docs/deployment/company-installation.md) |
+| Add your name, logo, colors and theme | [Runtime branding](docs/deployment/branding.md) |
+| Understand what runs where | [Architecture and technology placement diagrams](docs/architecture/system-overview.md) |
+| Use AWS, Azure, Google Cloud or on premises | [Cloud mappings and supported adapters](docs/deployment/cloud-profiles.md) |
+| Look up a configuration key | [Configuration reference](docs/deployment/configuration-reference.md) |
+| Configure a test without performance-testing experience | [Consumer requirements guide](docs/user-guide/configuration.md) |
+| Find all documentation | [Documentation index](docs/README.md) |
 
-# 2. Copy the example team config and fill in your values
-cp config/teams/example-team.yml config/teams/your-team.yml
-# Edit config/teams/your-team.yml with your service URL and endpoints
+## How it fits into your infrastructure
 
-# 3. Start the platform
-cd docker && docker-compose up -d
+![Standalone system architecture](docs/images/system-architecture.svg)
 
-# 4. Open the Web UI
-open http://localhost:8080
+<details>
+<summary>Editable Mermaid source</summary>
+
+```text
+flowchart LR
+  Consumer["Browser / CI / AI editor"] --> API["Your ingress + TLS<br/>React UI / Spring Boot control plane"]
+  API --> DB[("Your PostgreSQL")]
+  API --> Store[("Your private S3-compatible storage")]
+  API --> Jobs["Isolated JMeter / Playwright Jobs<br/>dedicated Kubernetes namespace"]
+  Jobs --> Store
+  Jobs --> Target["Your approved application under test"]
 ```
 
----
+</details>
 
-## ☁️ Deploy to Kubernetes (EKS + Karpenter)
+The control plane validates requirements, authorizes team access, queues runs, reconciles Jobs and
+evaluates stored evidence. Material load runs in the isolated Jobs. PostgreSQL owns definitions,
+versions, state and summaries; object storage owns plans, raw results and browser evidence. You
+supply the cluster, database, bucket, registry, network and certificates. There is no required
+vendor-hosted control plane or AI subscription. See the full
+[architecture, placement and sequence diagrams](docs/architecture/system-overview.md).
 
-```bash
-# Add your team config to helm/performance-platform/values.yaml under teamConfigs:
-# Then install:
-helm install perf-platform ./helm/performance-platform \
-  --namespace perf-testing --create-namespace \
-  --set image.tag=1.0.0
+## Customize without editing components
 
-# Access the UI via the configured ingress host
-open https://perf-platform.internal.your-company.com
-```
-
-Karpenter will automatically provision and de-provision nodes for each JMeter test run — you only pay for EC2 during active tests.
-
----
-
-## 📝 Team Onboarding (3 Steps)
-
-**Step 1** — Get your API key from the platform admin.
-
-**Step 2** — Create your config file at `config/teams/<your-team>.yml`:
+Copy [company-values.yaml](helm/performance-platform/examples/company-values.yaml), replace its
+infrastructure coordinates, create the referenced Secrets, and set your branding:
 
 ```yaml
-team: my-team
-apiKey: "your-api-key"
-
-targets:
-  - name: my-service
-    baseUrl: "http://my-service:8080"
-    jvmEnabled: false         # Set true only for Java/Spring Boot services
-
-tests:
-  load:
-    enabled: true
-    rampUpUsers: 10
-    steadyStateUsers: 100
-    rampUpDurationSeconds: 60
-    steadyStateDurationSeconds: 300
-    scenarios:
-      - name: "core-flow"
-        endpoints:
-          - method: GET
-            path: "/api/health"
-
-sla:
-  maxP95LatencyMs: 500
-  maxErrorRatePercent: 1.0
+branding:
+  name: Acme Performance Lab
+  logoUrl: /branding/logo.svg
+  logoAlt: Acme
+  logoConfigMap: company-logo
+  theme: light
+  colors: {primary: "#0f766e", accent: "#0891b2"}
+capacity:
+  maxConcurrentRuns: 5
 ```
 
-**Step 3** — Run the test via:
-- **Web UI**: Open `http://localhost:8080`, select your team, click ▶ Run Test
-- **CI/CD**: Copy `ci-templates/github-actions.yml` into your repo → tests auto-trigger on config change
-- **REST API**: `POST /api/v1/tests/run`
+The same built UI supports runtime company name, tab title, local/HTTPS logo, light/dark theme and
+brand colors. For local development edit `platform-ui/public/platform-config.json`; on Kubernetes
+the chart mounts the configuration and your logo. Infrastructure settings include existing
+PostgreSQL, S3 endpoints, separate control-plane/runner identities, private image-pull Secrets,
+ingress-controller annotations, approved networks and extra non-secret Spring configuration.
+[Branding instructions](docs/deployment/branding.md) and the
+[configuration reference](docs/deployment/configuration-reference.md) show exact keys and paths.
 
----
+![Company branding and a real 100-RPS test report](docs/images/company-branded-report.png)
 
-## ⚙️ Configuration Reference
+This disposable local example measured 7,000 requests with no errors and 100 RPS in an interior
+steady window. The full-run average includes ramps. It demonstrates the flow and configuration;
+it is not a benchmark of your application or a five-team capacity certification.
 
-| Field | Default | Description |
-|---|---|---|
-| `team` | required | Unique team identifier |
-| `apiKey` | required | API key for authentication |
-| `targets[].baseUrl` | required | Base URL of the service under test |
-| `targets[].jvmEnabled` | `false` | Enable JVM heap/thread dump collection |
-| `targets[].jvmJmxPort` | `9010` | JMX port on the target service |
-| `tests.load.enabled` | `false` | Enable load test |
-| `tests.load.steadyStateUsers` | `50` | Concurrent users at peak |
-| `tests.endurance.durationMinutes` | `60` | Soak test duration |
-| `analysis.heapDump.enabled` | `false` | Heap dump collection (JVM only) |
-| `analysis.threadDump.enabled` | `false` | Thread dump collection (JVM only) |
-| `sla.maxP95LatencyMs` | `1000` | Max allowed P95 latency in ms |
-| `sla.maxErrorRatePercent` | `1.0` | Max allowed error rate % |
+Provider-specific SSO, native non-S3 storage and remote runner federation need adapters; they are
+not enabled by a logo or a cloud-name setting. The [extension guide](docs/development/extending.md)
+explains where those implementations belong.
 
-Full configuration reference: [docs/configuration-reference.md](docs/configuration-reference.md)
+## Try it locally
 
----
-
-## 🔌 REST API
-
-All endpoints require the `X-API-Key` header.
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/tests/run` | Trigger a test |
-| `GET` | `/api/v1/tests/{runId}` | Poll test status |
-| `GET` | `/api/v1/tests/{runId}/report` | Download HTML report |
-| `GET` | `/api/v1/tests/history?team=X` | Test run history |
-| `POST` | `/api/v1/dump/heap` | On-demand heap dump (JVM only) |
-| `POST` | `/api/v1/dump/thread` | On-demand thread dump (JVM only) |
-| `POST` | `/api/v1/config/reload` | Hot-reload team configs |
-
-Swagger UI: `http://localhost:8080/swagger-ui`
-
----
-
-## 🏗️ Architecture
-
-```
-Team YAML Config  →  Platform Core (Spring Boot)  →  JMeter Engine
-                           │
-                  ├── SLA Evaluator (CSV → P95/errors)
-                  ├── JVM Dump Collector (JMX, opt-in)
-                  ├── Eclipse MAT Analysis (heap)
-                  ├── Report Generator (unified HTML)
-                  └── Notification Service (Slack/email)
-
-Observability: Prometheus + pre-built Grafana dashboards
-Deployment:    Kubernetes (EKS + Karpenter) + Helm chart
-```
-
----
-
-## 🏗️ Building
+Prerequisites: JDK 21 (the application targets Java 17), Maven, Node.js 22.22.2 or newer, Python 3,
+and Docker for the PostgreSQL/object-storage integration tests. For real API load, install Apache
+JMeter with its Custom Thread Groups plugin; the launcher checks/installs the plugin. Browser
+execution uses the pinned Playwright runtime and Chromium, installed by the launcher.
 
 ```bash
+git clone https://github.com/sanoopbhaskerv/performance-testing-platform.git
 cd performance-testing-platform
-mvn clean package -pl platform-core
+# Set JAVA_HOME to your JDK installation if your environment does not already do so.
+./scripts/start-platform.sh --build
 ```
 
----
+Open `http://localhost:5173` and enter `local-dev-key-not-a-secret` in **Team access token**.
+Choose **Performance tests → New test**:
 
-## 📁 Project Layout
+- **Test an API**: import OpenAPI/Swagger, Postman, HAR, cURL, or enter requests manually. Review
+  journeys, correlation/checks, traffic and objectives, validate, save and run.
+- **Test web performance**: choose the `student-app` target, try the page-opening example or
+  upload a reviewed Playwright script, start with one browser/one iteration, check, save and run.
 
+[Browser walkthrough](docs/user-guide/browser-testing.md) ·
+[Verified self-service review](docs/reviews/browser-self-service-2026-10-19.md) ·
+[Configuration from requirements](docs/user-guide/configuration.md) ·
+[100 RPS with a concurrency ceiling of 20](specification/examples/valid/api-100-rps.yaml) ·
+[API examples](docs/api/v2-examples.md) ·
+[Recording API traffic](docs/operations/recording-locally.md)
+
+The launcher starts the API, console, demo service and student web app. Ctrl-C stops them;
+`./scripts/start-platform.sh --stop` cleans up a previous local session. `--build` rebuilds Java;
+without it, existing jars are reused. Logs are under `.local/logs`.
+
+**Check the execution banner.** The `fake` provider generates no traffic. Its runs are permanently
+marked synthetic, objectives are INDETERMINATE and the run fails with `NO_LOAD_GENERATED`.
+Those numbers are never evidence of performance. The real local adapters share your machine with
+the API; Kubernetes runners isolate material execution for hosted use.
+
+Local H2 storage is in memory. Use PostgreSQL and private S3-compatible object storage when runs
+and definitions must survive a restart or be available to multiple replicas.
+
+## Use your own application
+
+Register a permitted non-production target for your team/environment in the console's About step
+or through `POST /api/v2/targets`. The application name in your test resolves to that registered
+address; a specification does not choose a new host for itself. Bring representative requests,
+data and business assertions. Start small, inspect the results, then increase traffic.
+
+Browser scripts use relative URLs, reviewed sources, and a separate browser budget. API users
+and browsers are not interchangeable. Five concurrent material runs and one run per team are the
+initial admission defaults. These limits are configurable; they are not a verified capacity claim.
+Per-run defaults separately cap protocol users at 1,000 and workload duration at one hour. A test
+cannot raise those operator settings. Failed runs retain their slot until runner termination is
+confirmed, including after a restart. Objective units and supported percentiles are validated;
+the maximum is evaluated as p100, and p75 is stored explicitly.
+[Calibrate your generators](docs/operations/runner-calibration.md) before trusting large-load results.
+
+## Invoke it from an AI editor or CI
+
+Read the portable [performance-testing skill](skills/performance-testing/SKILL.md). It works through
+the public API and a Python 3 standard-library helper; it needs no hosted AI API or editor plugin.
+
+```bash
+export PERF_PLATFORM_URL=http://localhost:8080
+export PERF_PLATFORM_TOKEN=local-dev-key-not-a-secret # local demo only
+python3 scripts/perf.py validate --spec specification/examples/valid/demo-service.yaml
+python3 scripts/perf.py create --spec specification/examples/valid/demo-service.yaml
+# Use the immutable version.id returned above:
+python3 scripts/perf.py run --version VERSION_UUID --idempotency-key demo-check-1
+python3 scripts/perf.py wait --run RUN_UUID
+python3 scripts/perf.py report --run RUN_UUID
 ```
-performance-testing-platform/
-├── pom.xml                         # Root Maven POM
-├── platform-core/                  # Spring Boot control plane
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main/
-│       ├── java/com/perfplatform/  # All Java source
-│       └── resources/
-│           ├── application.yml
-│           ├── templates/jmx/      # Freemarker JMX templates
-│           └── static/index.html   # Web UI
-├── config/teams/                   # Team YAML configs
-│   └── example-team.yml
-├── docker/                         # Local Docker Compose
-├── helm/performance-platform/      # Kubernetes Helm chart (EKS)
-└── ci-templates/                   # GitHub Actions + Jenkins
+
+For real credentials use `PERF_PLATFORM_TOKEN_FILE` or injected secrets, never a checked-in value.
+[AI editor and CLI guide](docs/user-guide/ai-editors.md) explains uploads, versioning, cancellation,
+exit codes and safe retries.
+
+## Deploy in your own cloud
+
+The portable deployment is a modular Spring Boot control plane serving the React console,
+PostgreSQL, private S3-compatible object storage, and ephemeral JMeter/Playwright Kubernetes Jobs.
+It does not require AWS, a corporate account, Dynatrace, or BrowserStack. Cloud-specific identity,
+storage endpoints and policies are operator configuration.
+
+[Company installation](docs/deployment/company-installation.md) walks through clone, builds,
+registry publication, namespaces, managed dependencies, credentials, branding, Helm installation,
+target onboarding, verification and upgrades. [Standalone reference](docs/deployment/standalone.md) covers image builds, existing Secrets,
+scoped machine identities, Helm values, networking, storage, TLS, upgrades and verification. The
+production profile refuses local load generation, filesystem artifacts and development identity.
+Imported code must be reviewed and restricted by runner egress policy on a CNI that enforces it.
+
+The supplied standalone identity adapter uses expiring team-scoped service tokens whose hashes
+are mounted from an operator Secret. It supports automation and small self-hosted installations;
+it does not implement a human SSO login. Corporate OIDC remains an extension behind
+`CallerContextProvider`. Shared remote runner federation and BrowserStack are future work.
+
+## Build and verify
+
+```bash
+mvn clean verify                        # JAVA_HOME must be set; Docker must be running
+npm --prefix platform-ui ci
+npm --prefix platform-ui test
+npm --prefix platform-ui run build
+npm --prefix platform-ui run lint
+python3 -m unittest discover -s runner-images/jmeter-runner -p 'test_*.py'
+npm ci --prefix runner-images/playwright-runner
+(cd runner-images/playwright-runner && npx playwright install chromium && npm test)
+python3 scripts/perf.py --help
 ```
+
+The first S3 integration test builds its optional MinIO fixture from the pinned official source
+commit, verified by archive SHA-256, because upstream withdrew its old prebuilt images. Docker
+needs access to GitHub and the Go module proxy for that build; Go is not required on the host.
+The fixture retains MinIO's upstream license and is separate from your production object store.
+
+The optional live Chrome-recorder test uses `-Drecorder.live=true`. PostgreSQL and MinIO tests
+must actually run; skipped container tests do not prove integration. UI lint is part of verification alongside tests and the production build.
+
+## Extend and contribute
+
+[Extension guide](docs/development/extending.md) · [Contributing](CONTRIBUTING.md) ·
+[Deployment guide](docs/deployment/standalone.md) · [Current handoff](HANDOFF.md)
+
+The Java modules separate the domain, engine SPI, orchestration, API, persistence and results.
+`platform-core` is the composition root. JMeter and Playwright implementations plug into the SPI;
+runner images execute plans and upload artifacts rather than changing database run state.
+The [original architecture](docs/architecture/performance-testing-platform-target-architecture.md)
+contains historical enterprise requirements; the current product direction is open, self-hosted
+standalone operation with extension seams for enterprise integrations. The existing API-version
+namespace is retained for compatibility.
+
+The legacy V1 path remains available for local migration. It is blocked under production profiles.
+Do not mistake its public report and local-process behavior for the supported hosted V2 path.
+Baseline comparisons, private-repository credentials, human SSO, remote runner federation and
+physical-device testing are not implemented. Missing browser metrics remain indeterminate.

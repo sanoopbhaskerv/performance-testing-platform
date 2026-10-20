@@ -1,0 +1,101 @@
+# An open-model test: a stated rate of requests per second, whatever the system does with them.
+#
+# The question this shape answers is "can it sustain 400 requests a second?", which the staged model
+# cannot ask. A staged model holds a number of users; if the system slows down, those users send
+# less, so the load applied falls with the system's health and the test under-reports how bad a
+# stall was. Here the arrivals keep coming.
+#
+# That is also why maxConcurrency is mandatory. Requests that do not complete accumulate: at 400/s
+# against a target that stops answering, ten seconds of stall is four thousand requests in flight.
+# Without a ceiling the load generator exhausts its own threads or heap, dies, and the run reports
+# the generator's failure as the target's — a result that looks like evidence and is not.
+#
+# The ceiling is also what the platform's admission control budgets against. A rate says nothing
+# about how much of a generator a test occupies: 400/s against a 20ms endpoint is about eight
+# concurrent requests, and against a 2s endpoint it is eight hundred.
+#
+# See docs/operations/load-models.md.
+apiVersion: performance.ameriprise.com/v1alpha1
+kind: PerformanceTest
+
+metadata:
+  name: quotes-sustained-rate
+  team: advice-implementation
+  application: quotes
+  labels:
+    tier: tier-1
+
+spec:
+  environment:
+    name: performance
+    runnerCell: advice-perf-eks
+    targetClass: non-production
+
+  workloads:
+    - name: quotes-rate
+      type: protocol
+      engine: jmeter
+
+      model:
+        type: arrival-rate
+
+        # Roughly rate x the slowest response time expected, in seconds: 400/s at up to half a
+        # second each is about 200 in flight, and this leaves headroom above that. Set it below the
+        # rate and the ceiling — not the target — becomes what limits the test, which the validator
+        # warns about.
+        maxConcurrency: 250
+
+        stages:
+          # Climb to the rate, hold it, then stop. Stage order is significant, and the closing
+          # zero-rate stage is what expresses ramp-down.
+          - duration: 1m
+            targetRate: 100
+          - duration: 5m
+            targetRate: 400
+          - duration: 30s
+            targetRate: 0
+
+      scenarios:
+        - name: request-quote
+          weight: 80
+          method: POST
+          path: /api/quotes
+          headers:
+            Accept: application/json
+          body:
+            contentType: application/json
+            content: |
+              {"symbol":"ACME","quantity":100}
+
+        - name: read-quote
+          weight: 20
+          method: GET
+          path: /api/quotes/latest
+          headers:
+            Accept: application/json
+
+  objectives:
+    - metric: http.response.time
+      scope: quotes-rate
+      percentile: 95
+      threshold: 500ms
+
+    - metric: http.error.rate
+      scope: quotes-rate
+      threshold: 1%
+
+    # The one that matters in an open model: throughput is an input here, so failing to *achieve*
+    # the rate is itself the finding. A run that asked for 400/s and sustained 240/s did not meet
+    # its objective however good its latency looked.
+    - metric: http.throughput
+      scope: quotes-rate
+      threshold: 380/s
+
+  observability:
+    provider: dynatrace
+    correlationHeader: X-Performance-Test-Run-Id
+
+  governance:
+    maxDuration: 15m
+    approvalPolicy: non-production-standard
+    retention: 30d

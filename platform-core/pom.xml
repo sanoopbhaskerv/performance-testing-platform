@@ -15,6 +15,80 @@
   <name>Platform Core</name>
 
   <dependencies>
+    <!--
+      Internal modules. platform-core is the composition root: it depends on every
+      implementation module and owns application bootstrapping. Nothing depends on it.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-domain</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-engine-spi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-results</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-persistence</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-orchestration</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>platform-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>engine-jmeter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>engine-playwright</artifactId>
+    </dependency>
+    <!--
+      The production execution provider. Only the composition root knows about it; orchestration
+      reaches every provider through the ExecutionProvider port and has no Kubernetes types at all.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>runner-kubernetes</artifactId>
+    </dependency>
+
+    <!--
+      The local recorder bridge. Enabled only by configuration a production profile refuses; the
+      composition root falls back to UnavailableRecorderBrowser otherwise.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>runner-chrome</artifactId>
+    </dependency>
+    <!--
+      Importers. Only the composition root knows the implementations; the API reaches every one of
+      them through the SourceImporter port, so adding an importer is adding a bean.
+    -->
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-curl</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-openapi</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-har</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.perfplatform</groupId>
+      <artifactId>importer-postman</artifactId>
+    </dependency>
+
     <!-- Spring Boot starters -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -103,13 +177,13 @@
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>1.19.3</version>
+      <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>postgresql</artifactId>
-      <version>1.19.3</version>
+      <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
